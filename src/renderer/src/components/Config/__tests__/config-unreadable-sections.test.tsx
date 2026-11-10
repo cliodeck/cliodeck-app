@@ -67,6 +67,16 @@ describe('MCPClientsSection', () => {
     expect(screen.getByText('europeana')).toBeTruthy();
   });
 
+  it('retirer refusé parce qu’un autre projet s’est ouvert : une phrase, pas le code brut', async () => {
+    installMcp(vi.fn().mockResolvedValue({ success: false, error: 'project-changed' }));
+    render(<MCPClientsSection />);
+    fireEvent.click(screen.getByText('mcp.title'));
+    fireEvent.click(await screen.findByTitle('mcp.buttons.remove'));
+
+    expect(await screen.findByText('hints.reasons.projectChanged')).toBeTruthy();
+    expect(screen.queryByText('project-changed')).toBeNull();
+  });
+
   it('retirer sans motif : un texte, pas de silence', async () => {
     installMcp(vi.fn().mockResolvedValue({ success: false }));
     render(<MCPClientsSection />);
@@ -149,6 +159,18 @@ describe('MCPClientsSection, sur un config.json illisible', () => {
     await fillAndSubmit();
 
     expect(await screen.findByText('mcp.errors.addFailed')).toBeTruthy();
+  });
+
+  it('ajout refusé parce qu’un autre projet s’est ouvert : une phrase, pas le code brut', async () => {
+    const add = vi.fn().mockResolvedValue({ success: false, error: 'project-changed' });
+    installList(vi.fn().mockResolvedValue({ success: true, clients: [] }), add);
+    render(<MCPClientsSection />);
+    fireEvent.click(screen.getByText('mcp.title'));
+
+    await fillAndSubmit();
+
+    expect(await screen.findByText('hints.reasons.projectChanged')).toBeTruthy();
+    expect(screen.queryByText('project-changed')).toBeNull();
   });
 });
 

@@ -43,6 +43,14 @@ import {
   resolveClientEnvSecrets,
 } from './mcp-env-secrets.js';
 
+/**
+ * Un autre projet s'est ouvert pendant l'opération : elle s'arrête là. Le message est le mot que
+ * l'IPC renvoie tel quel et que le renderer reconnaît (`refusedAsProjectChanged`).
+ */
+function projectChanged(): Error {
+  return new Error('project-changed');
+}
+
 export function toManagerConfig(w: WorkspaceClientConfig): ManagerClientConfig {
   if (w.transport === 'stdio') {
     if (!w.command) {
@@ -75,6 +83,12 @@ class MCPClientsService {
   private workspaceRoot: string | null = null;
   private listeners = new Set<(e: MCPClientEvent) => void>();
   private auditLogStream: WriteStream | null = null;
+  /**
+   * Avance à chaque détachement (unload, ou ouverture d'un autre projet). Un `loadProject` qui
+   * reprend après une attente sur une génération dépassée a été relayé : il s'arrête là, et son
+   * manager comme son journal ont déjà été arrêtés par qui les a détachés.
+   */
+  private loadGeneration = 0;
 
   /**
    * Écrit dans le flux passé en paramètre, jamais dans le champ vivant du
@@ -100,31 +114,43 @@ class MCPClientsService {
   }
 
   async loadProject(root: string): Promise<void> {
-    await this.unload();
+    const previous = this.detach();
+    // Lue sans attente après le détachement : seul un détachement postérieur la fait avancer.
+    const generation = this.loadGeneration;
+    const superseded = (): boolean => generation !== this.loadGeneration;
+    await this.release(previous);
+    if (superseded()) return;
     this.workspaceRoot = root;
 
+    let auditLogStream: WriteStream | null = null;
     try {
       // Disparu (parent renommé, volume débranché) : surtout ne pas recréer un squelette de projet.
       await stat(root);
+      if (superseded()) return;
       // `.cliodeck` lié hors du projet (D18) : ni dossier ni journal créés à l'autre bout du lien.
       const linked = await workspaceLinkOutside(root);
+      if (superseded()) return;
       if (linked) throw new Error(`lien hors du projet : ${linked}`);
       await ensureWorkspaceDirectories(root);
-      this.auditLogStream = createWriteStream(workspaceFiles(root).mcpAccessLog, {
+      if (superseded()) return;
+      auditLogStream = createWriteStream(workspaceFiles(root).mcpAccessLog, {
         flags: 'a',
       });
-      this.auditLogStream.on('error', (err) => {
+      auditLogStream.on('error', (err) => {
         console.warn('[mcp-clients] audit log stream error:', err);
       });
     } catch (err) {
       console.warn('[mcp-clients] failed to open audit log stream:', err);
-      this.auditLogStream = null;
     }
+    if (superseded()) return;
+    this.auditLogStream = auditLogStream;
 
     // Flux capturé par closure : ce manager n'écrira jamais dans le flux
     // d'un autre projet, même si un événement arrive après la bascule.
-    const auditStreamForThisManager = this.auditLogStream;
-    this.manager = new MCPClientManager({
+    const auditStreamForThisManager = auditLogStream;
+    // Capturé lui aussi : après chaque attente, c'est ce manager-ci qu'on remplit, jamais
+    // `this.manager` relu, qui peut être celui du projet ouvert entre-temps.
+    const manager = new MCPClientManager({
       factory: realMCPClientFactory,
       onEvent: (e) => {
         this.writeAuditLog(auditStreamForThisManager, e);
@@ -137,6 +163,7 @@ class MCPClientsService {
         });
       },
     });
+    this.manager = manager;
 
     let clients: WorkspaceClientConfig[];
     try {
@@ -148,6 +175,7 @@ class MCPClientsService {
       console.warn('[mcp-clients] config.json illisible, aucun serveur démarré:', e.message);
       return;
     }
+    if (superseded()) return;
 
     // Fusion 1.5: any sensitive env value still in plain text inside
     // `config.json` is migrated to `secureStorage` on first load. The
@@ -165,6 +193,7 @@ class MCPClientsService {
     } catch (e) {
       console.warn('[mcp-clients] failed to persist secret migration:', e);
     }
+    if (superseded()) return;
 
     // Ne JAMAIS démarrer ce que porte `config.json` sans l'avoir validé et
     // fait approuver : un projet partagé par un tiers exécuterait sinon la
@@ -172,6 +201,8 @@ class MCPClientsService {
     const approved: WorkspaceClientConfig[] = [];
     for (const w of clients) {
       const verdict = await this.approvalGate(w, root);
+      // Un autre projet ouvert pendant la question : ne rien démarrer, ne plus rien demander.
+      if (superseded()) return;
       if (verdict === 'approved') {
         approved.push(w);
         continue;
@@ -183,13 +214,13 @@ class MCPClientsService {
 
     for (const w of approved) {
       try {
-        this.manager.register(toManagerConfig(w));
+        manager.register(toManagerConfig(w));
       } catch (e) {
         console.warn('[mcp-clients] skipping invalid client:', e);
       }
     }
     if (approved.length) {
-      await this.manager.startAll();
+      await manager.startAll();
     }
   }
 
@@ -207,16 +238,37 @@ class MCPClientsService {
   };
 
   async unload(): Promise<void> {
-    await this.manager?.stopAll();
+    await this.release(this.detach());
+  }
+
+  /**
+   * Retire au service son manager et son journal, sans attendre : une opération en vol qui
+   * reprend après une attente ne les retrouve plus, et la génération a avancé.
+   */
+  private detach(): { manager: MCPClientManager | null; stream: WriteStream | null } {
+    this.loadGeneration += 1;
+    const detached = { manager: this.manager, stream: this.auditLogStream };
     this.manager = null;
     this.workspaceRoot = null;
-    if (this.auditLogStream) {
+    this.auditLogStream = null;
+    return detached;
+  }
+
+  /**
+   * Arrête les serveurs (attente bornée par le manager), puis ferme le journal, qui a reçu leurs
+   * derniers événements.
+   */
+  private async release(detached: {
+    manager: MCPClientManager | null;
+    stream: WriteStream | null;
+  }): Promise<void> {
+    await detached.manager?.stopAll();
+    if (detached.stream) {
       try {
-        this.auditLogStream.end();
+        detached.stream.end();
       } catch (err) {
         console.warn('[mcp-clients] failed to close audit log stream:', err);
       }
-      this.auditLogStream = null;
     }
   }
 
@@ -230,10 +282,15 @@ class MCPClientsService {
   }
 
   async addClient(client: WorkspaceClientConfig): Promise<MCPClientInstance> {
-    if (!this.workspaceRoot || !this.manager) {
+    // Projet et manager capturés à l'entrée : après une attente, `this.*` peut être le projet suivant.
+    const root = this.workspaceRoot;
+    const manager = this.manager;
+    if (!root || !manager) {
       throw new Error('No project loaded');
     }
-    await updateWorkspaceConfig(this.workspaceRoot, (cfg) => {
+    await updateWorkspaceConfig(root, (cfg) => {
+      // Un autre projet ouvert pendant l'attente du verrou ou la lecture : rien n'est écrit.
+      if (this.manager !== manager) throw projectChanged();
       const existing = cfg.mcpClients ?? [];
       if (existing.some((c) => c.name === client.name)) {
         throw new Error(`MCP client "${client.name}" already exists`);
@@ -244,27 +301,38 @@ class MCPClientsService {
       migrateClientEnvSecrets(client);
       cfg.mcpClients = [...existing, client];
     });
-    this.manager.register(toManagerConfig(client));
-    return this.manager.start(client.name);
+    // Ouvert pendant l'écriture : rien ne démarre dans un manager abandonné.
+    if (this.manager !== manager) throw projectChanged();
+    manager.register(toManagerConfig(client));
+    return manager.start(client.name);
   }
 
   async removeClient(name: string): Promise<void> {
-    if (!this.workspaceRoot || !this.manager) {
+    const root = this.workspaceRoot;
+    const manager = this.manager;
+    if (!root || !manager) {
       throw new Error('No project loaded');
     }
     let removed: WorkspaceClientConfig | undefined;
-    await updateWorkspaceConfig(this.workspaceRoot, (cfg) => {
+    await updateWorkspaceConfig(root, (cfg) => {
+      // Un autre projet ouvert pendant l'attente du verrou ou la lecture : rien n'est écrit.
+      if (this.manager !== manager) throw projectChanged();
       removed = (cfg.mcpClients ?? []).find((c) => c.name === name);
       cfg.mcpClients = (cfg.mcpClients ?? []).filter((c) => c.name !== name);
     });
     if (removed) deleteClientEnvSecrets(removed);
-    await this.manager.stop(name);
+    // Écrit : le retrait est fait. On arrête le serveur de CE projet, sur le manager capturé —
+    // déjà arrêté par la bascule si un autre projet s'est ouvert pendant l'écriture.
+    await manager.stop(name);
   }
 
   async restart(name: string): Promise<MCPClientInstance | null> {
-    if (!this.manager) return null;
-    await this.manager.stop(name);
-    return this.manager.start(name);
+    const manager = this.manager;
+    if (!manager) return null;
+    await manager.stop(name);
+    // Un autre projet ouvert pendant l'arrêt : rien ne repart dans un manager abandonné.
+    if (this.manager !== manager) throw projectChanged();
+    return manager.start(name);
   }
 
   async callTool(
