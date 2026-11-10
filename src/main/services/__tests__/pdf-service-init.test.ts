@@ -17,6 +17,7 @@ interface FakeStore {
   close: () => void;
   countDuplicateDocuments: () => number;
   getAllDocuments: () => Promise<unknown[]>;
+  deleteDocument: () => boolean;
 }
 
 const state = vi.hoisted(() => ({
@@ -25,6 +26,7 @@ const state = vi.hoisted(() => ({
   indexers: [] as Array<{ vectorStore: unknown; indexPDF: ReturnType<typeof vi.fn> }>,
   create: vi.fn(),
   clearRetrieval: vi.fn(),
+  maybeRebuild: vi.fn(async (_store: unknown) => undefined),
 }));
 
 vi.mock('../config-manager.js', () => ({
@@ -54,13 +56,19 @@ vi.mock('../pdf/PdfVectorStore.js', () => ({
   PdfVectorStore: {
     create: state.create,
     configureEnhanced: vi.fn(),
-    maybeRebuild: async () => undefined,
+    maybeRebuild: state.maybeRebuild,
   },
 }));
 vi.mock('../pdf/PdfIndexer.js', () => ({
   PdfIndexer: class {
     vectorStore: unknown;
-    indexPDF = vi.fn(async () => ({ id: 'doc' }));
+    // Comme le vrai : un indexeur dont le magasin est fermé écrit sur une base fermée.
+    indexPDF = vi.fn(async () => {
+      if ((this.vectorStore as { closed?: boolean }).closed) {
+        throw new TypeError('The database connection is not open');
+      }
+      return { id: 'doc' };
+    });
     constructor(deps: { vectorStore: unknown }) {
       this.vectorStore = deps.vectorStore;
       state.indexers.push(this);
@@ -69,7 +77,7 @@ vi.mock('../pdf/PdfIndexer.js', () => ({
 }));
 vi.mock('../pdf-extract-isolated.js', () => ({ extractPdfIsolated: vi.fn() }));
 vi.mock('../retrieval-service.js', () => ({
-  retrievalService: { configure: vi.fn(), clear: state.clearRetrieval },
+  retrievalService: { configure: vi.fn(), clear: state.clearRetrieval, drainSearches: vi.fn(async () => undefined) },
 }));
 
 const { pdfService } = await import('../pdf-service.js');
@@ -86,6 +94,7 @@ function openStore(): FakeStore {
       if (store.closed) throw new TypeError('The database connection is not open');
       return [];
     },
+    deleteDocument: () => true,
   };
   state.stores.push(store);
   return store;
@@ -97,6 +106,7 @@ beforeEach(async () => {
   state.stores.length = 0;
   state.indexers.length = 0;
   state.clearRetrieval.mockClear();
+  state.maybeRebuild.mockClear();
   state.create.mockReset();
   state.create.mockImplementation(() => ({ store: openStore(), useEnhanced: true, initPromise: undefined }));
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -266,5 +276,218 @@ describe('une ouverture abandonnée qui échoue ensuite', () => {
     expect(pdfService.getVectorStore()).toBe(storeA);
     expect(pdfService.getCurrentProjectPath()).toBe('/projet-a');
     expect(state.clearRetrieval).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Supprimer un document programme une reconstruction de l'index deux secondes plus tard. Le minuteur
+ * survivait à la fermeture : il partait ensuite sur `this.vectorStore`, le magasin du projet ouvert
+ * entre-temps.
+ */
+describe('la reconstruction programmée et la fermeture', () => {
+  it('fermer l’annule : elle ne part pas sur le magasin du projet suivant', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await pdfService.deleteDocument('doc');
+      await pdfService.close();
+      await pdfService.init('/projet-b');
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      const callsOn = (store: FakeStore): number => state.maybeRebuild.mock.calls.filter(([s]) => s === store).length;
+      // Une pour chacun : celle que l'ouverture lance d'elle-même, après le préchauffage.
+      expect(callsOn(storeA)).toBe(1);
+      expect(callsOn(storeB)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Toute indexation programme une reconstruction quand elle finit. Celle qui finit pendant la
+   * fermeture, attendue par elle, la programmait après l'annulation du minuteur : elle partait sur le
+   * magasin de B. Celle qui survit au délai de la fermeture la programmait une fois B installé.
+   */
+  function holdIndexing(): { finish: () => void } {
+    const indexer = state.indexers.at(-1)!;
+    const held = { finish: () => undefined as void };
+    indexer.indexPDF.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          held.finish = () => resolve({ id: 'doc' });
+        })
+    );
+    return held;
+  }
+
+  const callsOn = (store: FakeStore): number => state.maybeRebuild.mock.calls.filter(([s]) => s === store).length;
+
+  it('une indexation qui finit pendant la fermeture ne programme rien sur le magasin suivant', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const held = holdIndexing();
+      const indexing = pdfService.indexPDF('/projet-a/a.pdf');
+      const closing = pdfService.close();
+      held.finish();
+      await indexing;
+      await closing;
+      await pdfService.init('/projet-b');
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      expect(storeA.closed).toBe(true);
+      expect(callsOn(storeB)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ouvrir B sans fermer A d’abord : le minuteur de A ne part ni sur A fermé ni sur B', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await pdfService.deleteDocument('doc');
+      await pdfService.init('/projet-b');
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      expect(storeA.closed).toBe(true);
+      expect(callsOn(storeA)).toBe(1);
+      expect(callsOn(storeB)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('une indexation qui survit au délai de la fermeture ne programme rien sur le magasin suivant', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const held = holdIndexing();
+      const indexing = pdfService.indexPDF('/projet-a/a.pdf');
+      const closing = pdfService.close();
+      // La fermeture n'attend pas plus de 30 s : elle ferme A, l'indexation court toujours.
+      await vi.advanceTimersByTimeAsync(30_000);
+      await closing;
+      await pdfService.init('/projet-b');
+      held.finish();
+      await indexing;
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      expect(storeA.closed).toBe(true);
+      expect(callsOn(storeB)).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * La même, alors que B vient de demander sa propre reconstruction. Programmée, la demande de A
+   * remplaçait le minuteur de B (`clearTimeout`) puis ne partait pas (son magasin n'est plus
+   * installé) : la reconstruction de B était perdue en silence.
+   */
+  it('une indexation de A qui finit après le délai ne remplace pas la reconstruction demandée par B', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const held = holdIndexing();
+      const indexing = pdfService.indexPDF('/projet-a/a.pdf');
+      const closing = pdfService.close();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await closing;
+      await pdfService.init('/projet-b');
+      // B supprime un document, puis l'indexation de A finit.
+      await pdfService.deleteDocument('doc-b');
+      held.finish();
+      await indexing;
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const [storeA, storeB] = state.stores;
+      expect(callsOn(storeA)).toBe(1);
+      // Celle que l'ouverture lance d'elle-même, puis celle de la suppression dans B.
+      expect(callsOn(storeB)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Le cas où elle doit partir. Les gardes ci-dessus l'empêchent pour un magasin rendu ; dans un même
+   * projet, une suppression ou une indexation la déclenche toujours deux secondes plus tard, sinon les
+   * vecteurs des documents retirés restent dans HNSW.
+   */
+  it('dans un même projet, une suppression puis une indexation la déclenchent chacune', async () => {
+    await pdfService.init('/projet-a');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const [storeA] = state.stores;
+      await vi.advanceTimersByTimeAsync(0);
+      // Celle que l'ouverture lance d'elle-même.
+      expect(callsOn(storeA)).toBe(1);
+
+      await pdfService.deleteDocument('doc');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(callsOn(storeA)).toBe(2);
+
+      await pdfService.indexPDF('/projet-a/a.pdf');
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(callsOn(storeA)).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+/**
+ * `init` n'était pas transactionnel (S03-1-19) : le nouveau magasin était publié avant l'attente de son
+ * index, avec l'ancien indexeur, branché sur le magasin fermé. Garde-fous : le magasin ne s'installe
+ * qu'une fois prêt (#273), et un échec remet tout à null (#222, cas « le nouveau magasin ne s'ouvre
+ * pas » plus haut).
+ */
+describe('pendant l’ouverture de B (S03-1-19)', () => {
+  it('une indexation dit « not initialized », jamais « database connection is not open »', async () => {
+    await pdfService.init('/projet-a');
+    let finishB!: () => void;
+    state.create.mockImplementationOnce(() => ({
+      store: openStore(),
+      useEnhanced: true,
+      initPromise: new Promise<void>((resolve) => {
+        finishB = resolve;
+      }),
+    }));
+    const openingB = pdfService.init('/projet-b');
+    await new Promise((r) => setImmediate(r));
+
+    await expect(pdfService.indexPDF('/projet-b/a.pdf')).rejects.toThrow(/not initialized/);
+    await expect(pdfService.getAllDocuments()).rejects.toThrow(/not initialized/);
+
+    finishB();
+    await openingB;
+    await expect(pdfService.indexPDF('/projet-b/a.pdf')).resolves.toEqual({ id: 'doc' });
+    expect(state.indexers.at(-1)?.vectorStore).toBe(state.stores[1]);
+  });
+});
+
+/**
+ * La fiche voulait qu'un registre qui ne se construit plus laisse A « utilisable ». La règle de L04-2
+ * l'emporte : un registre en échec libère tout, l'indexeur compris (il tiendrait un fournisseur
+ * libéré). A reste ouvert et lisible ; seule l'indexation refuse, en disant pourquoi.
+ */
+describe('A ouvert, puis une configuration qui ne se construit plus', () => {
+  it('les lectures restent, l’indexation dit pourquoi elle refuse', async () => {
+    await pdfService.init('/projet');
+    state.llm = { backend: 'claude', claudeModel: 'claude-sonnet-4-6' };
+
+    await expect(pdfService.refreshProviders({ embeddingChanged: true })).rejects.toThrow(/claudeAPIKey/);
+
+    expect(state.stores[0].closed).toBe(false);
+    expect(pdfService.getCurrentProjectPath()).toBe('/projet');
+    await expect(pdfService.getAllDocuments()).resolves.toEqual([]);
+    await expect(pdfService.indexPDF('/projet/a.pdf')).rejects.toThrow(
+      /Fournisseur d'embeddings indisponible : Anthropic backend selected but no claudeAPIKey/
+    );
   });
 });

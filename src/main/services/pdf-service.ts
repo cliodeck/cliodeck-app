@@ -103,16 +103,16 @@ class PDFService {
       throw new Error('PDF Service requires a project path');
     }
 
-    // Fermer la base précédente si elle existe — après avoir laissé les indexations en vol se
-    // terminer (ou expirer). Détachée AVANT l'attente : un `close()` qui reprend pendant ce temps
-    // ne la retrouve plus, et ne ferme pas une seconde fois ce qu'on ferme ici (S01-1-9). Plus rien
-    // ne pointe sur elle : si l'ouverture du nouveau échoue, les lectures disent « not initialized »
-    // et une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
+    // Fermer la base précédente si elle existe — après avoir laissé les indexations et les
+    // recherches en vol se terminer (ou expirer). Détachée AVANT l'attente : un `close()` qui reprend
+    // pendant ce temps ne la retrouve plus, et ne ferme pas une seconde fois ce qu'on ferme ici
+    // (S01-1-9). Plus rien ne pointe sur elle : si l'ouverture du nouveau échoue, les lectures disent
+    // « not initialized » et une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
     const previous = this.vectorStore;
     this.vectorStore = null;
     this.pdfIndexer = null;
     if (previous) {
-      await this.drainInFlightIndexing();
+      await this.drainBeforeClose();
       previous.close();
     }
 
@@ -430,6 +430,9 @@ class PDFService {
   ): Promise<PDFDocument> {
     while (this.providerRefresh) await this.providerRefresh;
     this.ensureIndexer();
+    // Le magasin où cette indexation écrit : la reconstruction qu'elle programme en finissant ne vaut
+    // que pour lui, même si elle finit pendant la fermeture ou après, une fois un autre projet ouvert.
+    const store = this.vectorStore;
     const job = this.pdfIndexer!.indexPDF(
       filePath,
       bibtexKey,
@@ -444,7 +447,7 @@ class PDFService {
         this.inFlightIndexing.delete(job);
         // Une réindexation a pu remplacer des copies : leurs vecteurs
         // restent dans HNSW jusqu'à reconstruction.
-        this.scheduleIndexRebuild();
+        this.scheduleIndexRebuild(store);
       });
     return job;
   }
@@ -481,15 +484,21 @@ class PDFService {
    * Reconstruit HNSW/BM25 quand des documents ont quitté SQLite, une fois
    * les indexations en vol terminées : reconstruire pendant qu'une autre
    * écrit ses extraits ferait la course sur l'index.
+   *
+   * Pour le magasin `store` seulement, et seulement s'il est encore installé, à la programmation
+   * comme au départ du minuteur. Sinon la demande d'un projet fermé partait sur le magasin du projet
+   * ouvert ensuite : celle d'une indexation que la fermeture attend finit après l'annulation du
+   * minuteur, celle d'une indexation qui survit à son délai finit une fois B installé (et, programmée
+   * ici, aurait remplacé le minuteur de B).
    */
-  private scheduleIndexRebuild(delayMs = 2000): void {
+  private scheduleIndexRebuild(store: VectorStore | EnhancedVectorStore | null, delayMs = 2000): void {
+    if (!store || this.vectorStore !== store) return;
     if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
     this.rebuildTimer = setTimeout(() => {
       this.rebuildTimer = null;
-      const store = this.vectorStore;
-      if (!store) return;
+      if (this.vectorStore !== store) return;
       if (this.inFlightIndexing.size > 0) {
-        this.scheduleIndexRebuild(delayMs);
+        this.scheduleIndexRebuild(store, delayMs);
         return;
       }
       void PdfVectorStore.maybeRebuild(store);
@@ -521,6 +530,15 @@ class PDFService {
         `⚠️ Indexation(s) PDF toujours en vol après ${timeoutMs}ms — fermeture du store malgré tout`
       );
     }
+  }
+
+  /**
+   * Avant toute fermeture du magasin : les indexations (30 s au plus) et les recherches (5 s au plus)
+   * en vol finissent d'abord (S04-1-14). En même temps, pour tenir dans le délai de fermeture de la
+   * séquence (35 s).
+   */
+  private async drainBeforeClose(): Promise<void> {
+    await Promise.all([this.drainInFlightIndexing(), retrievalService.drainSearches()]);
   }
 
   /**
@@ -573,7 +591,7 @@ class PDFService {
   async deleteDocument(documentId: string) {
     this.ensureStore();
     const result = this.vectorStore!.deleteDocument(documentId);
-    this.scheduleIndexRebuild();
+    this.scheduleIndexRebuild(this.vectorStore);
     return result;
   }
 
@@ -1006,9 +1024,16 @@ class PDFService {
     this.llmRegistry = null;
     this.llm = null;
     this.embedding = null;
+    // La reconstruction programmée pour ce magasin n'a plus lieu d'être. Le minuteur vérifie aussi, en
+    // partant, que son magasin est toujours installé : une indexation que l'attente ci-dessous laisse
+    // finir en programme une autre après cette annulation (`scheduleIndexRebuild`).
+    if (this.rebuildTimer) {
+      clearTimeout(this.rebuildTimer);
+      this.rebuildTimer = null;
+    }
     if (store) {
       console.log('🔒 Closing PDF Service vector store...');
-      await this.drainInFlightIndexing();
+      await this.drainBeforeClose();
       store.close();
     }
 

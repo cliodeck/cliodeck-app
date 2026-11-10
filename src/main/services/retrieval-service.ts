@@ -70,6 +70,7 @@ import { createRegistryFromClioDeckConfig } from '../../../backend/core/llm/prov
 import type { EmbeddingProvider } from '../../../backend/core/llm/providers/base.js';
 import { resolveEmbeddingProvider } from '../../../backend/core/llm/providers/fallback.js';
 import type { ProviderRegistry } from '../../../backend/core/llm/providers/registry.js';
+import { ProjectChangedError } from '../../../backend/types/project-handle.js';
 
 /**
  * Hot-path logging gate. The retrieval pipeline emits a high volume of
@@ -87,6 +88,25 @@ const DEBUG = process.env.CLIODECK_RAG_DEBUG === '1';
  * the previous model's vectors.
  */
 const queryEmbeddingCache = new QueryEmbeddingCache(2000, 10);
+
+/**
+ * Ce qu'une fermeture de magasin attend au plus des recherches en vol (`drainSearches`). L'embedding
+ * d'une requête prend moins d'une seconde ; un modèle qui se charge peut dépasser ce délai, et la
+ * recherche s'arrête alors proprement (`project-changed`).
+ */
+export const SEARCH_DRAIN_MS = 5_000;
+
+/**
+ * Ce qu'une recherche capture à son entrée (S04-1-14) : le magasin de son projet, et de quoi savoir,
+ * après chaque attente, qu'il n'a pas été rendu depuis (fermeture du projet, bascule).
+ */
+interface SearchCapture {
+  readonly store: VectorStore | EnhancedVectorStore;
+  /** Le numéro du magasin à l'entrée de la recherche (`storeGeneration`). */
+  readonly generation: number;
+  /** Lève `ProjectChangedError` si le magasin a été rendu depuis l'entrée de la recherche. */
+  assertCurrent(): void;
+}
 
 /**
  * 'secondary'  = bibliography (PDFs), 'primary' = Tropy archives,
@@ -415,6 +435,21 @@ class RetrievalService {
   private inspectorMode: InspectorMode = DEFAULT_INSPECTOR_MODE;
 
   /**
+   * Recherches en vol (S04-1-14). Une recherche prend le magasin, puis attend l'embedding de sa
+   * requête : la fermeture du projet passait pendant ce temps, et la recherche lisait ensuite un
+   * magasin fermé (« The database connection is not open »). Une fermeture les attend donc
+   * (`drainSearches`), comme `pdfService` attend ses indexations. Chacune avec le numéro du magasin
+   * qu'elle a pris : une fermeture n'attend que celles du magasin qu'elle rend.
+   */
+  private inFlightSearches = new Map<Promise<unknown>, number>();
+  /**
+   * Change chaque fois que le magasin est rendu (`drainSearches`, `clear`, `configure`) : une
+   * recherche restée au-delà du délai s'arrête à sa prochaine attente, sans lire un magasin fermé ni
+   * répondre avec celui du projet suivant.
+   */
+  private storeGeneration = 0;
+
+  /**
    * Wire the service to the project-scoped dependencies. Called by
    * pdf-service.init() so both services share the same vector store.
    *
@@ -429,6 +464,7 @@ class RetrievalService {
     vectorStore: VectorStore | EnhancedVectorStore;
     workspaceRoot?: string;
   }): void {
+    this.storeGeneration++;
     this.vectorStore = deps.vectorStore;
     this.workspaceRoot = deps.workspaceRoot ?? null;
 
@@ -516,7 +552,45 @@ class RetrievalService {
     this.inspectorMode = mode;
   }
 
+  /**
+   * Le magasin va se fermer (fermeture du projet, ou reprise de `pdfService.init`) : plus aucune
+   * recherche n'y entre, et celles en vol finissent, au plus `timeoutMs`. Au-delà, la fermeture a lieu
+   * quand même (pas d'attente sans sortie) : celles qui restent s'arrêtent à leur prochaine attente sur
+   * `project-changed`, sans lire le magasin fermé. Ne lève pas.
+   *
+   * Seules celles du magasin courant sont attendues. Une recherche d'un magasin déjà rendu (restée
+   * au-delà du délai d'une fermeture précédente, sur un embedding qui ne revient pas : la requête n'a
+   * pas de délai) ne lit plus aucun magasin : l'attendre retardait chaque bascule de 5 s jusqu'au
+   * redémarrage.
+   */
+  async drainSearches(timeoutMs = SEARCH_DRAIN_MS): Promise<void> {
+    this.vectorStore = null;
+    const generation = this.storeGeneration;
+    const pending = [...this.inFlightSearches]
+      .filter(([, searchGeneration]) => searchGeneration === generation)
+      .map(([run]) => run);
+    if (pending.length > 0) {
+      console.log(
+        `⏳ ${pending.length} recherche(s) en vol — attente avant fermeture du vector store`
+      );
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), timeoutMs);
+      });
+      const drained = Promise.allSettled(pending).then(() => 'drained' as const);
+      const outcome = await Promise.race([drained, timeout]);
+      if (timer) clearTimeout(timer);
+      if (outcome === 'timeout') {
+        console.warn(
+          `⚠️ Recherche(s) toujours en vol après ${timeoutMs}ms — fermeture du store malgré tout`
+        );
+      }
+    }
+    this.storeGeneration++;
+  }
+
   clear(): void {
+    this.storeGeneration++;
     this.vectorStore = null;
     void this.disposePreviousRegistry();
     // Embedding cache persists across clear() — see constructor comment.
@@ -660,21 +734,41 @@ class RetrievalService {
     }
   }
 
-  private ensureReady(): void {
+  /** Le magasin de la recherche, ou une erreur si le service n'est pas configuré. */
+  private ensureReady(): VectorStore | EnhancedVectorStore {
     if (!this.vectorStore || !this.embedding) {
       throw new Error(
         'RetrievalService not configured. Call configure() after initializing pdf-service.'
       );
     }
+    return this.vectorStore;
   }
 
-  private async getQueryEmbedding(query: string): Promise<Float32Array> {
+  /** Le magasin pris à l'entrée d'une recherche, et le numéro qu'il avait alors. */
+  private captureStore(store: VectorStore | EnhancedVectorStore): SearchCapture {
+    const generation = this.storeGeneration;
+    return {
+      store,
+      generation,
+      assertCurrent: () => {
+        if (this.storeGeneration !== generation) throw new ProjectChangedError();
+      },
+    };
+  }
+
+  /**
+   * Après l'attente de l'embedding, le magasin que le corpus va lire a pu être rendu : `captured` le
+   * vérifie avant (S04-1-14).
+   */
+  private async getQueryEmbedding(query: string, captured: SearchCapture): Promise<Float32Array> {
     const provider = await this.resolveEmbedding();
     const providerId = RetrievalService.providerKey(provider);
-    const cached = queryEmbeddingCache.get(query, providerId);
-    if (cached) return cached;
-    const embedding = await RetrievalService.embedQuery(provider, query);
-    queryEmbeddingCache.set(query, embedding, providerId);
+    let embedding = queryEmbeddingCache.get(query, providerId);
+    if (!embedding) {
+      embedding = await RetrievalService.embedQuery(provider, query);
+      queryEmbeddingCache.set(query, embedding, providerId);
+    }
+    captured.assertCurrent();
     return embedding;
   }
 
@@ -774,8 +868,19 @@ class RetrievalService {
   }
 
   async search(q: RetrievalQuery): Promise<RetrievalSearchResult> {
-    this.ensureReady();
+    const captured = this.captureStore(this.ensureReady());
+    // Suivie jusqu'à sa fin : une fermeture du magasin l'attend (`drainSearches`).
+    const run = this.runSearch(q, captured);
+    this.inFlightSearches.set(run, captured.generation);
+    void run
+      .catch(() => undefined)
+      .finally(() => {
+        this.inFlightSearches.delete(run);
+      });
+    return run;
+  }
 
+  private async runSearch(q: RetrievalQuery, captured: SearchCapture): Promise<RetrievalSearchResult> {
     const searchStart = Date.now();
     const ragConfig = configManager.getRAGConfig();
     const topK = q.topK || ragConfig.topK;
@@ -794,7 +899,7 @@ class RetrievalService {
     // corpus must not silently lose the others — `fanOutCorpora` records
     // one outcome per corpus and keeps going.
     const { hits: allSourceResults, outcomes } = await fanOutCorpora(
-      this.corpusRetrievers(),
+      this.corpusRetrievers(captured),
       scope,
       q.query,
       {
@@ -812,13 +917,16 @@ class RetrievalService {
         // (le renderer la garde même bibliographie décochée).
         readingNoteCitekeys:
           scope.has('readingNotes') && !ownTextOnly
-            ? this.citekeysForSelection(q.documentIds, q.collectionKeys)
+            ? this.citekeysForSelection(captured.store, q.documentIds, q.collectionKeys)
             : undefined,
       },
       (corpus, error) => {
         console.warn(`⚠️ [PDF-SERVICE] ${corpus} corpus search failed:`, error);
       }
     );
+    // Le magasin a été rendu pendant la recherche (fermeture, bascule) : rien de ce qu'elle a trouvé
+    // ne sert, et un corpus interrogé après coup a pu répondre avec le projet suivant.
+    captured.assertCurrent();
 
     if (DEBUG) {
       for (const o of outcomes.filter((x) => x.attempted)) {
@@ -929,12 +1037,12 @@ class RetrievalService {
    *
    * Ajouter un corpus : un adaptateur ici, une valeur dans `CorpusId`.
    */
-  private corpusRetrievers(): CorpusRetriever<AnySearchResult>[] {
-    return [
+  private corpusRetrievers(captured: SearchCapture): CorpusRetriever<AnySearchResult>[] {
+    const retrievers: CorpusRetriever<AnySearchResult>[] = [
       {
         corpus: 'secondary',
         search: async (query, o) => {
-          const results = await this.searchSecondary(query, o);
+          const results = await this.searchSecondary(query, o, captured);
           return results.map(
             (r: SearchResult): SecondarySearchResult => ({
               ...r,
@@ -944,10 +1052,18 @@ class RetrievalService {
         },
       },
       { corpus: 'primary', search: (query, o) => this.searchPrimary(query, o) },
-      { corpus: 'vault', search: (query, o) => this.searchVault(query, o) },
-      { corpus: 'manuscript', search: (query, o) => this.searchManuscript(query, o) },
-      { corpus: 'readingNotes', search: (query, o) => this.searchReadingNotes(query, o) },
+      { corpus: 'vault', search: (query, o) => this.searchVault(query, o, captured) },
+      { corpus: 'manuscript', search: (query, o) => this.searchManuscript(query, o, captured) },
+      { corpus: 'readingNotes', search: (query, o) => this.searchReadingNotes(query, o, captured) },
     ];
+    // Un corpus ne part pas une fois le magasin rendu : il interrogerait le projet suivant.
+    return retrievers.map(({ corpus, search }) => ({
+      corpus,
+      search: async (query, o) => {
+        captured.assertCurrent();
+        return search(query, o);
+      },
+    }));
   }
 
   /**
@@ -962,14 +1078,13 @@ class RetrievalService {
    * d'exclure des sources.
    */
   private citekeysForSelection(
+    store: VectorStore | EnhancedVectorStore,
     documentIds?: string[],
     collectionKeys?: string[]
   ): readonly string[] | undefined {
     const selected = documentIds?.length ?? 0;
     const inCollections = collectionKeys?.length ?? 0;
     if (selected === 0 && inCollections === 0) return undefined;
-    const store = this.vectorStore;
-    if (!store) return [];
     let ids: string[] = documentIds ?? [];
     if (inCollections > 0) {
       let docsInCollections: string[] = [];
@@ -1000,14 +1115,15 @@ class RetrievalService {
       threshold: number;
       sole?: boolean;
       readingNoteCitekeys?: readonly string[];
-    }
+    },
+    captured: SearchCapture
   ): Promise<ReadingNoteMappedSearchResult[]> {
     const store = readingNotesIndexService.getSearchStore();
     if (!store) return [];
     // Cadrage sur une sélection : aucune clé, aucune note — inutile d'embarquer.
     const scoped = options.readingNoteCitekeys ? new Set(options.readingNoteCitekeys) : null;
     if (scoped && scoped.size === 0) return [];
-    const embedding = await this.getQueryEmbedding(query);
+    const embedding = await this.getQueryEmbedding(query, captured);
     // Le store rend `topK` extraits avant cadrage : on en demande davantage
     // quand un filtre suit, pour ne pas rendre deux notes là où dix passent.
     const hits = store.search(embedding, query, scoped ? options.topK * 4 : options.topK);
@@ -1083,11 +1199,12 @@ class RetrievalService {
 
   private async searchVault(
     query: string,
-    options: { topK: number; threshold: number }
+    options: { topK: number; threshold: number },
+    captured: SearchCapture
   ): Promise<VaultMappedSearchResult[]> {
     const store = this.getVaultStore();
     if (!store) return [];
-    const embedding = await this.getQueryEmbedding(query);
+    const embedding = await this.getQueryEmbedding(query, captured);
     const hits = this.withoutAuthorText(
       store.search(embedding, query, options.topK),
       await this.configuredVaultPath()
@@ -1188,11 +1305,12 @@ class RetrievalService {
 
   private async searchManuscript(
     query: string,
-    options: { topK: number; threshold: number; sole?: boolean }
+    options: { topK: number; threshold: number; sole?: boolean },
+    captured: SearchCapture
   ): Promise<ManuscriptMappedSearchResult[]> {
     const store = this.getManuscriptStore();
     if (!store) return [];
-    const embedding = await this.getQueryEmbedding(query);
+    const embedding = await this.getQueryEmbedding(query, captured);
     const hits = store.search(embedding, query, options.topK);
     const mapped = hits.map(
       (h): ManuscriptMappedSearchResult => ({
@@ -1257,12 +1375,13 @@ class RetrievalService {
    */
   private async searchSecondary(
     query: string,
-    options?: {
+    options: {
       topK?: number;
       threshold?: number;
       documentIds?: string[];
       collectionKeys?: string[];
-    }
+    },
+    captured: SearchCapture
   ): Promise<SearchResult[]> {
     const ragConfig = configManager.getRAGConfig();
     const topK = options?.topK || ragConfig.topK;
@@ -1274,9 +1393,10 @@ class RetrievalService {
       ? createExpandQueryFrEn(userDict)
       : undefined; // uses default expandQueryFrEn
 
+    // Le magasin pris à l'entrée : celui du service est retiré dès qu'une fermeture commence.
     const retriever = new SecondaryRetriever({
-      vectorStore: this.vectorStore!,
-      getQueryEmbedding: (q) => this.getQueryEmbedding(q),
+      vectorStore: captured.store,
+      getQueryEmbedding: (q) => this.getQueryEmbedding(q, captured),
       expandQuery,
     });
     return retriever.search(query, {
