@@ -302,13 +302,28 @@ export class VectorStore {
 
   // MARK: - Document Operations
 
+  /**
+   * Enregistre un document, ou met à jour sa ligne s'il existe déjà.
+   *
+   * **Pas d'`INSERT OR REPLACE`** : REPLACE supprime la ligne en conflit, et
+   * `pdf_documents` a des enfants — extraits, citations (sortantes en CASCADE,
+   * entrantes en SET NULL), similarités, affectations et aberrants de thèmes,
+   * collections. Réenregistrer un document les emportait tous (S01-1-4).
+   */
   saveDocument(document: PDFDocument): void {
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO pdf_documents
+      INSERT INTO pdf_documents
       (id, file_path, title, author, year, bibtex_key, page_count,
        created_at, indexed_at, last_accessed_at, metadata,
        summary, summary_embedding, citations_extracted, language)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        file_path = excluded.file_path, title = excluded.title, author = excluded.author,
+        year = excluded.year, bibtex_key = excluded.bibtex_key, page_count = excluded.page_count,
+        created_at = excluded.created_at, indexed_at = excluded.indexed_at,
+        last_accessed_at = excluded.last_accessed_at, metadata = excluded.metadata,
+        summary = excluded.summary, summary_embedding = excluded.summary_embedding,
+        citations_extracted = excluded.citations_extracted, language = excluded.language
     `);
 
     const metadataJSON = JSON.stringify(document.metadata);
@@ -431,8 +446,9 @@ export class VectorStore {
    * extrait prenaient les places des autres sources dans la recherche.
    * Supprimer ne suffit pas : les citations d'autres documents qui pointent
    * vers une copie passeraient à NULL (`ON DELETE SET NULL`), et ses
-   * collections Zotero disparaîtraient avec elle (`ON DELETE CASCADE`).
-   * On les rattache d'abord au document gardé.
+   * collections Zotero disparaîtraient avec elle (`ON DELETE CASCADE`), comme
+   * ses affectations de thèmes : le PDF réindexé sortait de son thème et de la
+   * frise (S01-1-5). On les rattache d'abord au document gardé.
    */
   mergeDocumentsInto(keepId: string, replacedIds: string[]): void {
     const ids = replacedIds.filter((id) => id !== keepId);
@@ -448,6 +464,22 @@ export class VectorStore {
            SELECT ?, collection_key FROM pdf_document_collections WHERE document_id IN (${placeholders})`
         )
         .run(keepId, ...ids);
+      // Une seule place par analyse pour le document gardé, comme le rend le calcul : dans un
+      // thème ou parmi les aberrants. S'il en a déjà une, ses copies y partent par cascade ;
+      // sinon une copie lui cède la sienne, une affectation plutôt qu'un aberrant (les
+      // affectations passent d'abord, et les aberrants excluent ensuite ces analyses).
+      for (const table of ['pdf_topic_assignments', 'pdf_topic_outliers']) {
+        this.db
+          .prepare(
+            `UPDATE ${table} SET document_id = ?
+             WHERE id IN (SELECT MIN(id) FROM ${table} WHERE document_id IN (${placeholders}) GROUP BY analysis_id)
+               AND analysis_id NOT IN (
+                 SELECT analysis_id FROM pdf_topic_assignments WHERE document_id = ?
+                 UNION SELECT analysis_id FROM pdf_topic_outliers WHERE document_id = ?
+               )`
+          )
+          .run(keepId, ...ids, keepId, keepId);
+      }
       this.db.prepare(`DELETE FROM pdf_documents WHERE id IN (${placeholders})`).run(...ids);
     })();
   }
@@ -1027,63 +1059,100 @@ export class VectorStore {
     const analysisId = randomUUID();
     const now = new Date().toISOString();
 
-    // Marquer toutes les analyses précédentes comme non-courantes
-    this.db.prepare('UPDATE pdf_topic_analyses SET is_current = 0').run();
+    // Tout ou rien (S01-1-15). Hors transaction, une erreur au milieu laissait courante une
+    // analyse tronquée, la précédente ayant déjà cessé de l'être.
+    const saved = this.db.transaction(() => {
+      // Marquer toutes les analyses précédentes comme non-courantes
+      this.db.prepare('UPDATE pdf_topic_analyses SET is_current = 0').run();
 
-    // Sauvegarder l'analyse principale
-    const insertAnalysis = this.db.prepare(`
-      INSERT INTO pdf_topic_analyses (id, analysis_date, is_current, options_json, statistics_json)
-      VALUES (?, ?, 1, ?, ?)
-    `);
+      // Le calcul dure plusieurs minutes, sur les documents d'avant : un PDF réindexé (nouvel id)
+      // ou retiré entre-temps n'est plus là, et son affectation faisait lever la clé étrangère.
+      // L'analyse ne se perd pas pour lui : on l'enregistre sans lui. Un thème qui y perd des
+      // documents est recompté ; s'il n'en garde aucun, il n'est pas enregistré.
+      const present = new Set(
+        (this.db.prepare('SELECT id FROM pdf_documents').all() as Array<{ id: string }>).map((r) => r.id)
+      );
+      const assignments = Object.entries(result.topicAssignments).filter(([docId]) => present.has(docId));
+      const outliers = result.outliers.filter((docId) => present.has(docId));
+      const shrunk = new Set(
+        Object.entries(result.topicAssignments)
+          .filter(([docId]) => !present.has(docId))
+          .map(([, topicId]) => topicId)
+      );
+      const topics = result.topics
+        .map((topic) =>
+          shrunk.has(topic.id)
+            ? { ...topic, size: assignments.filter(([, topicId]) => topicId === topic.id).length }
+            : topic
+        )
+        .filter((topic) => !shrunk.has(topic.id) || topic.size > 0);
 
-    insertAnalysis.run(
-      analysisId,
-      now,
-      JSON.stringify(options || {}),
-      JSON.stringify(result.statistics)
-    );
+      // Sauvegarder l'analyse principale. `statistics_json` reste celui du calcul : ses comptes
+      // (documents dans les thèmes, aberrants) incluent un document écarté ci-dessus.
+      const insertAnalysis = this.db.prepare(`
+        INSERT INTO pdf_topic_analyses (id, analysis_date, is_current, options_json, statistics_json)
+        VALUES (?, ?, 1, ?, ?)
+      `);
 
-    // Sauvegarder les topics
-    const insertTopic = this.db.prepare(`
-      INSERT INTO pdf_topics (id, analysis_id, topic_id, label, keywords_json, size)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-
-    for (const topic of result.topics) {
-      const topicDbId = randomUUID();
-      insertTopic.run(
-        topicDbId,
+      insertAnalysis.run(
         analysisId,
-        topic.id,
-        topic.label,
-        JSON.stringify(topic.keywords),
-        topic.size
+        now,
+        JSON.stringify(options || {}),
+        JSON.stringify(result.statistics)
+      );
+
+      // Sauvegarder les topics
+      const insertTopic = this.db.prepare(`
+        INSERT INTO pdf_topics (id, analysis_id, topic_id, label, keywords_json, size)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const topic of topics) {
+        const topicDbId = randomUUID();
+        insertTopic.run(
+          topicDbId,
+          analysisId,
+          topic.id,
+          topic.label,
+          JSON.stringify(topic.keywords),
+          topic.size
+        );
+      }
+
+      // Sauvegarder les assignations
+      const insertAssignment = this.db.prepare(`
+        INSERT INTO pdf_topic_assignments (id, analysis_id, document_id, topic_id)
+        VALUES (?, ?, ?, ?)
+      `);
+
+      for (const [docId, topicId] of assignments) {
+        const assignmentId = randomUUID();
+        insertAssignment.run(assignmentId, analysisId, docId, topicId);
+      }
+
+      // Sauvegarder les outliers
+      const insertOutlier = this.db.prepare(`
+        INSERT INTO pdf_topic_outliers (id, analysis_id, document_id)
+        VALUES (?, ?, ?)
+      `);
+
+      for (const docId of outliers) {
+        const outlierId = randomUUID();
+        insertOutlier.run(outlierId, analysisId, docId);
+      }
+
+      return { topics: topics.length, assignments: assignments.length, outliers: outliers.length };
+    })();
+
+    const dropped =
+      Object.keys(result.topicAssignments).length - saved.assignments + result.outliers.length - saved.outliers;
+    if (dropped > 0) {
+      console.warn(
+        `⚠️ Topic analysis saved without ${dropped} document(s) removed while it ran ` +
+          `(${result.topics.length - saved.topics} topic(s) left empty, not saved)`
       );
     }
-
-    // Sauvegarder les assignations
-    const insertAssignment = this.db.prepare(`
-      INSERT INTO pdf_topic_assignments (id, analysis_id, document_id, topic_id)
-      VALUES (?, ?, ?, ?)
-    `);
-
-    for (const [docId, topicId] of Object.entries(result.topicAssignments)) {
-      const assignmentId = randomUUID();
-      insertAssignment.run(assignmentId, analysisId, docId, topicId);
-    }
-
-    // Sauvegarder les outliers
-    const insertOutlier = this.db.prepare(`
-      INSERT INTO pdf_topic_outliers (id, analysis_id, document_id)
-      VALUES (?, ?, ?)
-    `);
-
-    for (const docId of result.outliers) {
-      const outlierId = randomUUID();
-      insertOutlier.run(outlierId, analysisId, docId);
-    }
-
-    console.log(`✅ Topic analysis saved: ${result.topics.length} topics, ${Object.keys(result.topicAssignments).length} assignments`);
+    console.log(`✅ Topic analysis saved: ${saved.topics} topics, ${saved.assignments} assignments`);
     return analysisId;
   }
 
