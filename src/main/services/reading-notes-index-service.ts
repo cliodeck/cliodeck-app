@@ -70,13 +70,19 @@ export interface ReadingNotesIndexReport {
    */
   withheldFrom?: string;
   /**
-   * Présent quand une réindexation complète (`reindexAll`) a été abandonnée,
-   * avec la raison : le fournisseur d'embeddings a échoué sur une note, ou
-   * l'écriture a été refusée. Rien n'a été écrit : l'index précédent reste
-   * celui que le chat consulte.
+   * Présent quand une passe a été abandonnée, avec la raison. Une réindexation
+   * complète (`reindexAll`) l'est quand le fournisseur d'embeddings a échoué
+   * sur une note, ou que l'écriture a été refusée : rien n'a été écrit, et
+   * l'index précédent reste celui que le chat consulte. Toute passe l'est sur
+   * `project-changed`, un autre projet ouvert (ou celui-ci rouvert) pendant
+   * qu'elle attendait : rien de plus ne s'écrit ni ne se retire ; une passe
+   * incrémentale garde, dans la base de son projet, les notes déjà écrites.
    */
   abandoned?: string;
 }
+
+/** La raison d'une passe arrêtée par un changement de projet : le mot de `ProjectChangedError`. */
+const PROJECT_CHANGED = 'project-changed';
 
 export interface ReadingNotesIndexStats {
   noteCount: number;
@@ -164,6 +170,11 @@ export class ReadingNotesIndexService {
    * manquer. Complète (`force`) si l'une des demandes l'était.
    */
   private rerun: { embedder: EmbeddingProvider; force: boolean } | null = null;
+  /**
+   * L'ouverture du projet courant, comptée par `detachStore`. Une passe la prend à son début et
+   * s'arrête dès qu'elle a changé (S02-1-13) : un autre projet, ou le même rouvert.
+   */
+  private opening = 0;
 
   constructor(
     private readonly deps: ReadingNotesIndexDeps = {
@@ -189,6 +200,7 @@ export class ReadingNotesIndexService {
   private detachStore(): void {
     const previous = this.store;
     const pending = this.running;
+    this.opening += 1;
     this.store = null;
     this.rerun = null;
     if (!previous) return;
@@ -295,19 +307,20 @@ export class ReadingNotesIndexService {
    * figure dans les échecs.
    */
   private runIndex(embedder: EmbeddingProvider, force: boolean): Promise<ReadingNotesIndexReport> {
-    // La passe est celle du projet configuré à son début. Elle ne s'arrête pas à l'ouverture d'un
-    // autre projet : ses appels au fournisseur, note après note, portent la racine de ce projet, et
-    // le journal d'usage du suivant les écarte (S10-1-33). Sans elle, un appel lancé après la
-    // bascule prenait la racine du journal ouvert.
+    // La passe est celle du projet configuré à son début. Ses appels au fournisseur, note après
+    // note, portent la racine de ce projet, et le journal d'usage du suivant les écarte (S10-1-33).
+    // Sans elle, un appel lancé après la bascule prenait la racine du journal ouvert.
     const workspaceRoot = this.workspaceRoot;
-    const pass = (): Promise<ReadingNotesIndexReport> => this.indexProject(embedder, force, workspaceRoot);
+    const opening = this.opening;
+    const pass = (): Promise<ReadingNotesIndexReport> => this.indexProject(embedder, force, workspaceRoot, opening);
     return workspaceRoot ? runWithJournalContext({ workspaceRoot }, pass) : pass();
   }
 
   private async indexProject(
     embedder: EmbeddingProvider,
     force: boolean,
-    workspaceRoot: string | null
+    workspaceRoot: string | null,
+    opening: number
   ): Promise<ReadingNotesIndexReport> {
     const started = Date.now();
     const report: ReadingNotesIndexReport = {
@@ -330,6 +343,13 @@ export class ReadingNotesIndexService {
       return { ...done(), withheldFrom };
     }
 
+    // Le store de ce projet, pris avant la première attente (S02-1-13) : `getStore` lit le projet
+    // courant, et après une bascule il ouvrait celui du suivant, où la passe écrivait ces notes-ci
+    // et retirait les siennes. `detachStore` ne le ferme qu'après la passe.
+    const store = this.getStore();
+    /** Le projet a changé depuis le début de la passe : elle s'arrête, sans écrire ni purger. */
+    const projectChanged = (): boolean => this.opening !== opening;
+
     let files: string[];
     try {
       // Pas `listReadingNotes` : il écarte une note illisible, que la passe
@@ -344,8 +364,8 @@ export class ReadingNotesIndexService {
       report.failures.push({ relativePath: READING_NOTES_DIR, reason: e instanceof Error ? e.message : String(e) });
       return done();
     }
+    if (projectChanged()) return { ...done(), abandoned: PROJECT_CHANGED };
 
-    const store = this.getStore();
     if (!store) {
       report.failures.push({ relativePath: '(store)', reason: 'store unavailable' });
       return done();
@@ -375,6 +395,10 @@ export class ReadingNotesIndexService {
         }
         const raw = await fs.readFile(file, 'utf8');
         const note = await readReadingNote(file);
+        if (projectChanged()) {
+          abandoned = PROJECT_CHANGED;
+          break;
+        }
         if (!note) continue;
 
         const id = readingNoteId(note);
@@ -421,6 +445,10 @@ export class ReadingNotesIndexService {
           embedder,
           chunks.map((c) => `${header}\n\n${c.content}`)
         );
+        if (projectChanged()) {
+          abandoned = PROJECT_CHANGED;
+          break;
+        }
         if (typeof vectors === 'string') {
           // La note garde son état d'index précédent ; en force, toutes le gardent.
           report.failures.push({ relativePath, reason: vectors });
@@ -471,7 +499,12 @@ export class ReadingNotesIndexService {
       durationMs: Date.now() - started,
       abandoned: reason,
     });
-    if (abandoned !== undefined) return abandon(abandoned);
+    // Une lecture échouée après la bascule mène ici sans être passée par les arrêts de la boucle.
+    if (abandoned === undefined && projectChanged()) abandoned = PROJECT_CHANGED;
+    // Arrêtée en route : ni purge, qui retirerait ce que la passe n'a pas lu, ni, en force,
+    // l'écriture de ce qui attendait. En incrémental, les notes déjà écrites restent, dans la base
+    // de leur projet.
+    if (abandoned !== undefined) return force ? abandon(abandoned) : { ...done(), abandoned };
 
     const removeUnseen = (): void => {
       for (const known of store.listNotes()) {

@@ -96,6 +96,34 @@ const stoppedEmbedder = {
   },
 } as unknown as EmbeddingProvider;
 
+interface HeldEmbedder extends FakeEmbedder {
+  /** Résolue quand la passe est entrée dans l'embedding : la note est déjà lue. */
+  entered: Promise<void>;
+  release: () => void;
+}
+
+/** Un fournisseur dont le premier appel attend `release()` : la passe reste en vol le temps voulu. */
+function held(provider: FakeEmbedder): HeldEmbedder {
+  const embed = provider.embed.bind(provider);
+  let enter = (): void => undefined;
+  let release = (): void => undefined;
+  const entered = new Promise<void>((resolve) => (enter = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let first = true;
+  return Object.assign(provider, {
+    entered,
+    release,
+    async embed(texts: string[]): Promise<number[][]> {
+      if (first) {
+        first = false;
+        enter();
+        await released;
+      }
+      return embed(texts);
+    },
+  });
+}
+
 function writeNote(root: string, file: string, frontMatter: string, body: string): string {
   const dir = path.join(root, READING_NOTES_DIR);
   fs.mkdirSync(dir, { recursive: true });
@@ -275,6 +303,150 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService', () => {
   });
 });
 
+const BLOCH = 'citekey: Bloch_1939\nzotero_key: BLOC1939\ntags: []';
+const FEBVRE = 'citekey: Febvre_1942\nzotero_key: FEBV0001\ntags: []';
+
+/** Les notes et les textes qu'une autre connexion lit dans le brain.db d'un projet. */
+function notesOf(root: string): { notes: string[]; hits: (word: string) => number } {
+  const store = new ReadingNotesStore({ dbPath: readingNotesStorePath(root) });
+  try {
+    const notes = store.listNotes().map((n) => n.citekey).sort();
+    const texts = new Map<string, number>();
+    for (const word of ['Méditerranée', 'Lyon', 'revue']) texts.set(word, store.searchLexical(word, 10).length);
+    return { notes, hits: (word) => texts.get(word) ?? 0 };
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * S02-1-13 : la passe prenait son store après `fs.readdir`, par `getStore()`, qui relit le projet
+ * courant. Un autre projet ouvert pendant cette lecture recevait les notes du premier, et la purge
+ * finale y retirait les siennes. La passe prend désormais le store de son projet avant toute
+ * attente, et s'arrête dès que le projet a changé, sans écrire ni purger.
+ */
+describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — un autre projet ouvert pendant la passe', () => {
+  let other = '';
+  let opened: string[] = [];
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-a-'));
+    other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-b-'));
+    opened = [];
+    service = new ReadingNotesIndexService({
+      isEnabled: () => true,
+      openStore: (root) => {
+        opened.push(root);
+        return new ReadingNotesStore({ dbPath: readingNotesStorePath(root) });
+      },
+    });
+  });
+
+  afterEach(() => {
+    service.clear();
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.rmSync(other, { recursive: true, force: true });
+  });
+
+  async function indexedB(): Promise<void> {
+    writeNote(other, 'Bloch_1939.md', BLOCH, '# Bloch\n\nLa société féodale, vue de Lyon.\n');
+    service.configure(other);
+    await service.index(fakeEmbedder());
+  }
+
+  async function indexedA(): Promise<void> {
+    writeNote(tmp, 'Braudel_1949.md', BRAUDEL, '# Braudel\n\nLa Méditerranée et la longue durée.\n');
+    writeNote(tmp, 'Febvre_1942.md', FEBVRE, '# Febvre\n\nL’incroyance au XVIe siècle.\n');
+    service.configure(tmp);
+    await service.index(fakeEmbedder());
+  }
+
+  /** La note de Braudel change : la passe suivante s'arrête à son embedding (première note lue). */
+  function reviseBraudel(): void {
+    writeNote(tmp, 'Braudel_1949.md', BRAUDEL, '# Braudel\n\nLa Méditerranée, note revue.\n');
+  }
+
+  it('B ouvert pendant la lecture du dossier de A : rien de A n’entre dans B, rien de B n’en sort', async () => {
+    await indexedB();
+    writeNote(tmp, 'Braudel_1949.md', BRAUDEL, '# Braudel\n\nLa Méditerranée et la longue durée.\n');
+    service.configure(tmp);
+    opened = [];
+    const embedder = fakeEmbedder();
+
+    const pass = service.index(embedder);
+    service.configure(other); // pendant `fs.readdir`
+    const report = await pass;
+
+    expect(notesOf(other)).toMatchObject({ notes: ['Bloch_1939'] });
+    expect(notesOf(other).hits('Méditerranée')).toBe(0);
+    expect(report.abandoned).toBe('project-changed');
+    expect(report.removed).toBe(0);
+    expect(embedder.calls).toBe(0);
+    // La passe de A n'a ouvert que la base de A.
+    expect(opened).toEqual([tmp]);
+  });
+
+  it('B ouvert pendant la boucle de A : la passe s’arrête, et sa purge n’a pas lieu', async () => {
+    await indexedA();
+    reviseBraudel();
+    const embedder = held(fakeEmbedder());
+
+    const pass = service.index(embedder);
+    await embedder.entered;
+    service.configure(other);
+    embedder.release();
+    const report = await pass;
+
+    // Aucune note de A retirée : la purge d'une passe interrompue n'a vu qu'une partie du dossier.
+    expect(notesOf(tmp).notes).toEqual(['Braudel_1949', 'Febvre_1942']);
+    // Et rien de plus ne s'écrit après la bascule : la note revue le sera à la passe suivante de A.
+    expect(notesOf(tmp).hits('revue')).toBe(0);
+    expect(report.abandoned).toBe('project-changed');
+    expect(fs.existsSync(readingNotesStorePath(other))).toBe(false);
+  });
+
+  it('A → B → A pendant la boucle : rien dans B, aucune note de A purgée, la passe de la première ouverture s’arrête', async () => {
+    await indexedB();
+    await indexedA();
+    reviseBraudel();
+    const embedder = held(fakeEmbedder());
+
+    const pass = service.index(embedder);
+    await embedder.entered;
+    service.configure(other);
+    service.configure(tmp);
+    embedder.release();
+    const report = await pass;
+
+    expect(notesOf(other).notes).toEqual(['Bloch_1939']);
+    expect(notesOf(other).hits('Méditerranée')).toBe(0);
+    expect(notesOf(tmp).notes).toEqual(['Braudel_1949', 'Febvre_1942']);
+    expect(report.abandoned).toBe('project-changed');
+
+    // La passe suivante de A, elle, embarque la note revue.
+    expect(await service.index(fakeEmbedder())).toMatchObject({ indexed: 1, unchanged: 1, removed: 0 });
+    expect(notesOf(tmp).hits('revue')).toBe(1);
+  });
+
+  it('A → B → A pendant la lecture du dossier : rien n’est écrit, ni dans A ni dans B', async () => {
+    await indexedB();
+    await indexedA();
+    reviseBraudel();
+    const embedder = fakeEmbedder();
+
+    const pass = service.index(embedder);
+    service.configure(other);
+    service.configure(tmp);
+    const report = await pass;
+
+    expect(report.abandoned).toBe('project-changed');
+    expect(embedder.calls).toBe(0);
+    expect(notesOf(tmp).notes).toEqual(['Braudel_1949', 'Febvre_1942']);
+    expect(notesOf(tmp).hits('revue')).toBe(0);
+    expect(notesOf(other).notes).toEqual(['Bloch_1939']);
+  });
+});
+
 /**
  * « Tout réindexer » (S04-1-18, S02-1-21). Le bouton vidait l'index avant de savoir si le
  * fournisseur répondait : Ollama arrêté, plus aucune note consultée. Et le store gardait la
@@ -423,6 +595,25 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — tout réindexer'
     expect(report.failures).not.toEqual([]);
     // La passe incrémentale garde son propre rapport.
     expect((await next).abandoned).toBeUndefined();
+  });
+
+  it('un autre projet ouvert pendant la réindexation : rien de ce qui attendait ne s’écrit, et l’abandon le dit', async () => {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-rnindex-tout-b-'));
+    try {
+      const mxbai = held(sizedEmbedder(1024));
+      const all = service.reindexAll(mxbai);
+      await mxbai.entered;
+      service.configure(other);
+      mxbai.release();
+      const report = await all;
+
+      // L'index de A reste celui d'avant, entier, dans l'ancienne dimension.
+      expect(storedDimensions()).toEqual([768]);
+      expect(report).toMatchObject({ indexed: 0, removed: 0, abandoned: 'project-changed' });
+      expect(fs.existsSync(readingNotesStorePath(other))).toBe(false);
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true });
+    }
   });
 
   it('une passe demandée pendant une réindexation réussie : le rapport rendu est celui de la réindexation', async () => {

@@ -63,7 +63,16 @@ export interface ManuscriptIndexReport {
   /** Échecs par chapitre — l'indexation continue malgré eux. */
   failures: Array<{ relativePath: string; reason: string }>;
   durationMs: number;
+  /**
+   * Présent quand la passe s'est arrêtée en route, avec sa raison : `project-changed`, un autre
+   * projet ouvert (ou celui-ci rouvert) pendant qu'elle attendait. Ce qu'elle avait déjà écrit
+   * reste, dans la base de son projet ; rien d'autre n'y a été écrit, ni retiré.
+   */
+  abandoned?: string;
 }
+
+/** La raison d'une passe arrêtée par un changement de projet : le mot de `ProjectChangedError`. */
+const PROJECT_CHANGED = 'project-changed';
 
 interface ManuscriptPiece {
   relativePath: string;
@@ -120,6 +129,12 @@ class ManuscriptIndexService {
    * voir quelque part.
    */
   private lastReport: ManuscriptIndexReport | null = null;
+  /**
+   * L'ouverture du projet courant, comptée par `forgetProject`. Une passe la prend à son début et
+   * s'arrête dès qu'elle a changé (S02-1-13) : un autre projet, ou le même rouvert, dont la passe
+   * en vol n'est plus celle qu'on attend.
+   */
+  private opening = 0;
 
   /**
    * Rattache le service à un projet. Fermer le store précédent est
@@ -144,6 +159,7 @@ class ManuscriptIndexService {
    * mais la relance qu'il trouve appartient au projet courant.
    */
   private forgetProject(): void {
+    this.opening += 1;
     this.detachStore();
     this.rerun = null;
     this.lastReport = null;
@@ -327,11 +343,15 @@ class ManuscriptIndexService {
     return this.running;
   }
 
-  /** Une passe, dont le compte rendu devient `lastReport`. */
+  /**
+   * Une passe, dont le compte rendu devient `lastReport`, sauf si son projet a été quitté entre-temps :
+   * la section des réglages du suivant montrait alors le compte rendu de l'autre.
+   */
   private runPass(embedder: EmbeddingProvider): Promise<ManuscriptIndexReport> {
-    return this.runIndex(embedder).then(
+    const opening = this.opening;
+    return this.runIndex(embedder, opening).then(
       (report) => {
-        this.lastReport = report;
+        if (this.opening === opening) this.lastReport = report;
         return report;
       },
       (error: unknown) => {
@@ -343,28 +363,28 @@ class ManuscriptIndexService {
           relativePath: '(passe)',
           reason: error instanceof Error ? error.message : String(error),
         });
-        this.lastReport = failed;
+        if (this.opening === opening) this.lastReport = failed;
         throw error;
       }
     );
   }
 
   /**
-   * Une passe sur le projet configuré à son début. Elle ne s'arrête pas à
-   * l'ouverture d'un autre projet : ses appels au fournisseur, un par lot
-   * d'extraits et chapitre après chapitre, portent la racine de ce projet,
-   * et le journal d'usage du suivant les écarte (S10-1-33). Sans elle, un
-   * appel lancé après la bascule prenait la racine du journal ouvert.
+   * Une passe sur le projet configuré à son début. Ses appels au fournisseur,
+   * un par lot d'extraits et chapitre après chapitre, portent la racine de ce
+   * projet, et le journal d'usage du suivant les écarte (S10-1-33). Sans elle,
+   * un appel lancé après la bascule prenait la racine du journal ouvert.
    */
-  private runIndex(embedder: EmbeddingProvider): Promise<ManuscriptIndexReport> {
+  private runIndex(embedder: EmbeddingProvider, opening: number): Promise<ManuscriptIndexReport> {
     const workspaceRoot = this.workspaceRoot;
-    const pass = (): Promise<ManuscriptIndexReport> => this.indexProject(embedder, workspaceRoot);
+    const pass = (): Promise<ManuscriptIndexReport> => this.indexProject(embedder, workspaceRoot, opening);
     return workspaceRoot ? runWithJournalContext({ workspaceRoot }, pass) : pass();
   }
 
   private async indexProject(
     embedder: EmbeddingProvider,
-    workspaceRoot: string | null
+    workspaceRoot: string | null,
+    opening: number
   ): Promise<ManuscriptIndexReport> {
     const started = Date.now();
     const report = emptyReport();
@@ -373,6 +393,21 @@ class ManuscriptIndexService {
       report.durationMs = Date.now() - started;
       return report;
     }
+
+    // Le store de ce projet, pris avant la première attente (S02-1-13) : `getStore` lit le projet
+    // courant, et après une bascule il ouvrait celui du suivant, où la passe écrivait ce texte-ci
+    // et retirait ce qu'elle n'avait pas vu. `detachStore` ne le ferme qu'après la passe.
+    const store = this.getStore();
+    /**
+     * Le projet a changé depuis le début de la passe : elle s'arrête, sans rien écrire de plus, et
+     * sans la purge finale, qui retirerait ce qu'elle n'a pas encore lu.
+     */
+    const abandoned = (): boolean => this.opening !== opening;
+    const abandon = (): ManuscriptIndexReport => {
+      report.abandoned = PROJECT_CHANGED;
+      report.durationMs = Date.now() - started;
+      return report;
+    };
 
     let pieces: ManuscriptPiece[];
     try {
@@ -385,16 +420,15 @@ class ManuscriptIndexService {
       report.durationMs = Date.now() - started;
       return report;
     }
+    if (abandoned()) return abandon();
     if (pieces.length === 0) {
       // Plus rien à lire : l'index reste, un dossier déplacé ou un changement de branche ne
       // doivent pas faire tout réembarquer à leur retour. Sauf ce qui sort du projet.
-      const store = this.getStore();
       if (store) report.removed = this.removeOutside(store, workspaceRoot);
       report.durationMs = Date.now() - started;
       return report;
     }
 
-    const store = this.getStore();
     if (!store) {
       report.failures.push({ relativePath: '(store)', reason: 'store unavailable' });
       report.durationMs = Date.now() - started;
@@ -424,6 +458,7 @@ class ManuscriptIndexService {
         });
         continue;
       }
+      if (abandoned()) return abandon();
 
       const hash = hashContent(content);
 
@@ -469,6 +504,7 @@ class ManuscriptIndexService {
         });
         continue;
       }
+      if (abandoned()) return abandon();
       if (vectors.length !== chunks.length) {
         report.failures.push({
           relativePath: piece.relativePath,
@@ -512,6 +548,7 @@ class ManuscriptIndexService {
 
     // Chapitres sortis du manifeste (ou du disque) : on les retire, sinon
     // l'assistant citerait un texte que l'auteur a détaché.
+    if (abandoned()) return abandon();
     for (const known of store.listChapters()) {
       if (!seenIds.has(known.id)) {
         store.deleteChapter(known.id);
