@@ -62,6 +62,7 @@ import {
 import { UnreadableFileError, withFileLock } from '../../../../backend/core/fs/user-files.js';
 import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 import { workspaceFiles } from '../../../../backend/core/workspace/layout.js';
+import { assertProjectRoot, ProjectRootMissingError } from '../../../../backend/core/workspace/project-root.js';
 import {
   workspaceLinkOutside,
   workspaceLinkOutsideMessage,
@@ -295,10 +296,13 @@ export function setupFusionHandlers(): void {
       if (linked) return linked;
       const userDir = workspaceFiles(root).recipesDir;
       try {
+        // Le projet disparu (parent renommé, volume débranché) ne renaît pas pour une recette.
+        await assertProjectRoot(root);
         await fs.mkdir(userDir, { recursive: true });
         await fs.writeFile(path.join(userDir, rawFileName), rawYaml, 'utf8');
         return successResponse({});
       } catch (e) {
+        if (e instanceof ProjectRootMissingError) return { ...errorResponse(e), code: e.code };
         return errorResponse(e as Error);
       }
     }
@@ -417,6 +421,7 @@ export function setupFusionHandlers(): void {
         failedStep: result.failedStep,
       });
     } catch (e) {
+      if (e instanceof ProjectRootMissingError) return { ...errorResponse(e), code: e.code };
       return errorResponse(e as Error);
     } finally {
       await registry.dispose().catch(() => undefined);

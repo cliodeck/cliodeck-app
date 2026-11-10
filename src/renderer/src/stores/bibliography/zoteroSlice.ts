@@ -57,11 +57,19 @@ const entryKey = (citation: Pick<Citation, 'id' | 'zoteroKey'>): string => citat
 const latestOf = (citations: Citation[], citation: Citation): Citation =>
   citations.find((c) => entryKey(c) === entryKey(citation)) ?? citation;
 
+/**
+ * Pourquoi le téléchargement n'a pas abouti. Le dossier du projet a disparu : sa traduction, jamais
+ * le code du refus ; le main n'a rien transféré ni recréé.
+ */
+const downloadFailure = (response: { error?: string; code?: string }, fallback: string): string =>
+  response.code === 'project_root_missing' ? i18n.t('project.rootMissing') : response.error || fallback;
+
 const notAttachedOf = (citation: Citation, filePath: string, response: AttachResponse): NotAttached => ({
   title: citation.title,
   filePath,
   metadataUnreadable: response.code === 'metadata-unreadable',
-  detail: response.error ?? '',
+  // Le dossier du projet a disparu : sa traduction, jamais le code du refus.
+  detail: response.code === 'project_root_missing' ? i18n.t('project.rootMissing') : (response.error ?? ''),
 });
 
 /**
@@ -169,7 +177,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       if (refusedAsProjectChanged(downloadResult) || (await left())) return { interrupted: true };
 
       if (!downloadResult.success || !downloadResult.filePath) {
-        throw new Error(downloadResult.error || 'Failed to download PDF');
+        throw new Error(downloadFailure(downloadResult, 'Failed to download PDF'));
       }
 
       console.log(`✅ PDF downloaded to: ${downloadResult.filePath}`);
@@ -374,7 +382,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
           if (refusedAsProjectChanged(downloadResult) || !(await stillIn(projectPath))) return interrupt();
 
           if (!downloadResult.success || !downloadResult.filePath) {
-            errors.push(`${citation.title}: ${downloadResult.error || 'Failed to download'}`);
+            errors.push(`${citation.title}: ${downloadFailure(downloadResult, 'Failed to download')}`);
             continue;
           }
 

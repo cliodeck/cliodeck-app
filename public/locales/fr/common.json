@@ -333,6 +333,10 @@
     "createServicesFailed": "Le projet « {{name}} » a été créé dans {{folder}}, mais il n'a pas pu être préparé : un des services de ClioDeck (par exemple le journal de recherche, les sources primaires ou l'index des PDF) n'a pas démarré. Ouvrez-le avec « Ouvrir un projet ». Si cela se reproduit, relancer ClioDeck peut suffire.",
     "openError": "Ce projet n'a pas pu être ouvert. Son fichier project.json est peut-être illisible ou endommagé.",
     "openUnavailable": "Ce projet n'a pas pu être ouvert : son dossier ou son fichier project.json est introuvable ou inaccessible (disque débranché, dossier déplacé ou renommé, droits de lecture retirés). Rien n'a été modifié.",
+    "openUnavailableClosed": "Le projet n'a pas pu être ouvert, ou rouvert : son dossier ou son fichier project.json est introuvable ou inaccessible (disque débranché, dossier déplacé ou renommé, droits de lecture retirés). Aucun projet n'est plus ouvert : rouvrez celui de votre choix depuis « Projets récents », une fois son dossier de nouveau accessible.",
+    "closeUnsavedConfirmTitle": "Votre document n'est pas enregistré",
+    "closeUnsavedConfirm": "Vos dernières modifications du document ouvert n'ont pas pu être enregistrées. Si vous fermez le projet maintenant, elles seront perdues.\n\nAnnuler : garder le projet ouvert, où elles sont encore à l'écran.\nConfirmer : fermer le projet sans les enregistrer.\n\nRaison : {{reason}}",
+    "rootMissing": "Le dossier du projet est introuvable (disque débranché, dossier déplacé ou renommé) : rien n'a été écrit. Rebranchez le disque, ou rouvrez le projet depuis son nouvel emplacement.",
     "openNotWritable": "Ce projet n'a pas pu être ouvert : son fichier project.json n'a pas pu être écrit. Il n'a pas été modifié. Vérifiez que ce fichier et le dossier du projet sont accessibles en écriture.",
     "servicesFailed": "Ce projet n'a pas pu être préparé : un des services de ClioDeck (par exemple le journal de recherche, les sources primaires ou l'index des PDF) n'a pas démarré. Son fichier project.json n'y est pour rien. Si cela se reproduit, relancer ClioDeck peut suffire.",
     "openFailed": "Ce projet n'a pas pu être ouvert.",
@@ -406,6 +410,7 @@
     "zoteroCollectionKeyHelp": "La clé d'une collection spécifique (optionnel)",
     "zoteroNotSaved": "Non enregistré : le fichier project.json de ce projet n'a pas pu être écrit. Il n'a pas été modifié. Vérifiez qu'il est lisible et accessible.",
     "loading": "Ouverture du projet...",
+    "closing": "Fermeture du projet...",
     "chaptersInNavigator_one": "{{count}} chapitre — voir le navigateur de chapitres",
     "chaptersInNavigator_other": "{{count}} chapitres — voir le navigateur de chapitres",
     "reopenOnboarding": "Rejouer l'assistant de démarrage"

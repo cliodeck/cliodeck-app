@@ -112,6 +112,15 @@ const api = {
       ipcRenderer.on('project:rebuild-progress', listener);
       return () => ipcRenderer.removeListener('project:rebuild-progress', listener);
     },
+    /**
+     * Le main a fermé le projet de lui-même (L03-3) : il ne se rechargeait plus. `code` se traduit
+     * comme un refus d'ouverture ; `error` ne va qu'au journal.
+     */
+    onClosed: (callback: (closed: { path: string; code: string; error: string }) => void) => {
+      const listener = (_event: unknown, closed: Parameters<typeof callback>[0]) => callback(closed);
+      ipcRenderer.on('project:closed', listener);
+      return () => ipcRenderer.removeListener('project:closed', listener);
+    },
   },
 
   // PDF & Documents
@@ -291,6 +300,8 @@ const api = {
         ipcRenderer.invoke('bibliography:reading-notes:open', reference) as Promise<{
           success: boolean;
           file?: string;
+          /** Le dossier du projet a disparu : rien n'a été écrit. */
+          code?: 'project_root_missing';
           error?: string;
         }>,
       setTags: (options: {
@@ -304,8 +315,11 @@ const api = {
         ipcRenderer.invoke('bibliography:reading-notes:set-tags', options) as Promise<{
           success: boolean;
           note?: { file: string; citekey: string; zoteroKey?: string; tags: string[] };
-          /** Note qu'on ne sait pas lire : elle n'a pas été touchée, et `reason` dit pourquoi. */
-          code?: 'unreadable';
+          /**
+           * `unreadable` : note qu'on ne sait pas lire, elle n'a pas été touchée, et `reason` dit
+           * pourquoi. `project_root_missing` : le dossier du projet a disparu, rien n'a été écrit.
+           */
+          code?: 'unreadable' | 'project_root_missing';
           reason?: string;
           error?: string;
         }>,

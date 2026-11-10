@@ -7,8 +7,9 @@
  * d'arrivée, et chacune suit la même séquence :
  *
  * - ouvrir : lire le manifeste de B sans rien changer (un `project.json` illisible laisse A intact,
- *   services compris) ; le même dossier ne relit que son manifeste (le style CSL) ; sinon fermer A,
- *   charger B, lui donner un nouveau handle et ouvrir ses services dans l'ordre ;
+ *   services compris) ; le même dossier ne relit que son manifeste (le style CSL), sauf si ce qui
+ *   décide de ses services a changé depuis (`reopenWhen`) ; sinon fermer A, charger B, lui donner
+ *   un nouveau handle et ouvrir ses services dans l'ordre ;
  * - fermer : avorter le signal du handle, appeler tous les `abort()`, puis les `close()` en ordre
  *   inverse d'ouverture, chacun pour soi, et enfin le gestionnaire de projet ;
  * - échouer : un service `required` qui échoue referme tout ce qui a été ouvert et rouvre A ; un
@@ -167,6 +168,14 @@ export interface ProjectLifecycleOptions<TLoaded extends ManagerReply = ManagerR
    * exception y est journalisée, et la séquence continue.
    */
   onUnrequestedClose?: (closed: UnrequestedClose) => void;
+  /**
+   * Le projet ouvert, rouvert : `opened` est la réponse du gestionnaire qui a servi à ouvrir ses
+   * services (ou à la dernière relecture), `reloaded` celle de la relecture. Vrai : ce qui décide de
+   * ses services a changé sur le disque (un `.cliodeck` lié dehors remis en place, par exemple), et
+   * le projet se ferme puis se rouvre en entier, comme un autre. Absent ou faux : seul son manifeste
+   * est relu.
+   */
+  reopenWhen?: (opened: TLoaded, reloaded: TLoaded) => boolean;
 }
 
 export interface ProjectLifecycle<TLoaded extends ManagerReply = ManagerReply, TRequest = void> {
@@ -284,13 +293,14 @@ interface ProjectDir {
 }
 
 /**
- * Ce qui est ouvert : le handle, le manifeste qui l'a ouvert et la clé de son dossier, les services
- * dans l'ordre d'ouverture.
+ * Ce qui est ouvert : le handle, le manifeste qui l'a ouvert et la clé de son dossier, la réponse du
+ * gestionnaire à sa dernière lecture (`reopenWhen`), les services dans l'ordre d'ouverture.
  */
 interface OpenState<TLoaded extends ManagerReply, TRequest> {
   handle: Opening;
   projectFile: string;
   key: string;
+  loaded: TLoaded;
   opened: ProjectBoundService<TLoaded, TRequest>[];
 }
 
@@ -504,7 +514,7 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
     // Le dossier demandé, celui que range `ProjectManager.loadProject` : pas le chemin courant du
     // gestionnaire, qu'un appel en retard peut avoir changé entre-temps.
     const handle = new Opening(dir, ++epoch);
-    const opening: OpenState<TLoaded, TRequest> = { handle, projectFile, key, opened: [] };
+    const opening: OpenState<TLoaded, TRequest> = { handle, projectFile, key, loaded, opened: [] };
     state = opening;
     const ctx: ServiceOpenContext<TLoaded, TRequest> = { loaded, request };
     const warnings: string[] = [];
@@ -575,12 +585,18 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
     const key = sameFileKey(dir);
     keys.set(dir, key);
 
-    // Le même dossier, par le disque et non par la chaîne : seul le manifeste se relit.
+    // Le même dossier, par le disque et non par la chaîne : seul le manifeste se relit, sauf si ce
+    // qui décide de ses services a changé depuis. Les bandeaux de `configIssue` disent « puis rouvrez
+    // le projet » : relu seul, un `.cliodeck` remis en place laissait ses services fermés.
     if (before && before.key === key) {
       const label = `rechargement de ${projectFile}`;
       const load = await changeManager(label, { dir, key }, timeouts.managerMs, () => manager.loadProject(projectFile));
-      if (load.kind === 'done' && load.value.success) return { ...load.value, success: true as const, warnings: [] };
-      return refuse(managerRefusal(label, load), before.handle.path);
+      if (load.kind !== 'done' || !load.value.success) return refuse(managerRefusal(label, load), before.handle.path);
+      if (!options.reopenWhen?.(before.loaded, load.value)) {
+        before.loaded = load.value;
+        return { ...load.value, success: true as const, warnings: [] };
+      }
+      console.info(`${LOG} ${projectFile} se rouvre en entier : ce qui décide de ses services a changé`);
     }
 
     // Ce dossier, sous une autre graphie, se charge encore.

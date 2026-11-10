@@ -11,6 +11,7 @@ import { PrimarySourcesVectorStore, PrimarySourceChunk, PrimarySourceDocument, P
 import type { NERService } from '../../../backend/core/ner/NERService.js';
 import type { EntityStatistics, ExtractedEntity } from '../../../backend/types/entity.js';
 import type { TropyReindexStatus } from '../../../backend/types/tropy-reindex.js';
+import { ProjectChangedError, type ProjectHandle } from '../../../backend/types/project-handle.js';
 
 // Chunking optimization modules
 import { DocumentChunker, CHUNKING_CONFIGS } from '../../../backend/core/chunking/DocumentChunker.js';
@@ -129,21 +130,20 @@ class TropyService {
   /**
    * Initialise le service Tropy pour un projet
    */
-  async init(projectPath: string): Promise<void> {
+  async init(projectPath: string, handle?: ProjectHandle): Promise<void> {
     // Bascule de projet : démonter l'instance précédente AVANT de la
-    // remplacer. project:load appelle init() sans close() ; sans ce
-    // teardown, l'ancien watcher chokidar survivait et son callback
-    // `change` — closure sur le singleton — pouvait déclencher une resync
-    // sur le projet nouvellement chargé ; l'ancien vector store restait
-    // aussi ouvert (fuite de handle SQLite).
-    this.stopWatching();
-    await this.ocrPipeline?.dispose();
-    // Le moteur OCR de la synchro aussi : un thread, le WASM de Tesseract et
-    // son modèle, gardés jusqu'à la fermeture de l'app (S08-1-16). Une passe
-    // du projet quitté s'arrête alors en échec, sans l'attendre.
-    await this.tropySync?.dispose();
-    this.vectorStore?.close();
-    this.currentTPYPath = null;
+    // remplacer. Sans ce teardown, l'ancien watcher chokidar survivait et son
+    // callback `change` — closure sur le singleton — pouvait déclencher une
+    // resync sur le projet nouvellement chargé ; l'ancien vector store restait
+    // aussi ouvert (fuite de handle SQLite). Le moteur OCR de la synchro aussi :
+    // un thread, le WASM de Tesseract et son modèle, gardés jusqu'à la fermeture
+    // de l'app (S08-1-16). Une passe du projet quitté s'arrête alors en échec,
+    // sans l'attendre.
+    await this.teardown();
+
+    // Une ouverture abandonnée par la séquence continue pendant qu'un autre
+    // projet s'ouvre sur ce même service : elle n'installe rien.
+    if (handle && !handle.isCurrent()) throw new ProjectChangedError();
 
     this.projectPath = projectPath;
     this.vectorStore = new PrimarySourcesVectorStore(projectPath);
@@ -154,9 +154,8 @@ class TropyService {
     this.ocrPipeline = new TropyOCRPipeline(ocrOptions());
 
     // Build the typed provider registry from the active config. Same
-    // self-contained lifecycle as retrieval-service: dispose any previous
-    // registry before re-init.
-    await this.disposePreviousRegistry();
+    // self-contained lifecycle as retrieval-service; le précédent est déjà
+    // libéré par `teardown`, et rien ne s'attend entre ici et la fin.
     try {
       const llmConfig = configManager.getLLMConfig();
       this.llmRegistry = createRegistryFromClioDeckConfig(llmConfig);
@@ -165,7 +164,9 @@ class TropyService {
       this.embedding = this.registry.getEmbedding();
     } catch (e) {
       console.warn('[tropy-service] failed to build provider registry:', e);
-      await this.disposePreviousRegistry();
+      // Sans attente : les champs se vident tout de suite, et un démontage qui arriverait pendant
+      // la libération trouverait ce projet à moitié installé.
+      void this.disposePreviousRegistry();
     }
 
     // Initialize chunking optimization modules
@@ -206,12 +207,20 @@ class TropyService {
    * Ferme le service et libère les ressources
    */
   async close(): Promise<void> {
-    this.stopWatching();
-    await this.ocrPipeline?.dispose();
-    await this.tropySync?.dispose();
-    this.vectorStore?.close();
-    await this.disposePreviousRegistry();
+    await this.teardown();
+  }
 
+  /**
+   * Démonte le projet ouvert. Tout est détaché AVANT la moindre attente : un
+   * `init` ou un `close` qui reprend pendant ce temps ne retrouve ni ce magasin
+   * ni ces moteurs, et chaque libération qui lève (le `.tpy` refermé par
+   * `tropySync.dispose`, un moteur OCR) n'empêche ni les autres ni
+   * l'ouverture suivante.
+   */
+  private async teardown(): Promise<void> {
+    this.stopWatching();
+    const { ocrPipeline, tropySync, vectorStore } = this;
+    const registries = [this.registry, this.llmRegistry];
     this.vectorStore = null;
     this.reindexStatus = { phase: 'idle' };
     this.tropySync = null;
@@ -219,11 +228,27 @@ class TropyService {
     this.ocrPipeline = null;
     this.currentTPYPath = null;
     this.projectPath = null;
+    this.registry = null;
+    this.llmRegistry = null;
+    this.llm = null;
+    this.embedding = null;
 
     // Clean up chunking optimization modules
     this.chunker = null;
     this.qualityScorer = null;
     this.deduplicator = null;
+
+    const release = async (what: string, run: () => unknown): Promise<void> => {
+      try {
+        await run();
+      } catch (error: unknown) {
+        console.warn(`⚠️ [TROPY-SERVICE] libération de ${what} impossible :`, error);
+      }
+    };
+    await release('la passe OCR', () => ocrPipeline?.dispose());
+    await release('la synchro', () => tropySync?.dispose());
+    await release('la base', () => vectorStore?.close());
+    await Promise.all(registries.map((r) => r?.dispose().catch(() => undefined)));
   }
 
   private async disposePreviousRegistry(): Promise<void> {

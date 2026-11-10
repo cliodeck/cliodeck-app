@@ -225,6 +225,19 @@ describe('RecipeEditor : recette modifiée', () => {
     expect(closeEditor).toHaveBeenCalledTimes(1);
   });
 
+  it('le dossier du projet a disparu : l’auteur lit la traduction du refus, jamais son code', async () => {
+    save.mockResolvedValueOnce({ success: false, error: 'project_root_missing', code: 'project_root_missing' });
+    await renderEditor();
+    typeName('autre-nom');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTitle('recipeEditor.save'));
+    });
+
+    expect(screen.queryByText('project.rootMissing')).not.toBeNull();
+    expect(screen.queryByText(/project_root_missing/)).toBeNull();
+  });
+
   it('un enregistrement refusé : c’est toujours modifié', async () => {
     save.mockResolvedValueOnce({ success: false, error: 'disque plein' });
     await renderEditor();

@@ -526,8 +526,10 @@ class RetrievalService {
     this.manuscriptStore?.close();
     this.manuscriptStore = null;
     // Projet fermé : le handle des notes de lecture ne doit pas garder le
-    // `brain.db` de l'ancien projet verrouillé.
+    // `brain.db` de l'ancien projet verrouillé. Celui du corpus manuscrit non
+    // plus : `configure` le détache, `clear` l'oubliait (S02-1-17).
     readingNotesIndexService.clear();
+    manuscriptIndexService.clear();
   }
 
   /**

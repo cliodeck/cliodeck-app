@@ -333,6 +333,10 @@
     "createServicesFailed": "Das Projekt „{{name}}“ wurde in {{folder}} erstellt, konnte aber nicht vorbereitet werden: Einer der Dienste von ClioDeck (zum Beispiel Forschungstagebuch, Primärquellen oder PDF-Index) ist nicht gestartet. Öffnen Sie es mit „Projekt öffnen“. Falls das erneut passiert, kann ein Neustart von ClioDeck genügen.",
     "openError": "Dieses Projekt konnte nicht geöffnet werden. Die Datei project.json ist möglicherweise unlesbar oder beschädigt.",
     "openUnavailable": "Dieses Projekt konnte nicht geöffnet werden: Sein Ordner oder seine Datei project.json ist nicht auffindbar oder nicht erreichbar (Laufwerk getrennt, Ordner verschoben oder umbenannt, Leserechte entzogen). Es wurde nichts geändert.",
+    "openUnavailableClosed": "Das Projekt konnte nicht geöffnet oder erneut geöffnet werden: Sein Ordner oder seine Datei project.json ist nicht auffindbar oder nicht erreichbar (Laufwerk getrennt, Ordner verschoben oder umbenannt, Leserechte entzogen). Es ist kein Projekt mehr geöffnet: Öffnen Sie das gewünschte Projekt über „Letzte Projekte“ erneut, sobald sein Ordner wieder erreichbar ist.",
+    "closeUnsavedConfirmTitle": "Ihr Dokument ist nicht gespeichert",
+    "closeUnsavedConfirm": "Ihre letzten Änderungen am geöffneten Dokument konnten nicht gespeichert werden. Wenn Sie das Projekt jetzt schließen, gehen sie verloren.\n\nAbbrechen: das Projekt geöffnet lassen, wo sie noch auf dem Bildschirm sind.\nBestätigen: das Projekt schließen, ohne sie zu speichern.\n\nGrund: {{reason}}",
+    "rootMissing": "Der Projektordner ist nicht auffindbar (Laufwerk getrennt, Ordner verschoben oder umbenannt): Es wurde nichts geschrieben. Schließen Sie das Laufwerk wieder an oder öffnen Sie das Projekt an seinem neuen Speicherort erneut.",
     "openNotWritable": "Dieses Projekt konnte nicht geöffnet werden: Seine Datei project.json konnte nicht geschrieben werden. Sie wurde nicht verändert. Prüfen Sie, ob diese Datei und der Projektordner beschreibbar sind.",
     "servicesFailed": "Dieses Projekt konnte nicht vorbereitet werden: Einer der Dienste von ClioDeck (zum Beispiel Forschungstagebuch, Primärquellen oder PDF-Index) ist nicht gestartet. Die Datei project.json ist nicht die Ursache. Falls das erneut passiert, kann ein Neustart von ClioDeck genügen.",
     "openFailed": "Dieses Projekt konnte nicht geöffnet werden.",
@@ -406,6 +410,7 @@
     "zoteroCollectionKeyHelp": "Der Schlüssel einer bestimmten Sammlung innerhalb der Gruppe (optional)",
     "zoteroNotSaved": "Nicht gespeichert: Die Datei project.json dieses Projekts konnte nicht geschrieben werden. Sie wurde nicht verändert. Prüfen Sie, ob sie lesbar und erreichbar ist.",
     "loading": "Projekt wird geöffnet...",
+    "closing": "Projekt wird geschlossen...",
     "chaptersInNavigator_one": "{{count}} Kapitel — siehe Kapitelnavigator",
     "chaptersInNavigator_other": "{{count}} Kapitel — siehe Kapitelnavigator",
     "reopenOnboarding": "Einrichtungsassistent erneut starten"

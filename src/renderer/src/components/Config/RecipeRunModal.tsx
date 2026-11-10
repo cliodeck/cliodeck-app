@@ -60,6 +60,8 @@ interface RecipesApi {
     logPath?: string;
     failedStep?: { stepId: string; message: string };
     error?: string;
+    /** `project_root_missing` : le dossier du projet a disparu, la passe n'a pas commencé. */
+    code?: string;
   }>;
   cancel(runId: string): Promise<unknown>;
   onEvent(
@@ -214,7 +216,14 @@ export const RecipeRunModal: React.FC<Props> = ({ scope, fileName, onClose }) =>
           failedStep: res.failedStep,
         });
       } else {
-        setResult({ ok: false, error: res.error ?? t('recipeRun.errors.unknownFailure') });
+        setResult({
+          ok: false,
+          // Le dossier du projet a disparu : le refus se traduit, jamais son code brut.
+          error:
+            res.code === 'project_root_missing'
+              ? t('project.rootMissing')
+              : (res.error ?? t('recipeRun.errors.unknownFailure')),
+        });
       }
     } finally {
       if (runIdRef.current === runId) runIdRef.current = null;

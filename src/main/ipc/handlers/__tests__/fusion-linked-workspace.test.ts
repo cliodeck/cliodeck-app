@@ -162,3 +162,18 @@ describe('témoin : un vrai dossier .cliodeck', () => {
     expect(fs.readFileSync(path.join(root, '.cliodeck', 'recipes', 'nouvelle.yaml'), 'utf8')).toBe(RECIPE);
   });
 });
+
+/**
+ * Le dossier du projet ouvert a disparu (parent renommé, volume débranché) : enregistrer une recette
+ * le recréait, vide, avec son seul `.cliodeck/recipes/`. Refusé par un code, rien d'écrit.
+ */
+describe('le dossier du projet a disparu', () => {
+  it('recipes:save : refusé par son code, aucun squelette recréé', async () => {
+    fs.renameSync(root, path.join(workDir, 'Thèse (ancienne)'));
+
+    const result = await call('fusion:recipes:save', 'nouvelle.yaml', RECIPE);
+
+    expect(result).toMatchObject({ success: false, code: 'project_root_missing' });
+    expect(fs.existsSync(root)).toBe(false);
+  });
+});

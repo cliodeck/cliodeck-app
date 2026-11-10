@@ -21,6 +21,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { ProviderRegistry } from '../core/llm/providers/registry.js';
 import { workspaceFiles, ensureWorkspaceDirectories } from '../core/workspace/layout.js';
+import { assertProjectRoot } from '../core/workspace/project-root.js';
 import { runWithJournalContext } from '../core/usage-journal/context.js';
 import { validateInputs, type Recipe, type StepKind } from './schema.js';
 
@@ -229,6 +230,9 @@ export class RecipeRunner {
   ): Promise<RunResult> {
     const violations = validateInputs(recipe, inputs);
     const paths = workspaceFiles(this.workspaceRoot);
+    // Les dossiers de `.cliodeck` se créent au besoin, jamais le projet : disparu (parent renommé,
+    // volume débranché), il renaîtrait vide à son ancien chemin avec ce seul journal de passe.
+    await assertProjectRoot(this.workspaceRoot);
     await ensureWorkspaceDirectories(this.workspaceRoot);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const safeName = recipe.name.replace(/[^\w.-]/g, '_');

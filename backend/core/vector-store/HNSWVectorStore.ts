@@ -381,10 +381,11 @@ export class HNSWVectorStore {
     console.log('💾 Saving HNSW index to disk...');
     const startTime = Date.now();
 
-    // Ensure directory exists
+    // Ensure directory exists — `.cliodeck` seulement, jamais son parent : le dossier du projet
+    // disparu (parent renommé, volume débranché) renaîtrait vide à son ancien chemin avec cet index.
     const dir = path.dirname(this.indexPath);
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(dir);
     }
 
     const tempIndexPath = this.indexPath + '.tmp';

@@ -196,8 +196,43 @@ describe('ProjectPanel : les autres refus disent leur cause, jamais « project.j
   });
 });
 
+/**
+ * B ne s'ouvre pas et A ne revient pas (`restoredPath: null`) : aucun projet n'est plus ouvert.
+ * « Rien n'a été modifié » était faux : le projet d'avant a été fermé, et l'écran passe à l'accueil.
+ */
+describe('ProjectPanel : le projet d’avant n’a pas pu revenir', () => {
+  it('dossier inaccessible, A fermé : un message qui le dit, sans « rien n’a été modifié »', async () => {
+    await renderPanel();
+    load.mockResolvedValue({ success: false, code: 'project_unavailable', error: 'timeout', restoredPath: null });
+
+    await OPEN_DOORS[0][1]();
+    await vi.waitFor(() => expect(dialogs().alertOpen).toBe(true));
+
+    expect(dialogs().alertMessage).toBe('project.openUnavailableClosed');
+    expect(useProjectStore.getState().currentProject).toBeNull();
+  });
+
+  it('témoin : A revenu (restoredPath), le message d’avant', async () => {
+    await renderPanel();
+    load.mockResolvedValue({ success: false, code: 'project_unavailable', error: 'EIO', restoredPath: A });
+
+    await OPEN_DOORS[0][1]();
+    await vi.waitFor(() => expect(dialogs().alertOpen).toBe(true));
+
+    expect(dialogs().alertMessage).toBe('project.openUnavailable');
+    expect(useProjectStore.getState().currentProject?.path).toBe(A);
+  });
+});
+
 describe('les messages d’échec d’ouverture, dans les trois langues', () => {
-  const OTHER_CAUSES = ['servicesFailed', 'createServicesFailed', 'openUnavailable', 'openNotWritable', 'openFailed'];
+  const OTHER_CAUSES = [
+    'servicesFailed',
+    'createServicesFailed',
+    'openUnavailable',
+    'openUnavailableClosed',
+    'openNotWritable',
+    'openFailed',
+  ];
   const projectTexts = (language: string): Record<string, string> => {
     const file = path.join(process.cwd(), 'public', 'locales', language, 'common.json');
     return (JSON.parse(readFileSync(file, 'utf8')) as { project: Record<string, string> }).project;

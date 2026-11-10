@@ -221,7 +221,9 @@ describe('createProject — non-régression', () => {
     expect(existsSync(path.join(dir, 'abstract.md'))).toBe(true);
     expect(existsSync(path.join(dir, 'context.md'))).toBe(true);
     expect(JSON.parse(await readFile(path.join(dir, 'project.json'), 'utf-8')).name).toBe('Neuf');
-    expect(manager.getCurrentProjectPath()).toBe(dir);
+    // Créé, pas ouvert : `project:create` l'ouvre ensuite par la séquence, services compris (L03-3).
+    expect(manager.getCurrentProjectPath()).toBeNull();
+    expect(result).toMatchObject({ path: path.join(dir, 'project.json') });
     expect(addRecentProject).toHaveBeenCalledWith(path.join(dir, 'project.json'));
     expect(migrateWorkspaceToFlat).toHaveBeenCalledWith(dir);
   });

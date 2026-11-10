@@ -358,6 +358,9 @@ export const CodeMirrorEditor: React.FC = () => {
     // document sans le remplacer.
     let ownFilePath = store.filePath;
     const detached = store.bufferDetached;
+    // Détachée pour une fermeture (aucun projet attendu au bout) ou pour une ouverture.
+    const projectLoad = useProjectStore.getState().loadState;
+    const closingProject = projectLoad.kind === 'loading' && projectLoad.path === '';
     const changeListeners = new Set<(content: string) => void>();
     const selectionListeners = new Set<(offset: number) => void>();
     let syncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -420,7 +423,7 @@ export const CodeMirrorEditor: React.FC = () => {
               EditorState.readOnly.of(true),
               EditorView.editable.of(false),
               EditorState.changeFilter.of(() => false),
-              placeholder(t('project.loading')),
+              placeholder(t(closingProject ? 'project.closing' : 'project.loading')),
             ]
           : [],
         history(),

@@ -10,6 +10,7 @@
  * qu'aucun fournisseur ne parte sur le réseau.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ProjectChangedError, type ProjectHandle } from '../../../../backend/types/project-handle.js';
 
 interface FakeStore {
   closed: boolean;
@@ -181,5 +182,89 @@ describe('le nouveau magasin s’ouvre mais son initialisation échoue', () => {
     // Plus rien ne le référence : resté ouvert, sa poignée sur brain.db ne serait jamais rendue.
     expect(state.stores[1].closed).toBe(true);
     expect(pdfService.getVectorStore()).toBeNull();
+  });
+});
+
+/**
+ * Une ouverture abandonnée (délai tombé, autre service en panne) continue pendant que la séquence
+ * referme ce projet et rouvre le précédent, sur ce même singleton. Elle ne s'installe pas : sinon le
+ * magasin de B remplacerait celui de A rouvert entre-temps, et la recherche répondrait avec B.
+ */
+describe('une ouverture dont le handle n’est plus courant', () => {
+  function handleFor(projectPath: string): ProjectHandle & { end: () => void } {
+    const controller = new AbortController();
+    return {
+      path: projectPath,
+      epoch: 1,
+      signal: controller.signal,
+      isCurrent: () => !controller.signal.aborted,
+      assertCurrent: () => {
+        if (controller.signal.aborted) throw new ProjectChangedError();
+      },
+      end: () => controller.abort(),
+    };
+  }
+
+  it('s’arrête après l’attente de son index : son magasin est fermé, celui de A reste installé', async () => {
+    let finishB!: () => void;
+    state.create.mockImplementationOnce(() => ({
+      store: openStore(),
+      useEnhanced: true,
+      initPromise: new Promise<void>((resolve) => {
+        finishB = resolve;
+      }),
+    }));
+    const handleB = handleFor('/projet-b');
+    const openingB = pdfService.init('/projet-b', undefined, handleB);
+    await new Promise((r) => setImmediate(r));
+
+    // La séquence abandonne B et rouvre A pendant que l'index de B se charge encore.
+    handleB.end();
+    await pdfService.close();
+    await pdfService.init('/projet-a', undefined, handleFor('/projet-a'));
+    finishB();
+    await openingB.catch(() => undefined);
+
+    const [storeB, storeA] = state.stores;
+    expect(storeB.closed).toBe(true);
+    expect(storeA.closed).toBe(false);
+    expect(pdfService.getVectorStore()).toBe(storeA);
+    expect(pdfService.getCurrentProjectPath()).toBe('/projet-a');
+  });
+});
+
+describe('une ouverture abandonnée qui échoue ensuite', () => {
+  it('son échec ne défait pas le projet ouvert entre-temps', async () => {
+    let failB!: (error: Error) => void;
+    state.create.mockImplementationOnce(() => ({
+      store: openStore(),
+      useEnhanced: true,
+      initPromise: new Promise<void>((_resolve, reject) => {
+        failB = reject;
+      }),
+    }));
+    const controller = new AbortController();
+    const handleB: ProjectHandle = {
+      path: '/projet-b',
+      epoch: 1,
+      signal: controller.signal,
+      isCurrent: () => !controller.signal.aborted,
+      assertCurrent: () => undefined,
+    };
+    const openingB = pdfService.init('/projet-b', undefined, handleB);
+    await new Promise((r) => setImmediate(r));
+
+    controller.abort();
+    await pdfService.close();
+    await pdfService.init('/projet-a');
+    state.clearRetrieval.mockClear();
+    failB(new Error('HNSW illisible'));
+    await openingB.catch(() => undefined);
+
+    const [storeB, storeA] = state.stores;
+    expect(storeB.closed).toBe(true);
+    expect(pdfService.getVectorStore()).toBe(storeA);
+    expect(pdfService.getCurrentProjectPath()).toBe('/projet-a');
+    expect(state.clearRetrieval).not.toHaveBeenCalled();
   });
 });

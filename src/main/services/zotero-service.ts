@@ -28,6 +28,7 @@ import {
 import { BibliographyMissingError, readBibFile, rewriteProjectBibliography } from './bibliography-service.js';
 import type { BibAudit } from '../../../backend/core/bibliography/bibAudit.js';
 import { fromStoredPath } from '../../../backend/core/bibliography/stored-path.js';
+import { assertProjectRoot, ProjectRootMissingError } from '../../../backend/core/workspace/project-root.js';
 import { followRenamedCitekeys } from '../../../backend/core/bibliography/readingNotes.js';
 import { indexReadingNotesInBackground } from './reading-notes-indexing.js';
 import type { Citation } from '../../../backend/types/citation.js';
@@ -179,6 +180,10 @@ class ZoteroService {
 
   /**
    * Download a specific PDF attachment from Zotero
+   *
+   * Le dossier du projet a disparu (parent renommé, volume débranché) : `project_root_missing`,
+   * avant toute connexion à Zotero. Le `mkdir` récursif de `PDFs/` faisait renaître le projet, vide,
+   * à son ancien chemin, et le rattachement qui suit écrivait ses métadonnées dans ce squelette.
    */
   async downloadPDF(options: ZoteroSourceOptions & {
     attachmentKey: string;
@@ -188,8 +193,10 @@ class ZoteroService {
     success: boolean;
     filePath?: string;
     error?: string;
+    code?: 'project_root_missing';
   }> {
     try {
+      await assertProjectRoot(options.targetDirectory);
       const ds = this.createDataSource(options);
       try {
         const pdfDir = path.join(options.targetDirectory, 'PDFs');
@@ -234,6 +241,7 @@ class ZoteroService {
       }
     } catch (error: unknown) {
       console.error('Zotero PDF download failed:', error);
+      if (error instanceof ProjectRootMissingError) return { success: false, error: error.message, code: error.code };
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
