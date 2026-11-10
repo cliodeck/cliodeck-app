@@ -52,22 +52,42 @@ interface FakeProject {
   unreadable?: boolean;
   /** Lisible, mais `lastOpenedAt` ne s'écrit pas : `loadProject` le refuse. */
   unwritable?: boolean;
+  /**
+   * `loadProject` attend cette promesse avant de rien décider : une migration de l'espace de
+   * travail qui dure. Comme `ProjectManager.loadProject`, il ne bascule qu'à la fin.
+   */
+  hold?: Promise<void>;
 }
 
 type FakeManager = ProjectManagerPort<Loaded> & {
   current: () => string | null;
   metadataCalls: string[];
   loadCalls: string[];
+  /** Le plus grand nombre de `loadProject` qui ont couru ensemble. */
+  maxLoadsInFlight: () => number;
+  /** La prochaine fermeture attend `gate` avant de rien changer. */
+  holdNextClose: (gate: Promise<void>) => void;
 };
 
 function fakeManager(events: string[], projects: Record<string, FakeProject>): FakeManager {
   let current: string | null = null;
   const metadataCalls: string[] = [];
   const loadCalls: string[] = [];
+  let loadsInFlight = 0;
+  let maxLoadsInFlight = 0;
+  let nextCloseGate: Promise<void> | null = null;
+  const closeNow = (): void => {
+    current = null;
+    events.push('manager:close');
+  };
   return {
     current: () => current,
     metadataCalls,
     loadCalls,
+    maxLoadsInFlight: () => maxLoadsInFlight,
+    holdNextClose: (gate) => {
+      nextCloseGate = gate;
+    },
     async getProjectMetadata(projectFile) {
       metadataCalls.push(projectFile);
       const project = projects[projectFile];
@@ -78,21 +98,32 @@ function fakeManager(events: string[], projects: Record<string, FakeProject>): F
     },
     async loadProject(projectFile) {
       loadCalls.push(projectFile);
-      const project = projects[projectFile];
-      if (!project || project.unreadable) {
-        return { success: false, code: 'manifest_unreadable', fileName: 'project.json', error: 'JSON invalide' };
+      loadsInFlight += 1;
+      maxLoadsInFlight = Math.max(maxLoadsInFlight, loadsInFlight);
+      try {
+        const hold = projects[projectFile]?.hold;
+        if (hold) await hold;
+        const project = projects[projectFile];
+        if (!project || project.unreadable) {
+          return { success: false, code: 'manifest_unreadable', fileName: 'project.json', error: 'JSON invalide' };
+        }
+        if (project.unwritable) {
+          return { success: false, code: 'manifest_unwritable', fileName: 'project.json', error: 'EROFS' };
+        }
+        current = path.dirname(projectFile);
+        events.push(`load:${label(current)}`);
+        return { success: true, project: { name: label(current) } };
+      } finally {
+        loadsInFlight -= 1;
       }
-      if (project.unwritable) {
-        return { success: false, code: 'manifest_unwritable', fileName: 'project.json', error: 'EROFS' };
-      }
-      current = path.dirname(projectFile);
-      events.push(`load:${label(current)}`);
-      return { success: true, project: { name: label(current) } };
     },
     getCurrentProjectPath: () => current,
     close() {
-      current = null;
-      events.push('manager:close');
+      const gate = nextCloseGate;
+      nextCloseGate = null;
+      if (gate) return gate.then(closeNow);
+      closeNow();
+      return undefined;
     },
   };
 }
@@ -166,6 +197,37 @@ describe('projectLifecycle — contrat', () => {
   it('le port se branche tel quel sur ProjectManager, une fois close() ajouté (seconde partie)', () => {
     type ManagerLoaded = Awaited<ReturnType<ProjectManager['loadProject']>>;
     expectTypeOf<ProjectManager & { close(): void }>().toExtend<ProjectManagerPort<ManagerLoaded>>();
+  });
+
+  it('refuse à la construction un délai sans borne ou hors de ce que setTimeout accepte', () => {
+    const events: string[] = [];
+    const manager = fakeManager(events, { [A]: {} });
+    // Node ramène à 1 ms tout délai au-delà de 2^31-1, Infinity compris : « pas de plafond » ferait
+    // échouer l'ouverture aussitôt. Et une attente sans plafond serait une attente sans sortie.
+    for (const bad of [Infinity, Number.NaN, 2 ** 31, 0, -1]) {
+      expect(() => lifecycle(manager, [fakeService(events, 'pdf', { openTimeoutMs: bad })])).toThrow(RangeError);
+      expect(() => lifecycle(manager, [fakeService(events, 'pdf', { closeTimeoutMs: bad })])).toThrow(RangeError);
+      expect(() => lifecycle(manager, [], { managerMs: bad })).toThrow(RangeError);
+    }
+    expect(() => lifecycle(manager, [], { abortMs: Infinity })).toThrow(/abortMs/);
+    expect(() => lifecycle(manager, [fakeService(events, 'pdf', { openTimeoutMs: 2 ** 31 - 1 })])).not.toThrow();
+  });
+
+  it('un délai de séquence passé à undefined garde sa valeur par défaut', async () => {
+    vi.useFakeTimers();
+    const events: string[] = [];
+    const manager = fakeManager(events, { [A]: {} });
+    const lc = lifecycle(manager, [fakeService(events, 'chat', { abort: never })], { abortMs: undefined });
+    await lc.open(A, request);
+    events.length = 0;
+
+    const closing = lc.close();
+    // Pas 1 ms : les 5 s par défaut.
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(events).toEqual(['abort:chat']);
+    await vi.advanceTimersByTimeAsync(1);
+    await closing;
+    expect(events).toEqual(['abort:chat', 'close:chat', 'manager:close']);
   });
 });
 
@@ -607,5 +669,141 @@ describe('projectLifecycle — fermeture', () => {
     await closing;
     expect(events).toEqual(['abort:chat', 'close:chat', 'manager:close']);
     expect(logged(consoleWarn)).toContain('chat');
+  });
+});
+
+/**
+ * Le gestionnaire qui ne répond pas à temps : son appel continue, et finit plus tard. Le délai est
+ * injecté, tout petit ; le chargement retenu ne finit que quand le test le libère, si bien que le
+ * délai tombe toujours, quelle que soit la charge de la machine.
+ */
+describe('projectLifecycle — gestionnaire en retard', () => {
+  it('B sans réponse à temps : A n’est pas rouvert, et restoredPath vaut null', async () => {
+    const events: string[] = [];
+    const held = deferred();
+    const manager = fakeManager(events, { [A]: {}, [B]: { hold: held.promise } });
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 });
+    await lc.open(A, request);
+
+    const result = await lc.open(B, request);
+
+    expect(result).toEqual({ success: false, code: 'project_unavailable', error: 'timeout', restoredPath: null });
+    // Le gestionnaire peut encore basculer sur B : rouvrir A maintenant mettrait les services de A sur B.
+    expect(manager.loadCalls).toEqual([A, B]);
+    expect(lc.current()).toBeNull();
+    expect(events).not.toContain('open:history:B');
+
+    held.resolve();
+    // Sa fin tardive ne laisse pas le main sur B, qu'aucune ouverture n'a gardé.
+    await vi.waitFor(() => expect(events.slice(-2)).toEqual(['load:B', 'manager:close']));
+    expect(manager.current()).toBeNull();
+  });
+
+  it('la fin tardive du chargement de B ne fait pas basculer le main : il revient sur C, ouvert entre-temps', async () => {
+    const events: string[] = [];
+    const held = deferred();
+    const manager = fakeManager(events, { [A]: {}, [B]: { hold: held.promise }, [C]: {} });
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 });
+    await lc.open(A, request);
+    await lc.open(B, request);
+
+    // B ne finit pas : un autre projet s'ouvre quand même, sans quitter l'app.
+    await expect(lc.open(C, request)).resolves.toMatchObject({ success: true });
+    expect(manager.current()).toBe('/projets/C');
+
+    held.resolve();
+    // B finit : le gestionnaire bascule un instant, puis revient sur le projet de la séquence.
+    await vi.waitFor(() => expect(manager.loadCalls).toEqual([A, B, C, C]));
+    await vi.waitFor(() => expect(manager.current()).toBe('/projets/C'));
+    expect(lc.current()?.path).toBe('/projets/C');
+    // Aucun service ne s'est ouvert sur B, et le retour du gestionnaire n'en a rouvert aucun.
+    expect(events.filter((e) => e.startsWith('open:'))).toEqual(['open:history:A', 'open:history:C']);
+  });
+
+  it('un nouvel essai sur B pendant que son chargement court ne relance pas de loadProject', async () => {
+    const events: string[] = [];
+    const held = deferred();
+    const manager = fakeManager(events, { [A]: {}, [B]: { hold: held.promise } });
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 });
+    await lc.open(A, request);
+    await lc.open(B, request);
+
+    // Deux migrations du même `.cliodeck` en même temps, sans verrou : jamais.
+    const retry = await lc.open(B, request);
+
+    expect(retry).toEqual({ success: false, code: 'project_unavailable', error: 'timeout', restoredPath: null });
+    expect(manager.loadCalls).toEqual([A, B]);
+    expect(manager.maxLoadsInFlight()).toBe(1);
+
+    held.resolve();
+    await vi.waitFor(() => expect(events.slice(-2)).toEqual(['load:B', 'manager:close']));
+    expect(lc.current()).toBeNull();
+    // Une fois le premier chargement fini, B s'ouvre normalement.
+    await expect(lc.open(B, request)).resolves.toMatchObject({ success: true });
+    expect(manager.current()).toBe('/projets/B');
+    expect(lc.current()?.path).toBe('/projets/B');
+  });
+
+  it('un chargement qui finit pendant l’attente du suivant : aucun chevauchement', async () => {
+    vi.useFakeTimers();
+    const events: string[] = [];
+    const held = deferred();
+    const manager = fakeManager(events, { [A]: {}, [B]: { hold: held.promise }, [C]: {} });
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 1_000 });
+    await lc.open(A, request);
+    const openingB = lc.open(B, request);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(openingB).resolves.toMatchObject({ code: 'project_unavailable' });
+
+    const openingC = lc.open(C, request);
+    await vi.advanceTimersByTimeAsync(10);
+    // C attend la fin de B avant de rien charger.
+    expect(manager.loadCalls).toEqual([A, B]);
+
+    held.resolve();
+    await expect(openingC).resolves.toMatchObject({ success: true });
+    expect(manager.maxLoadsInFlight()).toBe(1);
+    expect(manager.current()).toBe('/projets/C');
+    expect(lc.current()?.path).toBe('/projets/C');
+  });
+
+  it('une fermeture du gestionnaire en retard ne ferme pas le projet ouvert après elle', async () => {
+    const events: string[] = [];
+    const gate = deferred();
+    const manager = fakeManager(events, { [A]: {}, [B]: {} });
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { closeMs: 5, managerMs: 5 });
+    await lc.open(A, request);
+    manager.holdNextClose(gate.promise);
+
+    await lc.close();
+    await expect(lc.open(B, request)).resolves.toMatchObject({ success: true });
+
+    gate.resolve();
+    // La fermeture tardive vide le gestionnaire ; il revient sur B.
+    await vi.waitFor(() => expect(manager.loadCalls).toEqual([A, B, B]));
+    await vi.waitFor(() => expect(manager.current()).toBe('/projets/B'));
+    expect(lc.current()?.path).toBe('/projets/B');
+  });
+
+  it('si le projet de la séquence ne se recharge pas après une bascule tardive, tout est fermé', async () => {
+    const events: string[] = [];
+    const held = deferred();
+    const projects: Record<string, FakeProject> = { [A]: {}, [B]: { hold: held.promise }, [C]: {} };
+    const manager = fakeManager(events, projects);
+    const lc = lifecycle(manager, [fakeService(events, 'history')], { managerMs: 5 });
+    await lc.open(A, request);
+    await lc.open(B, request);
+    await lc.open(C, request);
+    const handleOfC = lc.current();
+    projects[C].unwritable = true;
+
+    held.resolve();
+
+    // Le main ne reste ni sur B, que le renderer ne croit pas ouvert, ni à moitié sur C.
+    await vi.waitFor(() => expect(manager.current()).toBeNull());
+    expect(lc.current()).toBeNull();
+    expect(handleOfC?.signal.aborted).toBe(true);
+    expect(events.slice(-3)).toEqual(['abort:history', 'close:history', 'manager:close']);
+    expect(logged(consoleError)).toContain('/projets/C');
   });
 });

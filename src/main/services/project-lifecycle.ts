@@ -18,6 +18,10 @@
  * l'app pour ouvrir un projet. Chaque attente est donc bornée, journalisée quand le délai tombe, et
  * la séquence continue : un `open()` sans réponse compte comme un échec, un `close()` comme fait.
  *
+ * Un appel au gestionnaire (charger, fermer) qui dépasse son délai continue pourtant, et finira :
+ * il reste suivi. Le suivant l'attend d'abord, borné ; deux chargements du même dossier ne courent
+ * jamais ensemble ; et sa fin remet le gestionnaire sur le projet de la séquence.
+ *
  * N'importe aucun service : la table des services et le gestionnaire de projet lui sont passés.
  */
 import path from 'path';
@@ -64,19 +68,34 @@ export interface ServiceOpenContext<TLoaded extends ManagerReply = ManagerReply,
 
 /**
  * Un service lié au projet ouvert. `abort` coupe ce qui court ; `close` libère, et peut attendre la
- * fin de ce que `abort` a coupé. Les délais remplacent ceux de la séquence pour ce service seul.
+ * fin de ce que `abort` a coupé. Les délais remplacent ceux de la séquence pour ce service seul :
+ * un nombre fini de millisecondes, entre 1 et `MAX_DELAY_MS`, vérifié à la construction.
  */
 export interface ProjectBoundService<TLoaded extends ManagerReply = ManagerReply, TRequest = void> {
   readonly name: string;
   readonly mode: ProjectServiceMode;
   readonly openTimeoutMs?: number;
   readonly closeTimeoutMs?: number;
+  /**
+   * Ouvre le service sur `handle`. Une ouverture abandonnée n'est pas interrompue : délai tombé,
+   * ou autre service `required` en échec, elle continue pendant que la séquence referme ce projet
+   * et rouvre le précédent, peut-être sur ce même service. Le signal du handle s'avorte alors.
+   * Après chaque attente, avant de s'installer, elle vérifie donc `handle.isCurrent()` (ou appelle
+   * `handle.assertCurrent()`) et s'arrête sinon. Seul un `best-effort` dont le délai tombe garde
+   * un handle courant : son ouverture tardive peut s'installer.
+   */
   open?(handle: ProjectHandle, ctx: ServiceOpenContext<TLoaded, TRequest>): void | Promise<void>;
   abort?(): void | Promise<void>;
   close?(): void | Promise<void>;
 }
 
-/** Les délais de la séquence, en millisecondes. */
+/**
+ * Le plus long délai que `setTimeout` respecte : au-delà, Node le ramène à 1 ms (Infinity compris),
+ * et « pas de plafond » ferait tomber le délai aussitôt.
+ */
+export const MAX_DELAY_MS = 2_147_483_647;
+
+/** Les délais de la séquence, en millisecondes : finis, entre 1 et `MAX_DELAY_MS`. */
 export interface ProjectLifecycleTimeouts {
   /** Chaque `abort()`, tous en même temps. */
   abortMs: number;
@@ -84,7 +103,10 @@ export interface ProjectLifecycleTimeouts {
   openMs: number;
   /** Chaque `close()`, et la fermeture côté gestionnaire. */
   closeMs: number;
-  /** Chaque lecture ou chargement du manifeste. */
+  /**
+   * Chaque lecture ou chargement du manifeste, et l'attente d'un appel au gestionnaire resté en
+   * retard avant d'en lancer un autre.
+   */
   managerMs: number;
 }
 
@@ -152,11 +174,25 @@ class Opening implements ProjectHandle {
   }
 }
 
-type Settled<T> = { kind: 'done'; value: T } | { kind: 'failed'; error: unknown } | { kind: 'timeout' };
+/** `late` : l'appel resté sans réponse, qui se résout (sans jamais rejeter) quand il finit. */
+type Settled<T> =
+  | { kind: 'done'; value: T }
+  | { kind: 'failed'; error: unknown }
+  | { kind: 'timeout'; late: Promise<void> };
 
 const LOG = '[project-lifecycle]';
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** Un délai que `setTimeout` respecte, ou une erreur dès la construction : jamais d'attente sans borne. */
+function checkDelay(name: string, ms: number | undefined): void {
+  if (ms === undefined) return;
+  if (!Number.isFinite(ms) || ms < 1 || ms > MAX_DELAY_MS) {
+    throw new RangeError(
+      `${LOG} délai ${name} invalide (${ms}) : un nombre fini de millisecondes, entre 1 et ${MAX_DELAY_MS}`
+    );
+  }
+}
 
 /**
  * Attend `run` au plus `ms`, sans jamais lever. Le délai tombé est journalisé, et un échec qui
@@ -170,8 +206,8 @@ async function settleWithin<T>(label: string, ms: number, run: () => T | Promise
     return { kind: 'failed', error };
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<Settled<T>>((resolve) => {
-    timer = setTimeout(() => resolve({ kind: 'timeout' }), ms);
+  const timedOut = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), ms);
   });
   try {
     const outcome = await Promise.race([
@@ -181,11 +217,13 @@ async function settleWithin<T>(label: string, ms: number, run: () => T | Promise
       ),
       timedOut,
     ]);
-    if (outcome.kind === 'timeout') {
-      console.warn(`${LOG} ${label} : pas de réponse après ${ms} ms, la séquence continue`);
-      work.catch((error: unknown) => console.warn(`${LOG} ${label} : échec après le délai :`, error));
-    }
-    return outcome;
+    if (outcome !== 'timeout') return outcome;
+    console.warn(`${LOG} ${label} : pas de réponse après ${ms} ms, la séquence continue`);
+    const late = work.then(
+      () => undefined,
+      (error: unknown) => console.warn(`${LOG} ${label} : échec après le délai :`, error)
+    );
+    return { kind: 'timeout', late };
   } finally {
     clearTimeout(timer);
   }
@@ -217,21 +255,116 @@ type EnterOutcome<TLoaded extends ManagerReply> =
   | { kind: 'entered'; loaded: TLoaded; warnings: string[] }
   | { kind: 'refused'; reply: Refusal; managerUnsure: boolean };
 
+/** Un appel qui change le gestionnaire (charger, fermer), resté sans réponse et qui court encore. */
+interface LateCall {
+  /** Le dossier qu'il charge ; null pour une fermeture. */
+  readonly dir: string | null;
+  /** Se résout quand il a fini, une fois retiré du suivi et la remise d'accord mise en file. */
+  readonly finished: Promise<void>;
+}
+
 export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerReply, TRequest = void>(
   options: ProjectLifecycleOptions<TLoaded, TRequest>
 ): ProjectLifecycle<TLoaded, TRequest> {
   const { manager } = options;
   const services = [...options.services];
-  const timeouts: ProjectLifecycleTimeouts = { ...DEFAULT_TIMEOUTS, ...options.timeouts };
+  const timeouts: ProjectLifecycleTimeouts = { ...DEFAULT_TIMEOUTS };
+  for (const key of Object.keys(DEFAULT_TIMEOUTS) as Array<keyof ProjectLifecycleTimeouts>) {
+    // Un `undefined` explicite garde la valeur par défaut, au lieu de devenir un délai de 1 ms.
+    const ms = options.timeouts?.[key];
+    if (ms !== undefined) timeouts[key] = ms;
+    checkDelay(key, timeouts[key]);
+  }
+  for (const service of services) {
+    checkDelay(`openTimeoutMs de ${service.name}`, service.openTimeoutMs);
+    checkDelay(`closeTimeoutMs de ${service.name}`, service.closeTimeoutMs);
+  }
   let state: OpenState<TLoaded, TRequest> | null = null;
   let epoch = 0;
   let tail: Promise<unknown> = Promise.resolve();
+  const lateCalls = new Set<LateCall>();
 
   /** Dans l'ordre d'arrivée, une à la fois. Les tâches ne lèvent pas ; la file survit quand même. */
   function enqueue<T>(task: () => Promise<T>): Promise<T> {
     const run = tail.then(task, task);
     tail = run.catch(() => undefined);
     return run;
+  }
+
+  /**
+   * Charger (`dir`) ou fermer (`dir` null) côté gestionnaire. Un appel qui dépasse son délai
+   * continue : il reste suivi jusqu'à sa fin, qui met en file une remise d'accord (`reconcile`).
+   *
+   * - Avant de partir, l'appel attend ceux qui courent encore, au plus `managerMs` : le cas
+   *   courant, une migration d'espace de travail un peu longue, finit là, sans chevauchement.
+   * - Deux chargements du même dossier ne courent jamais ensemble : la migration de `.cliodeck`
+   *   n'a pas de verrou. Le second est refusé, comme un délai tombé (`project_unavailable`).
+   * - Un autre dossier passe après l'attente : un chargement qui ne finit jamais n'empêche pas
+   *   d'ouvrir un autre projet sans quitter l'app.
+   */
+  async function changeManager<T>(
+    label: string,
+    dir: string | null,
+    ms: number,
+    run: () => T | Promise<T>
+  ): Promise<Settled<T>> {
+    if (lateCalls.size > 0) {
+      const pending = [...lateCalls].map((call) => call.finished);
+      await settleWithin(`${label}, attente des appels en retard`, timeouts.managerMs, () => Promise.all(pending));
+    }
+    if (dir !== null) {
+      for (const call of lateCalls) {
+        if (call.dir === null || !sameFile(call.dir, dir)) continue;
+        console.warn(`${LOG} ${label} : le chargement précédent de ${dir} court encore, refusé`);
+        return { kind: 'timeout', late: call.finished };
+      }
+    }
+    const outcome = await settleWithin(label, ms, run);
+    if (outcome.kind === 'timeout') {
+      const call: LateCall = {
+        dir,
+        finished: outcome.late.then(() => {
+          lateCalls.delete(call);
+          void enqueue(reconcile);
+        }),
+      };
+      lateCalls.add(call);
+    }
+    return outcome;
+  }
+
+  /**
+   * Un appel au gestionnaire a fini après son délai : il a pu basculer sur un projet que la
+   * séquence a quitté, ou fermer celui qu'elle a ouvert depuis. Le gestionnaire revient sur le
+   * projet de la séquence ; s'il ne peut pas, tout se ferme, plutôt que de laisser le main sur un
+   * projet que le renderer ne croit pas ouvert.
+   */
+  async function reconcile(): Promise<void> {
+    const managerPath = manager.getCurrentProjectPath();
+    const target = state;
+    if (target === null) {
+      if (managerPath === null) return;
+      console.warn(`${LOG} le gestionnaire est sur ${managerPath} après un appel en retard : fermeture`);
+      const outcome = await changeManager('fermeture du projet', null, timeouts.closeMs, () => manager.close());
+      if (outcome.kind === 'failed') console.error(`${LOG} fermeture du projet :`, outcome.error);
+      return;
+    }
+    if (managerPath !== null && sameFile(managerPath, target.handle.path)) return;
+    console.warn(
+      `${LOG} le gestionnaire est sur ${managerPath ?? 'aucun projet'} après un appel en retard : ` +
+        `retour sur ${target.handle.path}`
+    );
+    const label = `rechargement de ${target.projectFile}`;
+    const back = await changeManager(label, target.handle.path, timeouts.managerMs, () =>
+      manager.loadProject(target.projectFile)
+    );
+    // Encore en retard : sa propre fin relancera la remise d'accord.
+    if (back.kind === 'timeout' || (back.kind === 'done' && back.value.success)) return;
+    console.error(
+      `${LOG} ${target.handle.path} ne se recharge pas après un appel en retard, le projet est fermé :`,
+      managerRefusal(label, back).error
+    );
+    await closeNow();
   }
 
   async function closeNow(): Promise<void> {
@@ -261,7 +394,7 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
         if (outcome.kind === 'failed') console.error(`${LOG} fermeture de ${service.name} :`, outcome.error);
       }
     }
-    const outcome = await settleWithin('fermeture du projet', timeouts.closeMs, () => manager.close());
+    const outcome = await changeManager('fermeture du projet', null, timeouts.closeMs, () => manager.close());
     if (outcome.kind === 'failed') console.error(`${LOG} fermeture du projet :`, outcome.error);
   }
 
@@ -270,7 +403,8 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
    * `managerUnsure` : le gestionnaire n'a pas répondu à temps, et peut encore basculer.
    */
   async function enter(projectFile: string, request: TRequest): Promise<EnterOutcome<TLoaded>> {
-    const load = await settleWithin(`chargement de ${projectFile}`, timeouts.managerMs, () =>
+    const dir = path.dirname(projectFile);
+    const load = await changeManager(`chargement de ${projectFile}`, dir, timeouts.managerMs, () =>
       manager.loadProject(projectFile)
     );
     if (load.kind !== 'done' || !load.value.success) {
@@ -279,7 +413,9 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
     }
     const loaded = load.value;
 
-    const handle = new Opening(manager.getCurrentProjectPath() ?? path.dirname(projectFile), ++epoch);
+    // Le dossier demandé, celui que range `ProjectManager.loadProject` : pas le chemin courant du
+    // gestionnaire, qu'un appel en retard peut avoir changé entre-temps.
+    const handle = new Opening(dir, ++epoch);
     const opening: OpenState<TLoaded, TRequest> = { handle, projectFile, opened: [] };
     state = opening;
     const ctx: ServiceOpenContext<TLoaded, TRequest> = { loaded, request };
@@ -338,7 +474,7 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
 
     // Le même dossier, par le disque et non par la chaîne : seul le manifeste se relit.
     if (before && sameFile(path.dirname(projectFile), before.handle.path)) {
-      const load = await settleWithin(`rechargement de ${projectFile}`, timeouts.managerMs, () =>
+      const load = await changeManager(`rechargement de ${projectFile}`, before.handle.path, timeouts.managerMs, () =>
         manager.loadProject(projectFile)
       );
       if (load.kind === 'done' && load.value.success) return { ...load.value, success: true as const, warnings: [] };
@@ -351,8 +487,9 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
       return { ...entered.loaded, success: true as const, warnings: entered.warnings };
     }
 
-    // Retour sur A. Sauf si le gestionnaire n'a pas répondu : il pourrait encore basculer sur B
-    // après ce retour, et le main servirait A sur le projet B. Aucun projet, alors.
+    // Retour sur A. Sauf si le gestionnaire n'a pas répondu : son chargement de B court encore, et
+    // rouvrir A le chevaucherait après une seconde attente. Aucun projet, alors ; la fin de B
+    // remettra le gestionnaire d'accord (`reconcile`), et l'auteur peut rouvrir A ou un autre.
     let restoredPath: string | null = null;
     if (before && !entered.managerUnsure) {
       const back = await enter(before.projectFile, request);
