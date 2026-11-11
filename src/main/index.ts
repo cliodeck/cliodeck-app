@@ -76,9 +76,7 @@ function createWindow(): BrowserWindow {
   });
   mainWindow = win;
 
-  // Deny all window.open / target=_blank attempts at the main-process level.
-  // Links that should open externally must go through a dedicated IPC path.
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // Aucune nouvelle fenêtre (`window.open`, `target=_blank`) : le garde le refuse, sur tout WebContents.
 
   // En dev : charger depuis Vite
   // En production : charger depuis dist

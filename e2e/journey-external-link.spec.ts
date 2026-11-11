@@ -133,7 +133,7 @@ const appWindowState = (app: ElectronApplication): Promise<{ url: string; modeBa
 const framingBlocked = (window: Page): Promise<string[]> =>
   window.evaluate(() => (window as unknown as { __framingBlocked?: string[] }).__framingBlocked ?? []);
 
-test('une navigation sans geste n’ouvre rien : meta refresh, location, sous-frame, clic de script', async () => {
+test('une navigation sans geste n’ouvre rien : meta refresh, location, sous-frame, clic de script, nouvelle fenêtre', async () => {
   const session = await start(() => 'Réponse sans lien.');
   if (!session) return;
   const { app, window, base, project } = session;
@@ -197,6 +197,24 @@ test('une navigation sans geste n’ouvre rien : meta refresh, location, sous-fr
       a.remove();
     }, `${base}/script`);
     await expectRefused(`${base}/script`);
+
+    // Une nouvelle fenêtre demandée par la page, sans geste : `window.open`, puis un lien
+    // `target=_blank` cliqué par un script. Refusée sur tout WebContents, et dite au journal.
+    await window.evaluate((url) => {
+      window.open(url);
+    }, `${base}/fenetre`);
+    await expectRefused(`${base}/fenetre`);
+    await window.evaluate((url) => {
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.textContent = 'piège';
+      document.body.append(a);
+      a.click();
+      a.remove();
+    }, `${base}/onglet`);
+    await expectRefused(`${base}/onglet`);
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
 
     // La fenêtre est restée l'app. Vu du main : Playwright attend la fin des navigations que le
     // garde a annulées, et ses localisateurs resteraient bloqués.
