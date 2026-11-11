@@ -8,7 +8,7 @@
  * symbolique (SQLite range le journal à côté de la cible, pas du lien), et un
  * `-wal` resté sans `-shm`. La synchro ne voyait pas les items du journal.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createHash } from 'crypto';
 import * as fs from 'fs';
@@ -16,7 +16,29 @@ import * as os from 'os';
 import * as path from 'path';
 import { sqliteAvailable } from '../../../__tests__/helpers/native-guards';
 import { makeTpy, openTpyForWrite, tpyDatabasePath } from './helpers/make-tpy';
-import { openTropyDatabase, READ_FILE_SYNC_MAX_BYTES } from '../tropy-database';
+import { openTropyDatabase } from '../tropy-database';
+
+/**
+ * Garde contre la copie en mémoire d'une base agrandie : elle remplirait 4 Gio,
+ * l'image lue puis la copie que better-sqlite3 en fait dans SQLite. Quand
+ * `forbidden` est posé, lire d'un coup un fichier de plus de 1 Mio lève tout de
+ * suite, sans rien allouer. Le reste du temps, `readFileSync` est le vrai.
+ */
+const largeReads = vi.hoisted(() => ({ forbidden: false }));
+
+vi.mock('fs', async (importOriginal) => {
+  const real = await importOriginal<typeof import('fs')>();
+  const readFileSync = (
+    file: Parameters<typeof real.readFileSync>[0],
+    options?: Parameters<typeof real.readFileSync>[1],
+  ) => {
+    if (largeReads.forbidden && typeof file === 'string' && real.statSync(file).size > 2 ** 20) {
+      throw new Error(`copie en mémoire de ${file} (${real.statSync(file).size} octets)`);
+    }
+    return real.readFileSync(file, options);
+  };
+  return { ...real, readFileSync };
+});
 
 let root: string;
 
@@ -25,6 +47,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  largeReads.forbidden = false;
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -161,24 +184,39 @@ describe.skipIf(!sqliteAvailable)('openTropyDatabase', () => {
     expect({ base: digest(copied), journal: digest(`${copied}-wal`) }).toEqual(bytes);
   });
 
-  // J5 : la copie en mémoire passe par `readFileSync`, qui refuse un fichier
-  // de 2 Gio ou plus. Une très grosse base, Tropy fermé, ne se liait plus ni
-  // ne se synchronisait. Au-delà, elle se lit elle-même ; SQLite crée alors
-  // `-wal` et `-shm`, que Tropy retire à sa prochaine ouverture (décision J5).
-  it('un .tpy en WAL de 2 Gio ou plus, Tropy fermé : se lit lui-même, -wal et -shm à côté, base intacte', () => {
-    const archives = path.join(root, 'archives');
-    const tpy = makeTpy(archives, { projectId: 'projet-A', name: 'Grèves nantaises', wal: true, items: [] });
-    growSparse(tpy, READ_FILE_SYNC_MAX_BYTES + 1);
-    expect(listing(archives)).toEqual([path.basename(tpy)]);
-    const header = head(tpy);
+  // J5 : la copie en mémoire ne tient pas pour les plus grosses bases. Une très
+  // grosse base, Tropy fermé, ne se liait plus ni ne se synchronisait. Deux
+  // limites, mesurées :
+  // - `readFileSync` refuse 2^31 octets (`ERR_FS_FILE_TOO_LARGE`) : c'est le
+  //   défaut d'origine ;
+  // - sous Electron, la copie que better-sqlite3 fait de l'image dans SQLite
+  //   fait tomber le processus (SIGTRAP), sans exception, dès 2^31 − 2 Mio
+  //   (revue de J5). Sous Node, où tourne ce test, elle passe : la garde dit la
+  //   copie tentée.
+  // Ces bases se lisent elles-mêmes ; SQLite crée alors `-wal` et `-shm`, que
+  // Tropy retire à sa prochaine ouverture (décision J5). Les tailles sont
+  // écrites en clair : elles bornent le seuil par le haut.
+  it.each([
+    { size: 2 ** 31, limit: 'readFileSync la refuse' },
+    { size: 2 ** 31 - 2 * 2 ** 20, limit: 'sa copie dans SQLite fait tomber Electron' },
+  ])(
+    'un .tpy en WAL de $size octets ($limit), Tropy fermé : se lit lui-même, -wal et -shm à côté, base intacte',
+    ({ size }) => {
+      const archives = path.join(root, 'archives');
+      const tpy = makeTpy(archives, { projectId: 'projet-A', name: 'Grèves nantaises', wal: true, items: [] });
+      growSparse(tpy, size);
+      expect(listing(archives)).toEqual([path.basename(tpy)]);
+      const header = head(tpy);
+      largeReads.forbidden = true;
 
-    expect(projectName(tpy)).toBe('Grèves nantaises');
+      expect(projectName(tpy)).toBe('Grèves nantaises');
 
-    const name = path.basename(tpy);
-    expect(listing(archives)).toEqual([name, `${name}-shm`, `${name}-wal`]);
-    expect(fs.statSync(tpy).size).toBe(READ_FILE_SYNC_MAX_BYTES + 1);
-    expect(head(tpy)).toEqual(header);
-  });
+      const name = path.basename(tpy);
+      expect(listing(archives)).toEqual([name, `${name}-shm`, `${name}-wal`]);
+      expect(fs.statSync(tpy).size).toBe(size);
+      expect(head(tpy)).toEqual(header);
+    },
+  );
 
   it('un -shm resté sans -wal : rien dans un journal, copie en mémoire, aucun -wal créé', () => {
     const archives = path.join(root, 'archives');
@@ -194,15 +232,16 @@ describe.skipIf(!sqliteAvailable)('openTropyDatabase', () => {
   });
 });
 
-// `READ_FILE_SYNC_MAX_BYTES` recopie une constante que Node ne publie pas : le
-// vrai `readFileSync` doit refuser un octet de plus. Si Node relevait sa limite,
-// ce test le dirait. Le côté « à la limite, la lecture passe » n'est pas
-// éprouvé ici : il remplirait 2 Gio de mémoire.
-describe('READ_FILE_SYNC_MAX_BYTES', () => {
-  it('le vrai readFileSync refuse un fichier d’un octet de plus (ERR_FS_FILE_TOO_LARGE)', () => {
+// La limite de `readFileSync` (`kIoMaxLength`) est une constante que Node ne
+// publie pas : le vrai `readFileSync` doit refuser 2^31 octets, la taille du
+// premier cas ci-dessus. Le côté « 2^31 − 1 octets se lisent » n'est pas éprouvé
+// ici : il remplirait 2 Gio de mémoire. La limite d'Electron ne s'éprouve pas
+// non plus : vitest tourne sous Node, où la copie ne fait rien tomber.
+describe('limite de readFileSync', () => {
+  it('le vrai readFileSync refuse un fichier de 2^31 octets (ERR_FS_FILE_TOO_LARGE)', () => {
     const big = path.join(root, 'creux.bin');
     fs.writeFileSync(big, '');
-    growSparse(big, READ_FILE_SYNC_MAX_BYTES + 1);
+    growSparse(big, 2 ** 31);
 
     let error: unknown = null;
     try {
