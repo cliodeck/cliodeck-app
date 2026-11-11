@@ -55,6 +55,8 @@ __pycache__/
 # Les recettes partagées (skills/) sont versionnées ; réglages et permissions locales restent ignorés.
 .claude/*
 !.claude/skills/
+# `.claude/*` ne vaut qu'à la racine : un `.claude/` de sous-dossier reste ignoré en entier.
+*/**/.claude/
 
 # Coverage
 coverage/
