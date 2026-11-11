@@ -9,12 +9,9 @@ import { test, expect, type ElectronApplication, type Page } from '@playwright/t
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { launchApp } from './_helpers/launch';
+import { launchApp, NO_OLLAMA } from './_helpers/launch';
 import { startFakeOllama } from './_helpers/fake-ollama';
 import { textPdf } from './_helpers/text-pdf';
-
-/** Personne n'écoute ici : pas de vrai Ollama dans ces tests. */
-const NO_OLLAMA = 'http://127.0.0.1:9';
 
 type Config = Record<string, Record<string, unknown>>;
 

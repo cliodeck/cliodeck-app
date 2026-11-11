@@ -16,6 +16,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEFAULT_CONFIG } from '../../backend/types/config';
 
 export interface LaunchResult {
   app: ElectronApplication;
@@ -34,8 +35,18 @@ const MAIN_ENTRY = join(REPO_ROOT, 'dist', 'src', 'main', 'index.js');
 /** Langue de l'interface pendant les tests : les libellés attendus en dépendent. */
 export const E2E_LANGUAGE = 'fr';
 
+/**
+ * L'URL d'Ollama des tests : un port où personne n'écoute. Sinon chaque lancement interroge l'Ollama
+ * de l'auteur, à son défaut (`127.0.0.1:11434`). Un port fermé refuse tout de suite : aucun délai de
+ * connexion à attendre. Un test qui lance son faux Ollama (`fake-ollama.ts`) garde l'URL de celui-ci.
+ */
+export const NO_OLLAMA = 'http://127.0.0.1:9';
+
 /** Chargé par `-r` avant le main : les dialogues du démarrage, simulés (voir le module). */
 const STARTUP_DIALOGS_STUB = join(HERE, 'stub-startup-dialogs.cjs');
+
+/** Chargé par `-r` avant le main, à chaque lancement : le port d'Ollama par défaut, fermé (voir le module). */
+const CLOSED_OLLAMA = join(HERE, 'closed-ollama.cjs');
 
 export interface LaunchOptions {
   language?: string;
@@ -94,14 +105,19 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchOutc
   // `options.userDataDir` : un second lancement, qui retrouve les récents du premier.
   const userDataDir = options.userDataDir ?? mkdtempSync(join(tmpdir(), 'cliodeck-e2e-'));
 
-  // Langue fixée avant le premier rendu : sans réglage, l'app suit la langue
-  // du système, et tout test écrit sur un libellé devient dépendant du poste.
-  // On fixe le français, le défaut de l'app. `cliodeck-config.json` est le
-  // fichier electron-store, lu au démarrage dans le userData créé ci-dessus.
+  // Langue fixée avant le premier rendu : dans un userData neuf, l'app démarre
+  // en français (`DEFAULT_CONFIG.language`), mais un test écrit sur un libellé
+  // ne doit pas dépendre de ce défaut. Ollama visé sur un port fermé : `llm`
+  // entier, car electron-store ne complète les défauts qu'au premier niveau,
+  // et un `llm` partiel ferait perdre les autres. `cliodeck-config.json` est
+  // le fichier electron-store, lu au démarrage dans le userData créé ci-dessus.
   if (!options.userDataDir) {
     writeFileSync(
       join(userDataDir, 'cliodeck-config.json'),
-      JSON.stringify({ language: options.language ?? E2E_LANGUAGE }),
+      JSON.stringify({
+        language: options.language ?? E2E_LANGUAGE,
+        llm: { ...DEFAULT_CONFIG.llm, ollamaURL: NO_OLLAMA },
+      }),
     );
   }
 
@@ -135,8 +151,10 @@ export async function startElectron(userDataDir: string, options: LaunchOptions 
   return electron.launch({
     cwd: REPO_ROOT,
     // `--use-mock-keychain` : un test qui enregistre une clé d'API ne touche pas au vrai trousseau.
-    // `-r` avant l'app : le module est chargé avant son main.
+    // `-r` avant l'app : chaque module est chargé avant son main.
     args: [
+      '-r',
+      CLOSED_OLLAMA,
       ...(options.startupDialogs ? ['-r', STARTUP_DIALOGS_STUB] : []),
       '.',
       '--no-sandbox',

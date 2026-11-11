@@ -1,5 +1,5 @@
 /**
- * Le lanceur des tests e2e ne décide rien à la place de l'auteur (J16).
+ * Le lanceur des tests e2e ne décide rien à la place de l'auteur, et ne parle pas à son Ollama (J16).
  *
  * `launchApp` remplace `dialog.showMessageBox` pour que la question de sortie ne bloque pas
  * `app.close()`. Il répondait 1 à **toute** question : le consentement à un envoi distant
@@ -7,13 +7,19 @@
  * et leur bouton 1 accepte. Un test acceptait donc en silence un envoi hors de la machine, ou le
  * lancement d'une commande. Seule la question de sortie reçoit désormais la réponse choisie ;
  * toute autre reçoit `cancelId`.
+ *
+ * Le userData temporaire laissait aussi l'URL d'Ollama à son défaut, `127.0.0.1:11434` : chaque
+ * lancement interrogeait l'Ollama de l'auteur. `launchApp` vise désormais un port fermé, et un module
+ * chargé par `-r` ferme ce port-là aux lancements qui repartent du défaut.
  */
 
 import { test, expect, type ElectronApplication } from '@playwright/test';
 import { readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { answerLeaveDialog, launchApp, leaveDialogs } from './_helpers/launch';
+import { DEFAULT_CONFIG } from '../backend/types/config';
+import { answerLeaveDialog, launchApp, leaveDialogs, NO_OLLAMA } from './_helpers/launch';
 
 const LOCALES = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'locales');
 const menuTexts = (language: string) =>
@@ -111,5 +117,62 @@ test('ajouter un serveur MCP par le vrai canal : la question est refusée, rien 
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('un lancement sans userData fourni vise un port fermé, et garde les autres réglages d’Ollama par défaut', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window: page, userDataDir } = outcome.value;
+
+  try {
+    const llm = await page.evaluate(() => window.electron.config.get('llm'));
+    expect(llm).toMatchObject({ ...DEFAULT_CONFIG.llm, ollamaURL: NO_OLLAMA });
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('le port d’Ollama par défaut est fermé pour l’app sous test, quel que soit son réglage', async () => {
+  // Un témoin sur [::1]:11434 : l'Ollama de l'auteur, s'il tourne, écoute sur 127.0.0.1, et ce test
+  // ne lui envoie rien. Sans le module que `startElectron` charge par `-r`, la demande arriverait ici.
+  let hits = 0;
+  const witness = createServer((_req, res) => {
+    hits += 1;
+    res.end('{}');
+  });
+  const listening = await new Promise<boolean>((done) => {
+    witness.once('error', () => done(false));
+    witness.listen(11434, '::1', () => done(true));
+  });
+  test.skip(!listening, '[::1]:11434 est déjà pris, ou la machine n’a pas d’IPv6.');
+
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    witness.close();
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, userDataDir } = outcome.value;
+
+  try {
+    const result = await app.evaluate(async () => {
+      try {
+        await (await fetch('http://[::1]:11434/api/version')).text();
+        return 'joint';
+      } catch (error) {
+        return (error as { cause?: { code?: string } }).cause?.code ?? String(error);
+      }
+    });
+    expect(result).toBe('ECONNREFUSED');
+    expect(hits).toBe(0);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    await new Promise((done) => witness.close(done));
   }
 });
