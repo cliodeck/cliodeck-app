@@ -94,7 +94,16 @@ export interface ProjectHandlersOptions {
   timeouts?: Partial<ProjectLifecycleTimeouts>;
 }
 
-export function setupProjectHandlers(options: ProjectHandlersOptions = {}) {
+/**
+ * Ce que les handlers rendent à l'app : la fermeture du projet ouvert à la sortie, seule. La séquence
+ * reste ici : rien hors des handlers n'ouvre ni ne ferme un projet, sinon la sortie.
+ */
+export interface ProjectHandlersHandle {
+  /** `ProjectLifecycle.shutdown` : ferme le projet ouvert en `budgetMs` au plus, pour quitter. */
+  shutdownProject(budgetMs: number): Promise<void>;
+}
+
+export function setupProjectHandlers(options: ProjectHandlersOptions = {}): ProjectHandlersHandle {
   const lifecycle: ProjectLifecycle<LoadedProject, ProjectOpenRequest> = createProjectLifecycle<
     LoadedProject,
     ProjectOpenRequest
@@ -329,4 +338,5 @@ export function setupProjectHandlers(options: ProjectHandlersOptions = {}) {
   });
 
   console.log('✅ Project handlers registered');
+  return { shutdownProject: (budgetMs) => lifecycle.shutdown(budgetMs) };
 }

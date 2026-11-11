@@ -14,6 +14,7 @@ interface FakeManager {
   open: boolean;
   closeThrows: boolean;
   close: () => void;
+  closeOrphanSessions: () => number;
   startSession: () => string;
   endSession: () => void;
   getCurrentSessionId: () => string | null;
@@ -36,6 +37,7 @@ vi.mock('../../../../backend/core/history/HistoryManager.js', () => ({
           if (manager.closeThrows) throw new Error('SQLITE_IOERR: UPDATE history_sessions');
           manager.open = false;
         },
+        closeOrphanSessions: () => 0,
         startSession: () => 'session',
         endSession: () => undefined,
         getCurrentSessionId: () => null,

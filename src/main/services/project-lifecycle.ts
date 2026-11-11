@@ -12,6 +12,9 @@
  *   un nouveau handle et ouvrir ses services dans l'ordre ;
  * - fermer : avorter le signal du handle, appeler tous les `abort()`, puis les `close()` en ordre
  *   inverse d'ouverture, chacun pour soi, et enfin le gestionnaire de projet ;
+ * - quitter l'app (`shutdown`, L03-9) : la même fermeture, dans un budget que ses attentes se
+ *   partagent, sans fermer le gestionnaire ; une fermeture déjà en cours (une bascule) reçoit la
+ *   même échéance, et la sortie l'attend ; ensuite, plus rien ne s'ouvre ;
  * - échouer : un service `required` qui échoue referme tout ce qui a été ouvert et rouvre A ; un
  *   `best-effort` laisse un avertissement ; un `background` est lancé sans attente.
  *
@@ -183,6 +186,15 @@ export interface ProjectLifecycle<TLoaded extends ManagerReply = ManagerReply, T
   open(projectFile: string, request: TRequest): Promise<ProjectOpenResult<TLoaded>>;
   /** Ferme le projet courant ; ne lève pas. */
   close(): Promise<void>;
+  /**
+   * Ferme le projet courant pour quitter l'app, en `budgetMs` au plus ; ne lève pas (L03-9). Les
+   * services se ferment comme à `close`, mais chacun n'a que sa part du temps qui reste ; la file
+   * n'est attendue que la moitié du budget ; le gestionnaire reste sur son projet, pour qu'une
+   * sauvegarde tardive du renderer soit acceptée jusqu'à `app.exit`. Une fermeture déjà en cours
+   * (celle du projet quitté par une bascule) passe sous la même échéance, et la sortie l'attend :
+   * ses journaux aussi se ferment avant `app.exit`. Après elle, plus rien ne s'ouvre.
+   */
+  shutdown(budgetMs: number): Promise<void>;
   /** Le handle de l'ouverture en cours, ou null. */
   current(): ProjectHandle | null;
 }
@@ -235,19 +247,42 @@ function checkDelay(name: string, ms: number | undefined): void {
 }
 
 /**
- * Attend `run` au plus `ms`, sans jamais lever. Le délai tombé est journalisé, et un échec qui
- * arriverait ensuite aussi : la séquence, elle, a continué.
+ * Une attente déjà commencée qui peut être raccourcie : quand l'app se met à quitter, `onExit`
+ * appelle `cut`, et l'attente n'a plus que `ms()` au plus, jamais plus que ce qui lui restait.
+ * `onExit` rend de quoi se désinscrire : une attente finie ne reste accrochée à rien.
  */
-async function settleWithin<T>(label: string, ms: number, run: () => T | Promise<T>): Promise<Settled<T>> {
+interface Shortening {
+  readonly onExit: (cut: () => void) => () => void;
+  readonly ms: () => number;
+}
+
+/**
+ * Attend `run` au plus `ms` (moins, si `shortening` le raccourcit en route), sans jamais lever. Le
+ * délai tombé est journalisé, et un échec qui arriverait ensuite aussi : la séquence, elle, a
+ * continué.
+ */
+async function settleWithin<T>(
+  label: string,
+  ms: number,
+  run: () => T | Promise<T>,
+  shortening?: Shortening
+): Promise<Settled<T>> {
   let work: Promise<T>;
   try {
     work = Promise.resolve(run());
   } catch (error: unknown) {
     return { kind: 'failed', error };
   }
+  const startedAt = Date.now();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let unsubscribe: (() => void) | undefined;
   const timedOut = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => resolve('timeout'), ms);
+    unsubscribe = shortening?.onExit(() => {
+      const left = Math.max(0, startedAt + ms - Date.now());
+      clearTimeout(timer);
+      timer = setTimeout(() => resolve('timeout'), Math.min(left, shortening.ms()));
+    });
   });
   try {
     const outcome = await Promise.race([
@@ -258,13 +293,14 @@ async function settleWithin<T>(label: string, ms: number, run: () => T | Promise
       timedOut,
     ]);
     if (outcome !== 'timeout') return outcome;
-    console.warn(`${LOG} ${label} : pas de réponse après ${ms} ms, la séquence continue`);
+    console.warn(`${LOG} ${label} : pas de réponse après ${Date.now() - startedAt} ms, la séquence continue`);
     const late = work.then(
       () => undefined,
       (error: unknown) => console.warn(`${LOG} ${label} : échec après le délai :`, error)
     );
     return { kind: 'timeout', late };
   } finally {
+    unsubscribe?.();
     clearTimeout(timer);
   }
 }
@@ -308,6 +344,15 @@ type EnterOutcome<TLoaded extends ManagerReply> =
   | { kind: 'entered'; loaded: TLoaded; warnings: string[] }
   | { kind: 'refused'; reply: Refusal; managerUnsure: boolean };
 
+/** L'app quitte : l'ouverture s'arrête là, et ce qu'elle a déjà ouvert se ferme avec la sortie. */
+function quitRefusal<TLoaded extends ManagerReply>(): EnterOutcome<TLoaded> {
+  return {
+    kind: 'refused',
+    reply: { success: false, code: 'project_unavailable', error: 'app-quit' },
+    managerUnsure: false,
+  };
+}
+
 /** Un appel qui change le gestionnaire (charger, fermer), resté sans réponse et qui court encore. */
 interface LateCall {
   /** Le dossier qu'il charge ; null pour une fermeture. */
@@ -335,6 +380,17 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
     checkDelay(`closeTimeoutMs de ${service.name}`, service.closeTimeoutMs);
   }
   let state: OpenState<TLoaded, TRequest> | null = null;
+  /**
+   * L'heure (`Date.now()`) où l'app sort, posée par `shutdown`, ou null. Dès qu'elle l'est, plus aucun
+   * projet ne s'ouvre, le gestionnaire ne se ferme plus, et chaque attente d'une fermeture, en cours
+   * ou à venir, n'a que sa part du temps qui reste.
+   */
+  let exitBy: number | null = null;
+  const exiting = (): boolean => exitBy !== null;
+  /** Les attentes de fermeture en cours, que `shutdown` raccourcit quand il pose `exitBy`. */
+  const exitListeners = new Set<() => void>();
+  /** Les fermetures en cours, d'où qu'elles viennent (une bascule, un échec, une remise d'accord). */
+  const closings = new Set<Promise<void>>();
   let epoch = 0;
   let tail: Promise<unknown> = Promise.resolve();
   const lateCalls = new Set<LateCall>();
@@ -422,6 +478,8 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
    * laisser le main sur un projet que le renderer ne croit pas ouvert, et l'appelant l'apprend.
    */
   async function reconcile(): Promise<void> {
+    // L'app quitte : la sortie a fermé les services, et rien ne se recharge plus.
+    if (exiting()) return;
     const managerPath = manager.getCurrentProjectPath();
     const target = state;
     if (target === null) {
@@ -464,35 +522,119 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
     }
   }
 
-  async function closeNow(): Promise<void> {
+  /**
+   * À la sortie, la part d'une attente : le temps qui reste jusqu'à `exitBy`, partagé entre les
+   * `slots` attentes qui restent à venir, celle-ci comprise. Un service bloqué n'y perd que la sienne,
+   * et les derniers fermés, les journaux, ont toujours la leur ; leur fermeture est synchrone, et la
+   * part leur suffit, quelle qu'elle soit.
+   */
+  function exitShare(slots: number): number {
+    return exitBy === null ? MAX_DELAY_MS : Math.max(1, Math.floor((exitBy - Date.now()) / slots));
+  }
+
+  /** Inscrit une attente à raccourcir à la sortie ; déjà en sortie, sa part est prise d'emblée. */
+  function onExit(cut: () => void): () => void {
+    if (exiting()) return () => undefined;
+    exitListeners.add(cut);
+    return () => {
+      exitListeners.delete(cut);
+    };
+  }
+
+  /**
+   * Une attente de fermeture : `ms` hors sortie ; sa part (`exitShare`) si l'app quitte déjà, ou dès
+   * qu'elle se met à quitter, même au milieu de l'attente. Une bascule retenue par un service qui ne
+   * répond pas (35 s de délai) ne fait donc pas attendre les journaux de son projet au-delà de la
+   * sortie.
+   */
+  function settleClosing<T>(label: string, ms: number, slots: number, run: () => T | Promise<T>): Promise<Settled<T>> {
+    return settleWithin(label, Math.min(ms, exitShare(slots)), run, { onExit, ms: () => exitShare(slots) });
+  }
+
+  /** Ferme ce qui est ouvert ; suivie dans `closings` jusqu'à sa fin, pour que la sortie l'attende. */
+  function closeNow(): Promise<void> {
+    const run = closeState();
+    closings.add(run);
+    const forget = (): void => {
+      closings.delete(run);
+    };
+    void run.then(forget, forget);
+    return run;
+  }
+
+  /**
+   * La fermeture elle-même : avorter le handle, tous les `abort()` ensemble, les `close()` en ordre
+   * inverse d'ouverture, puis le gestionnaire, sauf à la sortie.
+   */
+  async function closeState(): Promise<void> {
     const closing = state;
     state = null;
     if (closing) {
       closing.handle.end();
       const reversed = [...closing.opened].reverse();
+      const closers = reversed.filter((service) => service.close);
       // Toutes ensemble : chaque `abort()` ne fait que couper, et aucun n'attend l'autre.
       await Promise.all(
         reversed
           .filter((service) => service.abort)
           .map(async (service) => {
-            const outcome = await settleWithin(`abort de ${service.name}`, timeouts.abortMs, () =>
+            const outcome = await settleClosing(`abort de ${service.name}`, timeouts.abortMs, closers.length + 1, () =>
               service.abort?.()
             );
             if (outcome.kind === 'failed') console.error(`${LOG} abort de ${service.name} :`, outcome.error);
           })
       );
-      for (const service of reversed) {
-        if (!service.close) continue;
-        const outcome = await settleWithin(
+      for (const [index, service] of closers.entries()) {
+        const outcome = await settleClosing(
           `fermeture de ${service.name}`,
           service.closeTimeoutMs ?? timeouts.closeMs,
+          closers.length - index,
           () => service.close?.()
         );
         if (outcome.kind === 'failed') console.error(`${LOG} fermeture de ${service.name} :`, outcome.error);
       }
     }
+    // L'app quitte : le gestionnaire reste sur son projet. Le renderer peut encore enregistrer jusqu'à
+    // `app.exit` (une écriture qui traînait au flush), et ses écritures sont validées contre lui.
+    if (exiting()) return;
     const outcome = await changeManager('fermeture du projet', null, timeouts.closeMs, () => manager.close());
     if (outcome.kind === 'failed') console.error(`${LOG} fermeture du projet :`, outcome.error);
+  }
+
+  /**
+   * La sortie (`ProjectLifecycle.shutdown`). Elle prend sa place dans la file, comme une fermeture,
+   * mais une ouverture qui dure (un index PDF qui se reconstruit, jusqu'à dix minutes) ne la retient
+   * que la moitié du budget : au-delà, elle ferme sans l'attendre ce que cette ouverture a déjà
+   * ouvert, les journaux d'abord ouverts compris. Le handle courant s'avorte tout de suite, pour que
+   * l'ouverture s'arrête dès qu'elle le peut.
+   *
+   * Une fermeture déjà en cours (une bascule A → B retenue par un tour de chat qui ne se draine pas)
+   * a détaché A de `state` : la sortie n'aurait rien à fermer, et les journaux de A attendraient
+   * derrière des délais de bascule. Ses attentes passent donc sous l'échéance de la sortie
+   * (`exitListeners`), et la sortie l'attend, dans son budget.
+   */
+  async function shutdownNow(budgetMs: number): Promise<void> {
+    const deadline = Date.now() + budgetMs;
+    exitBy = exitBy === null ? deadline : Math.min(exitBy, deadline);
+    for (const cut of [...exitListeners]) cut();
+    exitListeners.clear();
+    state?.handle.end();
+    let closing: Promise<void> | null = null;
+    const closeOnce = (): Promise<void> => (closing ??= closeNow());
+    let reachTurn!: () => void;
+    const turn = new Promise<void>((resolve) => {
+      reachTurn = resolve;
+    });
+    void enqueue(() => {
+      reachTurn();
+      return closeOnce();
+    });
+    await settleWithin('sortie, attente de la file', Math.max(1, Math.floor(budgetMs / 2)), () => turn);
+    await closeOnce();
+    const inFlight = [...closings];
+    if (inFlight.length > 0) {
+      await settleWithin('sortie, fermeture en cours', exitShare(1), () => Promise.all(inFlight));
+    }
   }
 
   /**
@@ -501,6 +643,7 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
    * court encore ; il peut encore basculer.
    */
   async function enter(projectFile: string, key: string, request: TRequest): Promise<EnterOutcome<TLoaded>> {
+    if (exiting()) return quitRefusal();
     const dir = path.dirname(projectFile);
     const load = await changeManager(`chargement de ${projectFile}`, { dir, key }, timeouts.managerMs, () =>
       manager.loadProject(projectFile)
@@ -510,6 +653,7 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
       return { kind: 'refused', reply, managerUnsure: load.kind === 'timeout' || load.kind === 'busy' };
     }
     const loaded = load.value;
+    if (exiting()) return quitRefusal();
 
     // Le dossier demandé, celui que range `ProjectManager.loadProject` : pas le chemin courant du
     // gestionnaire, qu'un appel en retard peut avoir changé entre-temps.
@@ -521,6 +665,8 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
 
     for (const service of services) {
       if (service.mode === 'background') continue;
+      // La sortie a fermé, sans l'attendre, ce que cette ouverture avait ouvert : rien de plus.
+      if (exiting()) return quitRefusal();
       // Avant l'attente : un service qui échoue a pu s'ouvrir à moitié, et se ferme avec les autres.
       opening.opened.push(service);
       const ms = service.openTimeoutMs ?? timeouts.openMs;
@@ -540,6 +686,7 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
     }
 
     // Après les autres : une ouverture refusée ne laisse aucune tâche de fond derrière elle.
+    if (exiting()) return quitRefusal();
     for (const service of services) {
       if (service.mode !== 'background') continue;
       opening.opened.push(service);
@@ -622,7 +769,8 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
 
   return {
     open: (projectFile, request) => enqueue(() => openNow(projectFile, request)),
-    close: () => enqueue(closeNow),
+    close: () => enqueue(() => closeNow()),
+    shutdown: shutdownNow,
     current: () => state?.handle ?? null,
   };
 }
