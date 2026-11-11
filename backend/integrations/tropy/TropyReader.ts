@@ -110,8 +110,11 @@ export interface PrimarySourcePhoto {
  * lèvent au lieu de rendre du vide : `listItems` rendait une liste vide, que
  * la synchro prenait pour un projet sans item ; une lecture par item ratée
  * donnait un item « sans photo » ou « sans note », réenregistré tel quel.
- * `method` dit quelle lecture, `subjectId` sur quel sujet (item, photo,
- * sélection), `cause` l'erreur de SQLite.
+ * La lecture de l'identité du projet lié (`tropy-project-identity.ts`),
+ * première de la synchro, et l'ouverture du .tpy par la synchro la lèvent
+ * aussi : fichier absent, sans droit de lecture, tronqué, qui n'est pas une
+ * base. `method` dit quelle lecture, `subjectId` sur quel sujet (item, photo,
+ * sélection), `cause` l'erreur d'origine (SQLite, système de fichiers).
  */
 export class TropyReadError extends Error {
   constructor(

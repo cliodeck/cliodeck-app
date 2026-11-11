@@ -24,6 +24,7 @@ import * as path from 'path';
 import { sqliteAvailable } from '../../../__tests__/helpers/native-guards';
 import { makeTpy, openTpyForWrite, tpyDatabasePath, type TpyItemSpec } from './helpers/make-tpy';
 import { TropyReader } from '../TropyReader';
+import { assessTropyBinding, readTropyProjectIdentity } from '../tropy-project-identity';
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 const handlers = vi.hoisted(() => new Map<string, Handler>());
@@ -113,8 +114,13 @@ function items(titleSuffix = '', modified?: string): TpyItemSpec[] {
   ];
 }
 
-function writeTpy(titleSuffix = '', modified?: string): string {
-  return makeTpy(tropyDir, { projectId: 'tropy-greves', name: 'Grèves nantaises', items: items(titleSuffix, modified) });
+function writeTpy(titleSuffix = '', modified?: string, wal = false): string {
+  return makeTpy(tropyDir, {
+    projectId: 'tropy-greves',
+    name: 'Grèves nantaises',
+    items: items(titleSuffix, modified),
+    wal,
+  });
 }
 
 /** Modifie le .tpy comme le ferait un fichier abîmé ou un schéma inattendu. */
@@ -420,6 +426,107 @@ describe.skipIf(!sqliteAvailable)('TropySync : une lecture ratée fait échouer 
     expect(repaired.updatedItems).toBe(3);
     expect(photosOf(20)).toEqual([21]);
     expect(brainState().tropy_sources.some((row) => row.includes('Lettre du commissaire (révisé)'))).toBe(true);
+  });
+});
+
+// MARK: - Avant TropyReader
+
+/**
+ * La garde d'identité (`assessTropyBinding`) lit le .tpy avant `TropyReader` :
+ * un fichier tronqué, qui n'est pas une base, sans droit de lecture, ou dont
+ * la table `project` est illisible, échoue là. L'erreur n'était pas typée, la
+ * synchro échouait sans avis, et « Synchroniser » ne montrait rien.
+ */
+describe.skipIf(!sqliteAvailable)('TropySync : un .tpy illisible dès son ouverture se dit aussi (J6)', () => {
+  /** Une synchro réussie, puis le .tpy abîmé par `damage` : la passe suivante, et brain.db avant elle. */
+  async function syncAfterDamage(damage: (dbPath: string) => void, wal = false) {
+    const tpy = writeTpy('', undefined, wal);
+    await tropyService.init(projectDir);
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+    expect((await tropyService.sync(noOcr)).success).toBe(true);
+    const before = brainState();
+    expect(before.tropy_sources).toHaveLength(3);
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    const dbPath = tpyDatabasePath(tpy);
+    damage(dbPath);
+    const result = await tropyService.sync(noOcr);
+    return { result, before, dbPath };
+  }
+
+  const halve = (dbPath: string) => fs.truncateSync(dbPath, Math.floor(fs.statSync(dbPath).size / 2));
+
+  it.each([
+    ['tronqué de moitié', halve, false],
+    ['tronqué de moitié, en journal WAL comme ceux de Tropy', halve, true],
+    ['réduit à sa première page', (dbPath: string) => fs.truncateSync(dbPath, 4096), false],
+    ['qui n’est pas une base SQLite', (dbPath: string) => fs.writeFileSync(dbPath, 'pas une base '.repeat(400)), false],
+    ['dont la table project est illisible', (dbPath: string) => alterTpy(dbPath, 'ALTER TABLE project RENAME TO project_abime'), false],
+  ] as const)('un .tpy %s : échec, avis « projet Tropy illisible », brain.db inchangé', async (_label, damage, wal) => {
+    const { result, before } = await syncAfterDamage(damage, wal);
+
+    expect(result.success).toBe(false);
+    expect(result.issues).toEqual([{ code: 'tropy-unreadable' }]);
+    expect(result.errors).toEqual([expect.stringContaining('TropyReadError')]);
+    expect(brainState()).toEqual(before);
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'un .tpy sans droit de lecture (chmod 000) : échec, avis, brain.db inchangé ; les droits remis, tout revient',
+    async () => {
+      const { result, before, dbPath } = await syncAfterDamage((file) => fs.chmodSync(file, 0o000));
+      try {
+        expect(result.success).toBe(false);
+        expect(result.issues).toEqual([{ code: 'tropy-unreadable' }]);
+        expect(result.errors).toEqual([expect.stringContaining('EACCES')]);
+        expect(brainState()).toEqual(before);
+      } finally {
+        fs.chmodSync(dbPath, 0o644);
+      }
+
+      const repaired = await tropyService.sync(noOcr);
+      expect(repaired.success).toBe(true);
+      expect(repaired.issues).toEqual([]);
+    }
+  );
+
+  it('un .tpy devenu illisible entre la garde et l’ouverture par la synchro : échec, avis, brain.db inchangé', async () => {
+    const { result, before } = await syncAfterDamage(() => {
+      const denied = Object.assign(new Error('EACCES: permission denied, open'), { code: 'EACCES' });
+      vi.spyOn(TropyReader.prototype, 'openProject').mockImplementationOnce(() => {
+        throw denied;
+      });
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.issues).toEqual([{ code: 'tropy-unreadable' }]);
+    expect(result.errors).toEqual([expect.stringContaining('openProject')]);
+    expect(brainState()).toEqual(before);
+  });
+
+  it('l’identité lue dans un .tpy illisible lève TropyReadError ; une panne de brain.db reste ce qu’elle est', () => {
+    const tpy = writeTpy();
+    const dbPath = tpyDatabasePath(tpy);
+    fs.writeFileSync(dbPath, 'pas une base '.repeat(400));
+    expect(thrown(() => readTropyProjectIdentity(tpy))).toMatchObject({
+      name: 'TropyReadError',
+      method: 'readTropyProjectIdentity',
+      message: expect.stringContaining('file is not a database'),
+    });
+
+    // La garde lit aussi brain.db : son erreur n'est pas un .tpy illisible.
+    const healthy = writeTpy();
+    const brainDown = new Error('brain.db: database is locked');
+    const store = {
+      getTropyProject: () => {
+        throw brainDown;
+      },
+      getStatistics: () => {
+        throw new Error('non appelé');
+      },
+      getPhotoFingerprint: () => [],
+    } satisfies Parameters<typeof assessTropyBinding>[1];
+    expect(thrown(() => assessTropyBinding(healthy, store))).toBe(brainDown);
   });
 });
 

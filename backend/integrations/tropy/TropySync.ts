@@ -114,8 +114,9 @@ export type TropySyncIssue =
     }
   | {
       /**
-       * Le .tpy n'a pas pu être lu (J6) : base verrouillée ou abîmée, table
-       * ou colonne qu'aucune version connue de Tropy n'écrit. La passe
+       * Le .tpy n'a pas pu être lu (J6) : fichier absent ou sans droit de
+       * lecture, base verrouillée, tronquée ou abîmée, table ou colonne
+       * qu'aucune version connue de Tropy n'écrit. La passe
        * s'arrête avant toute écriture : rien n'est modifié. Elle se disait
        * réussie, avec 0 item, et un item mal lu perdait ses photos en base.
        * Un état qui peut durer (fichier abîmé) : dit dans le panneau, y
@@ -268,7 +269,14 @@ export class TropySync {
         return result;
       }
 
-      this.reader.openProject(tpyPath);
+      // La garde a déjà lu le .tpy ; une erreur de lecture y lève aussi
+      // `TropyReadError`. L'ouverture en est une autre : un fichier devenu
+      // illisible entre les deux se dit de même (J6).
+      try {
+        this.reader.openProject(tpyPath);
+      } catch (error) {
+        throw new TropyReadError('openProject', error);
+      }
       result.projectName = this.reader.getProjectName();
       // Toute la base du .tpy se lit ici, avant la première écriture : une
       // lecture qui échoue au milieu lève `TropyReadError`, et la passe
