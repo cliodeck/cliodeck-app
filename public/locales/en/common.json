@@ -1250,33 +1250,6 @@
     "placeholder": "Start writing...",
     "noCitationFound": "No citation found"
   },
-  "pdfIndex": {
-    "unknownAuthor": "Unknown author",
-    "bibtexKey": "BibTeX key",
-    "pages": "Pages",
-    "chunks": "Chunks",
-    "indexedAt": "Indexed on",
-    "delete": "Delete",
-    "title": "Indexed PDFs",
-    "statistics": "Statistics",
-    "documents": "Documents",
-    "addPDF": "Add PDF",
-    "dropzone": "Drag and drop PDFs here or click + to add",
-    "noDocuments": "No documents",
-    "cleanOrphanedChunks": "Clean orphaned chunks",
-    "cleaning": "Cleaning...",
-    "cleanSuccess": "Orphaned chunks cleaned successfully!",
-    "cleanError": "Error during cleanup",
-    "noProjectOpen": "No project open. Please open or create a project first.",
-    "indexingError": "Indexing error",
-    "deleteConfirm": "Delete this document and all its chunks?",
-    "cleanOrphanedConfirm": "Clean orphaned chunks (without parent document)?\n\nThis action will remove chunks whose document has been deleted.",
-    "searchAndFilters": "Search and filters",
-    "searchPlaceholder": "Search author, title, year...",
-    "filtered": "filtered",
-    "noResults": "No results",
-    "tryDifferentSearch": "Try a different search term"
-  },
   "dialog": {
     "ok": "OK",
     "cancel": "Cancel",
@@ -2507,13 +2480,6 @@
     "transcriptionProgress": "Transcription progress",
     "topArchives": "Best-represented archives",
     "topCollections": "Best-represented collections"
-  },
-  "pdfRename": {
-    "title": "Rename the documents before indexing",
-    "extracting": "Extracting metadata from the PDFs…",
-    "save": "Save",
-    "editName": "Edit the name",
-    "cancel": "Cancel"
   },
   "errorFallback": {
     "title": "Something went wrong",

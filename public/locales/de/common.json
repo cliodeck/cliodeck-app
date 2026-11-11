@@ -1250,33 +1250,6 @@
     "placeholder": "Beginnen Sie zu schreiben...",
     "noCitationFound": "Kein Zitat gefunden"
   },
-  "pdfIndex": {
-    "unknownAuthor": "Unbekannter Autor",
-    "bibtexKey": "BibTeX-Schlüssel",
-    "pages": "Seiten",
-    "chunks": "Chunks",
-    "indexedAt": "Indexiert am",
-    "delete": "Löschen",
-    "title": "Indexierte PDFs",
-    "statistics": "Statistiken",
-    "documents": "Dokumente",
-    "addPDF": "PDF hinzufügen",
-    "dropzone": "PDFs hierher ziehen oder + klicken zum Hinzufügen",
-    "noDocuments": "Keine Dokumente",
-    "cleanOrphanedChunks": "Verwaiste Chunks bereinigen",
-    "cleaning": "Bereinigung läuft...",
-    "cleanSuccess": "Verwaiste Chunks erfolgreich bereinigt!",
-    "cleanError": "Fehler bei der Bereinigung",
-    "noProjectOpen": "Kein Projekt geöffnet. Bitte öffnen oder erstellen Sie zuerst ein Projekt.",
-    "indexingError": "Indexierungsfehler",
-    "deleteConfirm": "Dieses Dokument und alle seine Chunks löschen?",
-    "cleanOrphanedConfirm": "Verwaiste Chunks (ohne übergeordnetes Dokument) bereinigen?\n\nDiese Aktion entfernt Chunks, deren Dokument gelöscht wurde.",
-    "searchAndFilters": "Suche und Filter",
-    "searchPlaceholder": "Autor, Titel, Jahr suchen...",
-    "filtered": "gefiltert",
-    "noResults": "Keine Ergebnisse",
-    "tryDifferentSearch": "Versuchen Sie einen anderen Suchbegriff"
-  },
   "dialog": {
     "ok": "OK",
     "cancel": "Abbrechen",
@@ -2507,13 +2480,6 @@
     "transcriptionProgress": "Fortschritt der Transkriptionen",
     "topArchives": "Am stärksten vertretene Bestände",
     "topCollections": "Am stärksten vertretene Sammlungen"
-  },
-  "pdfRename": {
-    "title": "Dokumente vor der Indexierung umbenennen",
-    "extracting": "Metadaten werden aus den PDFs gelesen …",
-    "save": "Speichern",
-    "editName": "Namen bearbeiten",
-    "cancel": "Abbrechen"
   },
   "errorFallback": {
     "title": "Etwas ist schiefgelaufen",
