@@ -491,6 +491,36 @@ describe.skipIf(!sqliteAvailable)('TropySync : un .tpy illisible dès son ouvert
     }
   );
 
+  // Le remède que l'avis donne pour un projet déplacé : « Synchroniser »
+  // relit l'ancien chemin et l'avis revient ; « Ouvrir un projet Tropy », au
+  // nouvel emplacement, relie le même projet (même project_id) et l'avis s'en va.
+  it('un .tpy lié déplacé : l’avis revient à chaque « Synchroniser » ; rouvert à son nouvel emplacement, il est relié, sources gardées', async () => {
+    let moved = '';
+    const { result, before } = await syncAfterDamage((dbPath) => {
+      const target = path.join(root, 'Disque externe');
+      fs.mkdirSync(target);
+      moved = path.join(target, path.basename(dbPath));
+      fs.renameSync(dbPath, moved);
+    });
+    expect(result.issues).toEqual([{ code: 'tropy-unreadable' }]);
+
+    const again = await tropyService.sync(noOcr);
+    expect(again.success).toBe(false);
+    expect(again.issues).toEqual([{ code: 'tropy-unreadable' }]);
+    expect(brainState()).toEqual(before);
+
+    expect((await tropyService.openProject(moved)).success).toBe(true);
+    const relinked = await tropyService.sync(noOcr);
+    expect(relinked.success).toBe(true);
+    expect(relinked.issues).toEqual([]);
+
+    const after = brainState();
+    expect(after.tropy_sources).toEqual(before.tropy_sources);
+    expect(after.tropy_photos).toEqual(before.tropy_photos);
+    expect(after.tropy_projects).toHaveLength(1);
+    expect(JSON.parse(after.tropy_projects[0])).toMatchObject({ tpy_path: moved, project_uuid: 'tropy-greves' });
+  });
+
   it('un .tpy devenu illisible entre la garde et l’ouverture par la synchro : échec, avis, brain.db inchangé', async () => {
     const { result, before } = await syncAfterDamage(() => {
       const denied = Object.assign(new Error('EACCES: permission denied, open'), { code: 'EACCES' });

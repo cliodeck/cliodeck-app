@@ -185,6 +185,17 @@ describe('PrimarySourcesPanel — un projet Tropy illisible', () => {
       expect(strings.issues.tropyUnreadable as string, lng).toContain('Tropy');
     }
   });
+
+  // Un .tpy lié qui a disparu donne aussi cet avis. Déplacé, le projet
+  // s'ouvre bien dans Tropy, mais « Synchroniser » relit l'ancien chemin et
+  // l'avis revient. Le remède est « Ouvrir un projet Tropy » : la garde
+  // d'identité reconnaît le projet à son project_id et pose le nouveau chemin.
+  it('les trois langues disent de rouvrir un projet déplacé par « Ouvrir un projet Tropy », libellé exact', () => {
+    for (const lng of ['fr', 'en', 'de']) {
+      const strings = locale(lng).primarySources;
+      expect(strings.issues.tropyUnreadable as string, lng).toContain(strings.openProject);
+    }
+  });
 });
 
 // G3 : une page passée d'un item OCRisé à l'autre. Les deux sources attendent
