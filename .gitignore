@@ -52,7 +52,9 @@ __pycache__/
 *.traineddata
 
 # Claude Code local settings
-.claude/
+# Les recettes partagées (skills/) sont versionnées ; réglages et permissions locales restent ignorés.
+.claude/*
+!.claude/skills/
 
 # Coverage
 coverage/
