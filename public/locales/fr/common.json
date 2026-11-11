@@ -1256,26 +1256,7 @@
     "pages": "Pages",
     "chunks": "Chunks",
     "indexedAt": "Indexé le",
-    "delete": "Supprimer",
-    "title": "PDFs indexés",
-    "statistics": "Statistiques",
-    "documents": "Documents",
-    "addPDF": "Ajouter PDF",
-    "dropzone": "Glissez-déposez des PDFs ici ou cliquez sur + pour en ajouter",
-    "noDocuments": "Aucun document",
-    "cleanOrphanedChunks": "Nettoyer les chunks orphelins",
-    "cleaning": "Nettoyage en cours...",
-    "cleanSuccess": "Chunks orphelins nettoyés avec succès !",
-    "cleanError": "Erreur lors du nettoyage",
-    "noProjectOpen": "Aucun projet ouvert. Veuillez d'abord ouvrir ou créer un projet.",
-    "indexingError": "Erreur lors de l'indexation",
-    "deleteConfirm": "Supprimer ce document et tous ses chunks ?",
-    "cleanOrphanedConfirm": "Nettoyer les chunks orphelins (sans document parent) ?\n\nCette action supprimera les chunks dont le document a été supprimé.",
-    "searchAndFilters": "Recherche et filtres",
-    "searchPlaceholder": "Rechercher auteur, titre, année...",
-    "filtered": "filtré",
-    "noResults": "Aucun résultat",
-    "tryDifferentSearch": "Essayez un autre terme de recherche"
+    "delete": "Supprimer"
   },
   "dialog": {
     "ok": "OK",
@@ -2507,13 +2488,6 @@
     "transcriptionProgress": "Avancement des transcriptions",
     "topArchives": "Fonds les plus représentés",
     "topCollections": "Collections les plus représentées"
-  },
-  "pdfRename": {
-    "title": "Renommer les documents avant indexation",
-    "extracting": "Extraction des métadonnées des PDF…",
-    "save": "Enregistrer",
-    "editName": "Modifier le nom",
-    "cancel": "Annuler"
   },
   "errorFallback": {
     "title": "Quelque chose s'est mal passé",
