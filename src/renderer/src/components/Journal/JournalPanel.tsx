@@ -253,7 +253,7 @@ export const JournalPanel: React.FC = () => {
                   </div>
                   <div className="session-info">
                     <span className="session-duration">
-                      {session.totalDurationMs
+                      {session.totalDurationMs != null
                         ? `${Math.round(session.totalDurationMs / 1000 / 60)} min`
                         : t('journal.active')}
                     </span>

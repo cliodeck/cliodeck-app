@@ -50,6 +50,14 @@ class HistoryService {
       timestamp: new Date().toISOString(),
     };
 
+    // Avant la nouvelle : les sessions qu'une sortie sans fermeture, un plantage ou un kill ont
+    // laissées ouvertes se ferment à leur dernier événement. Une réparation qui échoue n'empêche
+    // pas d'ouvrir le projet : elle se refera à la prochaine ouverture.
+    try {
+      manager.closeOrphanSessions();
+    } catch (error: unknown) {
+      console.error('❌ Sessions restées ouvertes non réparées :', error);
+    }
     manager.startSession(metadata);
     console.log('✅ HistoryService initialized and session started');
   }

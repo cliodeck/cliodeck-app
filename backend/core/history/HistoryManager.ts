@@ -122,6 +122,23 @@ export interface HistoryStatistics {
   averageSessionDuration: number;
 }
 
+/**
+ * Les métadonnées d'une session réparée : les siennes, plus `endedBy: 'repair'`. Illisibles, elles
+ * restent telles quelles, et la fin estimée se pose quand même.
+ */
+function markRepaired(metadata: string | null): string | null {
+  if (metadata === null) return JSON.stringify({ endedBy: 'repair' });
+  try {
+    const parsed: unknown = JSON.parse(metadata);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return JSON.stringify({ ...parsed, endedBy: 'repair' });
+    }
+  } catch {
+    // Illisibles : gardées telles quelles.
+  }
+  return metadata;
+}
+
 // ============================================================================
 // HistoryManager Class
 // ============================================================================
@@ -536,6 +553,48 @@ export class HistoryManager {
 
   getCurrentSessionId(): string | null {
     return this.currentSessionId;
+  }
+
+  /**
+   * Ferme les sessions restées ouvertes (L03-9 ; S11-1-6) : une sortie de l'app qui ne fermait pas
+   * le projet, un plantage, un kill. Chacune finit à son dernier événement, ou à son début si elle
+   * n'en a aucun, et sa durée suit ; ses métadonnées portent `endedBy: 'repair'`, pour qu'un rapport
+   * distingue une durée estimée d'une durée mesurée. La session courante n'est pas touchée, ni aucun
+   * événement. Une transaction ; idempotente. Rend le nombre de sessions réparées.
+   */
+  closeOrphanSessions(): number {
+    const select = this.db.prepare(
+      `SELECT s.id, s.started_at, s.metadata,
+              (SELECT MAX(e.timestamp) FROM history_events e WHERE e.session_id = s.id) AS last_event_at
+       FROM history_sessions s
+       WHERE s.ended_at IS NULL AND s.id IS NOT ?`
+    );
+    const update = this.db.prepare(
+      'UPDATE history_sessions SET ended_at = ?, total_duration_ms = ?, metadata = ? WHERE id = ?'
+    );
+    const repair = this.db.transaction((currentId: string | null): number => {
+      const orphans = select.all(currentId) as Array<{
+        id: string;
+        started_at: string;
+        metadata: string | null;
+        last_event_at: string | null;
+      }>;
+      for (const orphan of orphans) {
+        const endedAt =
+          orphan.last_event_at !== null && orphan.last_event_at > orphan.started_at
+            ? orphan.last_event_at
+            : orphan.started_at;
+        const durationMs = Math.max(0, Date.parse(endedAt) - Date.parse(orphan.started_at)) || 0;
+        update.run(endedAt, durationMs, markRepaired(orphan.metadata), orphan.id);
+      }
+      return orphans.length;
+    });
+    const repaired = repair(this.currentSessionId);
+
+    if (repaired > 0) {
+      console.info(`📝 Journal de recherche : ${repaired} session(s) restée(s) ouverte(s), close(s) à leur dernier événement`);
+    }
+    return repaired;
   }
 
   // ==========================================================================
@@ -1131,7 +1190,7 @@ export class HistoryManager {
     md += `**Session ID:** ${session.id}\n`;
     md += `**Started:** ${session.startedAt.toLocaleString()}\n`;
     md += `**Ended:** ${session.endedAt ? session.endedAt.toLocaleString() : 'Active'}\n`;
-    md += `**Duration:** ${session.totalDurationMs ? Math.round(session.totalDurationMs / 1000 / 60) + ' minutes' : 'N/A'}\n`;
+    md += `**Duration:** ${session.totalDurationMs != null ? Math.round(session.totalDurationMs / 1000 / 60) + ' minutes' : 'N/A'}\n`;
     md += `**Total Events:** ${session.eventCount}\n\n`;
     md += `---\n\n`;
 
@@ -1226,7 +1285,7 @@ export class HistoryManager {
     latex += `  \\item Session ID: \\texttt{${session.id}}\n`;
     latex += `  \\item Started: ${session.startedAt.toLocaleString()}\n`;
     latex += `  \\item Ended: ${session.endedAt ? session.endedAt.toLocaleString() : 'Active'}\n`;
-    latex += `  \\item Duration: ${session.totalDurationMs ? Math.round(session.totalDurationMs / 1000 / 60) + ' minutes' : 'N/A'}\n`;
+    latex += `  \\item Duration: ${session.totalDurationMs != null ? Math.round(session.totalDurationMs / 1000 / 60) + ' minutes' : 'N/A'}\n`;
     latex += `  \\item Total Events: ${session.eventCount}\n`;
     latex += `\\end{itemize}\n\n`;
 
