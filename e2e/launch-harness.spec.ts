@@ -10,18 +10,22 @@
  *
  * Le userData temporaire laissait aussi l'URL d'Ollama à son défaut, `127.0.0.1:11434` : chaque
  * lancement interrogeait l'Ollama de l'auteur. `launchApp` vise désormais un port fermé, et un module
- * chargé par `-r` ferme ce port-là aux lancements qui repartent du défaut.
+ * chargé par `-r` ferme le port 11434, quel que soit l'hôte, aux lancements qui repartent du défaut.
  */
 
 import { test, expect, type ElectronApplication } from '@playwright/test';
+import { execFile } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { DEFAULT_CONFIG } from '../backend/types/config';
 import { answerLeaveDialog, launchApp, leaveDialogs, NO_OLLAMA } from './_helpers/launch';
 
-const LOCALES = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'locales');
+const HERE = dirname(fileURLToPath(import.meta.url));
+const LOCALES = resolve(HERE, '..', 'public', 'locales');
 const menuTexts = (language: string) =>
   JSON.parse(readFileSync(join(LOCALES, language, 'menu.json'), 'utf8')) as Record<string, string>;
 
@@ -137,7 +141,7 @@ test('un lancement sans userData fourni vise un port fermé, et garde les autres
   }
 });
 
-test('le port d’Ollama par défaut est fermé pour l’app sous test, quel que soit son réglage', async () => {
+test('le port d’Ollama, 11434, est fermé à l’app sous test, même à une adresse que le lanceur n’a pas écrite', async () => {
   // Un témoin sur [::1]:11434 : l'Ollama de l'auteur, s'il tourne, écoute sur 127.0.0.1, et ce test
   // ne lui envoie rien. Sans le module que `startElectron` charge par `-r`, la demande arriverait ici.
   let hits = 0;
@@ -175,4 +179,31 @@ test('le port d’Ollama par défaut est fermé pour l’app sous test, quel que
     rmSync(userDataDir, { recursive: true, force: true });
     await new Promise((done) => witness.close(done));
   }
+});
+
+test('le port fermé l’est quel que soit l’hôte qui mène à la machine, et les autres ports restent ouverts', async () => {
+  // `closed-ollama.cjs` décide sur le port seul. La sonde l'éprouve sur un port libre plutôt que sur
+  // 11434 : elle n'envoie rien à l'Ollama de l'auteur, même quand le module laisse passer.
+  const electronBinary = createRequire(import.meta.url)('electron') as string;
+  const { stdout } = await promisify(execFile)(electronBinary, [join(HERE, '_helpers', 'closed-ollama-probe.cjs')], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    timeout: 30_000,
+  });
+  const probe = JSON.parse(stdout) as {
+    refused: Record<string, string>;
+    reached: Record<string, string>;
+    closedConnections: number;
+    openConnections: number;
+  };
+
+  // Chaque écriture mène bien à un témoin qui n'écoute que sur 127.0.0.1, comme l'Ollama de l'auteur.
+  const hosts = Object.keys(probe.reached);
+  expect(hosts).toEqual(['127.0.0.1', 'localhost', 'localhost.', '0.0.0.0', '::ffff:127.0.0.1']);
+  expect(probe.reached).toEqual(Object.fromEntries(hosts.map((host) => [host, 'joint'])));
+  expect(probe.openConnections).toBe(hosts.length);
+
+  // Sur le port fermé, chacune est refusée, par `fetch`, `http.get` ou `Socket.connect`.
+  expect(Object.keys(probe.refused)).toHaveLength(hosts.length * 3 + 1);
+  expect(probe.refused).toEqual(Object.fromEntries(Object.keys(probe.refused).map((key) => [key, 'ECONNREFUSED'])));
+  expect(probe.closedConnections).toBe(0);
 });

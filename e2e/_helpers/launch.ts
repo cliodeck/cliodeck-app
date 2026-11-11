@@ -45,7 +45,7 @@ export const NO_OLLAMA = 'http://127.0.0.1:9';
 /** Chargé par `-r` avant le main : les dialogues du démarrage, simulés (voir le module). */
 const STARTUP_DIALOGS_STUB = join(HERE, 'stub-startup-dialogs.cjs');
 
-/** Chargé par `-r` avant le main, à chaque lancement : le port d'Ollama par défaut, fermé (voir le module). */
+/** Chargé par `-r` avant le main, à chaque lancement : le port d'Ollama, 11434, fermé quel que soit l'hôte (voir le module). */
 const CLOSED_OLLAMA = join(HERE, 'closed-ollama.cjs');
 
 export interface LaunchOptions {
