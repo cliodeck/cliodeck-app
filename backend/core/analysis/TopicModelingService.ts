@@ -67,6 +67,9 @@ interface AnalyzeResponse {
   };
 }
 
+/** Ce que `stop()` laisse au service pour sortir de lui-même, avant SIGKILL. */
+const STOP_GRACE_MS = 5_000;
+
 // MARK: - TopicModelingService
 
 export class TopicModelingService {
@@ -397,38 +400,46 @@ export class TopicModelingService {
   }
 
   /**
-   * Arrête le service Python
+   * Arrête le service Python, démarré ou en cours de démarrage (S13-1-15).
+   *
+   * SIGTERM, puis SIGKILL au bout de 5 s s'il n'est pas sorti : BERTopic calcule dans un handler
+   * qui tient la boucle d'uvicorn, et SIGTERM n'y est traité qu'à la fin du calcul. `killed` ne
+   * dit rien de la sortie (il passe à vrai dès le premier signal envoyé) : seul l'événement `exit`
+   * la dit. La promesse se résout à la sortie, ou au SIGKILL : jamais d'attente sans fin.
    */
   async stop(): Promise<void> {
-    if (!this.isRunning || !this.pythonProcess) {
+    const child = this.pythonProcess;
+    if (!child) {
       console.log('⚠️ Topic modeling service not running');
+      return;
+    }
+
+    const forget = (): void => {
+      if (this.pythonProcess === child) this.pythonProcess = undefined;
+      this.isRunning = false;
+    };
+    // Déjà sorti : `exit` a été émis, ou le sera sans nous attendre.
+    if (child.exitCode !== null || child.signalCode !== null) {
+      forget();
       return;
     }
 
     console.log('🛑 Stopping topic modeling service...');
 
     return new Promise((resolve) => {
-      if (this.pythonProcess) {
-        this.pythonProcess.on('exit', () => {
-          this.isRunning = false;
-          this.pythonProcess = undefined;
-          console.log('✅ Topic modeling service stopped');
-          resolve();
-        });
-
-        // Tenter SIGTERM d'abord
-        this.pythonProcess.kill('SIGTERM');
-
-        // Si toujours actif après 5s, forcer SIGKILL
-        setTimeout(() => {
-          if (this.pythonProcess && !this.pythonProcess.killed) {
-            console.log('⚠️ Forcing kill of Python service...');
-            this.pythonProcess.kill('SIGKILL');
-          }
-        }, 5000);
-      } else {
+      const killTimer = setTimeout(() => {
+        console.log('⚠️ Forcing kill of Python service...');
+        child.kill('SIGKILL');
+        forget();
         resolve();
-      }
+      }, STOP_GRACE_MS);
+      child.once('exit', () => {
+        clearTimeout(killTimer);
+        forget();
+        console.log('✅ Topic modeling service stopped');
+        resolve();
+      });
+      child.kill('SIGTERM');
     });
   }
 
