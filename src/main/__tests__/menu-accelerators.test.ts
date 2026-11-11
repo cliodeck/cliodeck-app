@@ -34,8 +34,12 @@ function itemsOn(platform: NodeJS.Platform): MenuItemConstructorOptions[] {
   Object.defineProperty(process, 'platform', { value: platform });
   loadMenuTranslations();
   setLanguage('fr');
-  const fakeWindow = { webContents: { send: vi.fn() } } as unknown as BrowserWindow;
-  const template = createApplicationMenu(fakeWindow) as unknown as MenuItemConstructorOptions[];
+  const fakeWindow = { webContents: { send: vi.fn() }, isDestroyed: () => false } as unknown as BrowserWindow;
+  const template = createApplicationMenu({
+    currentWindow: () => fakeWindow,
+    createWindow: () => fakeWindow,
+    isLeaving: () => false,
+  }) as unknown as MenuItemConstructorOptions[];
   const flat: MenuItemConstructorOptions[] = [];
   const walk = (items: MenuItemConstructorOptions[]): void => {
     for (const item of items) {

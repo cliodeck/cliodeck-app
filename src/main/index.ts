@@ -32,7 +32,7 @@ import { attachNavigationGuard } from './navigation-guard.js';
 import { setupIPCHandlers } from './ipc/index.js';
 import { configManager } from './services/config-manager.js';
 import { pdfService } from './services/pdf-service.js';
-import { setupApplicationMenu } from './menu.js';
+import { setupApplicationMenu, type MenuDeps } from './menu.js';
 import { loadMenuTranslations, setLanguage, t } from './i18n.js';
 import { guardWindowClose, mayLeaveRenderer } from './renderer-flush.js';
 import { sandboxStatus } from './utils/sandbox-status.js';
@@ -102,14 +102,21 @@ function createWindow(): BrowserWindow {
   guardWindowClose(win);
 
   win.on('closed', () => {
-    mainWindow = null;
+    if (mainWindow === win) mainWindow = null;
   });
-
-  // Setup application menu with keyboard shortcuts
-  setupApplicationMenu(win);
 
   return win;
 }
+
+/**
+ * Le menu vise la fenêtre du moment du clic, la recrée au besoin (macOS), et ne fait plus rien une
+ * fois la sortie engagée. Posé une fois, avant la première fenêtre : il ne dépend d'aucune.
+ */
+const menuDeps: MenuDeps = {
+  currentWindow: () => mainWindow,
+  createWindow,
+  isLeaving: () => onBeforeQuit.isLeaving(),
+};
 
 /**
  * Un fichier de réglages illisible a été mis de côté au démarrage (`openStoreResilient`) : l'auteur
@@ -194,9 +201,7 @@ app.whenReady().then(async () => {
   // Écouter les changements de langue pour mettre à jour le menu
   ipcMain.on('language-changed', (_event, language: 'fr' | 'en' | 'de') => {
     setLanguage(language);
-    if (mainWindow) {
-      setupApplicationMenu(mainWindow);
-    }
+    setupApplicationMenu(menuDeps);
   });
 
   // Note: pdfService is now project-scoped and initialized on-demand
@@ -205,10 +210,14 @@ app.whenReady().then(async () => {
   // Setup IPC handlers
   shutdownProject = setupIPCHandlers().shutdownProject;
 
+  // Setup application menu with keyboard shortcuts
+  setupApplicationMenu(menuDeps);
+
   tellRecoveredSettings(createWindow());
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    // Pendant l'arrêt, un clic sur le Dock ne recrée rien : `app.exit` l'emporterait aussitôt.
+    if (!onBeforeQuit.isLeaving() && BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
@@ -225,28 +234,26 @@ app.on('window-all-closed', () => {
 // puis `app.exit()`, quoi qu'il arrive.
 // `app.exit()` ne ferme rien de lui-même : sans cet arrêt, la session du journal de recherche
 // restait « Active » et le tampon du journal d'usage se perdait.
-app.on(
-  'before-quit',
-  createQuitHandler({
-    mayLeave: () => mayLeaveRenderer(mainWindow),
-    // Masquées, pas détruites : le renderer peut encore finir une écriture jusqu'à `app.exit`.
-    hideWindows: () => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.hide();
-      }
-    },
-    shutdown: () =>
-      shutdownApp({
-        deadlineMs: QUIT_DEADLINE_MS,
-        stopTopicModeling: async () => {
-          const { topicModelingService } = await import('./services/topic-modeling-service.js');
-          await topicModelingService.stop();
-        },
-        closeProject: async (budgetMs) => {
-          await shutdownProject?.(budgetMs);
-        },
-        releaseEmbeddedModels: () => disposeAllEmbeddedClients(),
-      }),
-    exit: () => app.exit(),
-  })
-);
+const onBeforeQuit = createQuitHandler({
+  mayLeave: () => mayLeaveRenderer(mainWindow),
+  // Masquées, pas détruites : le renderer peut encore finir une écriture jusqu'à `app.exit`.
+  hideWindows: () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.hide();
+    }
+  },
+  shutdown: () =>
+    shutdownApp({
+      deadlineMs: QUIT_DEADLINE_MS,
+      stopTopicModeling: async () => {
+        const { topicModelingService } = await import('./services/topic-modeling-service.js');
+        await topicModelingService.stop();
+      },
+      closeProject: async (budgetMs) => {
+        await shutdownProject?.(budgetMs);
+      },
+      releaseEmbeddedModels: () => disposeAllEmbeddedClients(),
+    }),
+  exit: () => app.exit(),
+});
+app.on('before-quit', onBeforeQuit);

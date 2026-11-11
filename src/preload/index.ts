@@ -910,6 +910,9 @@ const api = {
       }
       const wrapped = (_event: unknown, ...args: unknown[]): void => listener(...args);
       ipcRenderer.on(channel, wrapped);
+      // Le main garde une commande du menu tant que personne ne l'écoute : une fenêtre recréée par
+      // le menu (macOS) reçoit sa commande avant que React n'ait posé ses écouteurs.
+      if (channel.startsWith('menu:')) ipcRenderer.send('menu:listening', channel);
       return () => ipcRenderer.removeListener(channel, wrapped);
     },
     send: (channel: string, ...args: any[]) => {
