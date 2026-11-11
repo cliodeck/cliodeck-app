@@ -1048,7 +1048,8 @@ class TropyService {
    * Chemins d'images uniques et existants d'une source, pour l'OCR manuel
    * (#23). Même règle que TropySync.performOCROnItem : Tropy crée une
    * entrée photo par page de PDF, on déduplique par chemin et on écarte
-   * les fichiers disparus.
+   * les fichiers disparus. Une lecture du .tpy ratée lève `TropyReadError`
+   * (J6) : le handler la rend en échec, au lieu d'une source « sans image ».
    */
   getSourcePhotoPaths(sourceId: string): string[] {
     if (!this.vectorStore || !this.currentTPYPath) {

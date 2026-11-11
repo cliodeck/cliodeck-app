@@ -55,6 +55,8 @@ export function describeSyncIssue(t: TFunction, issue: TropySyncIssue): string {
       return t('primarySources.issues.pagesChanged', { sources: issue.sources });
     case 'pages-images-missing':
       return t('primarySources.issues.pagesImagesMissing', { sources: issue.sources });
+    case 'tropy-unreadable':
+      return t('primarySources.issues.tropyUnreadable');
   }
 }
 

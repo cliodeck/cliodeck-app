@@ -10,13 +10,15 @@
  *
  * Lecture à part de `TropyReader`, avec la même ouverture (`openTropyDatabase`,
  * G2) : lecture seule, rien d'écrit, rien laissé à côté du .tpy ; connexion
- * fermée quoi qu'il arrive.
+ * fermée quoi qu'il arrive. Une lecture qui échoue lève `TropyReadError`,
+ * comme celles de `TropyReader` (J6).
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import type Database from 'better-sqlite3';
 import { sameFile } from '../../core/vector-store/file-identity';
 import { openTropyDatabase } from './tropy-database';
+import { TropyReadError } from './TropyReader';
 import type { PrimarySourcesVectorStore } from '../../core/vector-store/PrimarySourcesVectorStore';
 
 // MARK: - Types
@@ -67,22 +69,33 @@ function databasePath(projectPath: string): string {
  * sur une copie en mémoire ; Tropy ouvert, sur la base elle-même, avec ce
  * qu'il n'a pas encore reporté. La règle est dans `openTropyDatabase`
  * (`tropy-database.ts`), la même que pour `TropyReader.openProject`.
+ *
+ * Toute erreur, de l'ouverture à la lecture, lève `TropyReadError` au nom de
+ * `method` (J6) : fichier absent ou sans droit de lecture, fichier qui n'est
+ * pas une base, base tronquée ou abîmée, table illisible. L'identité est la
+ * première lecture du .tpy d'une synchro, avant `TropyReader` : non typée,
+ * son erreur faisait échouer la synchro sans rien dire à l'écran.
  */
-function withTropyDatabase<T>(projectPath: string, read: (db: Database.Database) => T): T {
-  const db = openTropyDatabase(databasePath(projectPath));
+function withTropyDatabase<T>(method: string, projectPath: string, read: (db: Database.Database) => T): T {
   try {
-    return read(db);
-  } finally {
-    db.close();
+    const db = openTropyDatabase(databasePath(projectPath));
+    try {
+      return read(db);
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    throw new TropyReadError(method, error);
   }
 }
 
 /**
- * `project_id` et nom du projet Tropy. Lève si le fichier est absent ou n'est
- * pas un projet Tropy : à l'appelant de décider, la garde ne devine pas.
+ * `project_id` et nom du projet Tropy. Lève `TropyReadError` si le fichier
+ * est absent, illisible ou n'est pas un projet Tropy : à l'appelant de
+ * décider, la garde ne devine pas.
  */
 export function readTropyProjectIdentity(projectPath: string): TropyProjectIdentity {
-  return withTropyDatabase(projectPath, (db) => {
+  return withTropyDatabase('readTropyProjectIdentity', projectPath, (db) => {
     const row = db.prepare('SELECT project_id, name FROM project LIMIT 1').get() as
       | { project_id: string | null; name: string | null }
       | undefined;
@@ -100,7 +113,7 @@ export function readTropyPhotoMatchRatio(
   sample: ReadonlyArray<{ id: number; filename: string }>
 ): number | null {
   if (sample.length === 0) return null;
-  return withTropyDatabase(projectPath, (db) => {
+  return withTropyDatabase('readTropyPhotoMatchRatio', projectPath, (db) => {
     const lookup = db.prepare('SELECT path, filename FROM photos WHERE id = ?');
     let matches = 0;
     for (const { id, filename } of sample) {
@@ -163,7 +176,9 @@ export function decideTropyBinding(
 /**
  * Lit ce que `decideTropyBinding` demande — l'identité du candidat, le lien
  * enregistré, et l'empreinte des photos quand elle seule peut trancher — puis
- * décide. Lève si le candidat n'est pas lisible.
+ * décide. Lève `TropyReadError` si le candidat n'est pas lisible ; une erreur
+ * de brain.db (le lien enregistré, le compte des sources) passe telle quelle :
+ * ce n'est pas le .tpy qui est en cause.
  */
 export function assessTropyBinding(
   projectPath: string,

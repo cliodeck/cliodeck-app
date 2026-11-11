@@ -102,6 +102,57 @@ export interface PrimarySourcePhoto {
   notes: string[];
 }
 
+// MARK: - Erreurs
+
+/**
+ * Une lecture du .tpy qui a échoué (J6) : base verrouillée ou abîmée, table
+ * ou colonne qu'aucune version connue de Tropy n'écrit. Les lectures la
+ * lèvent au lieu de rendre du vide : `listItems` rendait une liste vide, que
+ * la synchro prenait pour un projet sans item ; une lecture par item ratée
+ * donnait un item « sans photo » ou « sans note », réenregistré tel quel.
+ * La lecture de l'identité du projet lié (`tropy-project-identity.ts`),
+ * première de la synchro, et l'ouverture du .tpy par la synchro la lèvent
+ * aussi : fichier absent, sans droit de lecture, tronqué, qui n'est pas une
+ * base. `method` dit quelle lecture, `subjectId` sur quel sujet (item, photo,
+ * sélection), `cause` l'erreur d'origine (SQLite, système de fichiers).
+ */
+export class TropyReadError extends Error {
+  constructor(
+    readonly method: string,
+    readonly cause: unknown,
+    readonly subjectId?: number
+  ) {
+    super(
+      `Tropy read failed in ${method}${subjectId === undefined ? '' : ` (subject ${subjectId})`}: ` +
+        (cause instanceof Error ? cause.message : String(cause))
+    );
+    this.name = 'TropyReadError';
+  }
+}
+
+/** L'erreur d'une lecture ; celle d'une lecture imbriquée passe telle quelle, avec son sujet. */
+function readError(method: string, error: unknown, subjectId?: number): TropyReadError {
+  return error instanceof TropyReadError ? error : new TropyReadError(method, error, subjectId);
+}
+
+/**
+ * Ce que porte le schéma du .tpy ouvert. Tropy met à jour la base d'un
+ * projet quand il l'ouvre ; un projet qu'aucune version récente n'a rouvert
+ * garde le schéma d'alors, et `TropyReader` le lit tel quel, sans le migrer.
+ * Deux éléments que lit `TropyReader` sont venus après le schéma initial
+ * (`db/migrate/project/` du dépôt de Tropy) :
+ *  - `photos.filename`, migration `2103171215` (Tropy 1.10) : sans elle, le
+ *    nom se tire du chemin, comme pour une photo sans nom ;
+ *  - la table `selections`, migration `1708121306` (août 2017, bêtas de
+ *    Tropy 1.0) : sans elle, aucune photo n'a de sélection.
+ * Relevé explicitement, jamais déduit d'une erreur de lecture : toute autre
+ * absence est une base que ClioDeck ne sait pas lire, et l'erreur se propage.
+ */
+interface TropySchemaFeatures {
+  photoFilename: boolean;
+  selections: boolean;
+}
+
 // MARK: - Helpers
 
 /**
@@ -133,6 +184,8 @@ export class TropyReader {
   private tpyPath: string | null = null;
   private packagePath: string | null = null; // Path to .tropy package if applicable
   private assetsPath: string | null = null; // Path to assets folder if in package
+  /** Le schéma relevé, pour la connexion qui l'a lu (`schemaFeatures`). */
+  private features: { db: Database.Database; value: TropySchemaFeatures } | null = null;
 
   /**
    * Ouvre un projet Tropy (.tropy package ou .tpy) en mode lecture seule
@@ -323,7 +376,9 @@ export class TropyReader {
   }
 
   /**
-   * Liste tous les items du projet
+   * Liste tous les items du projet. Lève `TropyReadError` si une lecture
+   * échoue, la sienne ou celle d'un item (J6) : une liste vide ou un item
+   * lu en partie passeraient pour l'état du projet.
    */
   listItems(): TropyItem[] {
     if (!this.db) throw new Error('No project opened');
@@ -374,13 +429,13 @@ export class TropyReader {
 
       return items;
     } catch (error) {
-      console.error('Failed to list items:', error);
-      return [];
+      throw readError('listItems', error);
     }
   }
 
   /**
-   * Récupère un item par son ID
+   * Récupère un item par son ID ; `null` s'il n'est pas dans le projet.
+   * Lève `TropyReadError` si une lecture échoue (J6).
    */
   getItem(itemId: number): TropyItem | null {
     if (!this.db) throw new Error('No project opened');
@@ -420,8 +475,7 @@ export class TropyReader {
 
       return item;
     } catch (error) {
-      console.error('Failed to get item:', error);
-      return null;
+      throw readError('getItem', error, itemId);
     }
   }
 
@@ -528,9 +582,10 @@ export class TropyReader {
 
     try {
       // Join with images table to get width/height
+      const filename = this.schemaFeatures(this.db).photoFilename ? 'p.filename' : 'NULL AS filename';
       const photoRows = this.db
         .prepare(`
-          SELECT p.id, p.item_id, p.path, p.filename, p.mimetype, i.width, i.height
+          SELECT p.id, p.item_id, p.path, ${filename}, p.mimetype, i.width, i.height
           FROM photos p
           LEFT JOIN images i ON p.id = i.id
         `)
@@ -564,8 +619,7 @@ export class TropyReader {
 
       return photos;
     } catch (error) {
-      console.error('Failed to list photos:', error);
-      return [];
+      throw readError('listAllPhotos', error);
     }
   }
 
@@ -586,6 +640,24 @@ export class TropyReader {
   }
 
   // MARK: - Private Methods
+
+  /**
+   * Le schéma du .tpy ouvert (`TropySchemaFeatures`), relevé une fois par
+   * connexion, par `sqlite_master` et `pragma table_info`.
+   */
+  private schemaFeatures(db: Database.Database): TropySchemaFeatures {
+    if (this.features && this.features.db === db) return this.features.value;
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
+      name: string;
+    }>;
+    const photoColumns = db.pragma('table_info(photos)') as Array<{ name: string }>;
+    const value: TropySchemaFeatures = {
+      photoFilename: photoColumns.some((column) => column.name === 'filename'),
+      selections: tables.some((table) => table.name === 'selections'),
+    };
+    this.features = { db, value };
+    return value;
+  }
 
   private getItemMetadata(itemId: number): Partial<TropyItem> {
     if (!this.db) return {};
@@ -612,8 +684,7 @@ export class TropyReader {
 
       return metadata as Partial<TropyItem>;
     } catch (error) {
-      console.warn(`Failed to get metadata for item ${itemId}:`, error);
-      return {};
+      throw readError('getItemMetadata', error, itemId);
     }
   }
 
@@ -632,8 +703,8 @@ export class TropyReader {
           WHERE m.id = ?
         `)
         .all(itemId) as Array<{ property: string; value: string }>;
-    } catch {
-      return [];
+    } catch (error) {
+      throw readError('getAllItemMetadataRaw', error, itemId);
     }
   }
 
@@ -659,8 +730,8 @@ export class TropyReader {
         .all(itemId) as Array<{ name: string }>;
 
       return tagRows.map((row) => row.name);
-    } catch {
-      return [];
+    } catch (error) {
+      throw readError('getItemTags', error, itemId);
     }
   }
 
@@ -679,8 +750,8 @@ export class TropyReader {
         html: row.state || '',
         text: row.text || '',
       }));
-    } catch {
-      return [];
+    } catch (error) {
+      throw readError('getItemNotes', error, itemId);
     }
   }
 
@@ -689,9 +760,10 @@ export class TropyReader {
 
     try {
       // Join with images table to get width/height
+      const filename = this.schemaFeatures(this.db).photoFilename ? 'p.filename' : 'NULL AS filename';
       const photoRows = this.db
         .prepare(`
-          SELECT p.id, p.path, p.filename, p.mimetype, i.width, i.height
+          SELECT p.id, p.path, ${filename}, p.mimetype, i.width, i.height
           FROM photos p
           LEFT JOIN images i ON p.id = i.id
           WHERE p.item_id = ?
@@ -723,8 +795,8 @@ export class TropyReader {
 
         return photo;
       });
-    } catch {
-      return [];
+    } catch (error) {
+      throw readError('getItemPhotos', error, itemId);
     }
   }
 
@@ -742,8 +814,8 @@ export class TropyReader {
         html: row.state || '',
         text: row.text || '',
       }));
-    } catch {
-      return [];
+    } catch (error) {
+      throw readError('getPhotoNotes', error, photoId);
     }
   }
 
@@ -751,6 +823,9 @@ export class TropyReader {
     if (!this.db) return [];
 
     try {
+      // Un projet d'avant la table `selections` n'a aucune sélection.
+      if (!this.schemaFeatures(this.db).selections) return [];
+
       // Selections only have id, photo_id, x, y, position
       // Width/height/angle are stored in subjects or images tables
       const selectionRows = this.db
@@ -781,8 +856,8 @@ export class TropyReader {
         angle: row.angle || 0,
         notes: this.getSelectionNotes(row.id),
       }));
-    } catch {
-      return [];
+    } catch (error) {
+      throw readError('getPhotoSelections', error, photoId);
     }
   }
 
@@ -800,8 +875,8 @@ export class TropyReader {
         html: row.state || '',
         text: row.text || '',
       }));
-    } catch {
-      return [];
+    } catch (error) {
+      throw readError('getSelectionNotes', error, selectionId);
     }
   }
 }
