@@ -218,6 +218,36 @@ describe.skipIf(!sqliteAvailable)('openTropyDatabase', () => {
     },
   );
 
+  // Revue de J5 : la lecture directe ne vaut qu'au-delà de 2 Gio (décision J5,
+  // « seulement »). Une grosse base sous le seuil se lit encore sur la copie en
+  // mémoire de G2, sans rien laisser à côté du .tpy. Les tests de G2 n'emploient
+  // que des bases de quelques Kio : un seuil abaissé à 1 Mio les passait tous,
+  // et laissait `-wal` et `-shm` à côté de presque toutes les vraies bases. Les
+  // tailles, écrites en clair, bornent le seuil par le bas. La garde dit la
+  // copie tentée sans remplir 2 Gio de mémoire : l'ouverture lève alors, avant
+  // que SQLite ne touche au fichier.
+  it.each([
+    { size: 2 ** 30, label: '1 Gio' },
+    { size: 2 ** 31 - 8 * 2 ** 20, label: '2 Gio − 8 Mio' },
+  ])(
+    'un .tpy en WAL de $size octets ($label), Tropy fermé : copie en mémoire tentée, rien de créé à côté',
+    ({ size }) => {
+      const archives = path.join(root, 'archives');
+      const tpy = makeTpy(archives, { projectId: 'projet-A', name: 'Grèves nantaises', wal: true, items: [] });
+      growSparse(tpy, size);
+      const before = listing(archives);
+      expect(before).toEqual([path.basename(tpy)]);
+      const header = head(tpy);
+      largeReads.forbidden = true;
+
+      expect(() => openTropyDatabase(tpy)).toThrow(/copie en mémoire/);
+
+      expect(listing(archives)).toEqual(before);
+      expect(fs.statSync(tpy).size).toBe(size);
+      expect(head(tpy)).toEqual(header);
+    },
+  );
+
   it('un -shm resté sans -wal : rien dans un journal, copie en mémoire, aucun -wal créé', () => {
     const archives = path.join(root, 'archives');
     const tpy = makeTpy(archives, { projectId: 'projet-A', name: 'Grèves nantaises', wal: true, items: [] });
