@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -32,6 +32,11 @@ const from = (bib: string, start: string, end?: string) => {
 const GARDE = '@book{Garde_2000,\n  title = {Le temps des archives},\n}';
 /** Un bloc de groupes BibDesk réduit à sa forme : liste de propriétés entre accolades imbriquées. */
 const GROUPS = '@comment{BibDesk Static Groups{\n<plist version="1.0"><array></array></plist>\n}}\n';
+
+// Un test qui échoue avant son `mockRestore` laissait l'espion de `console.warn` aux suivants.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /** Le fichier composé se relit comme les entrées réécrites seules, sans entrée non lue. */
 function expectSameReading(composed: string, rewritten: string): void {
@@ -359,6 +364,75 @@ describe('keepOutsideEntries — une arobase hors des entrées', () => {
 
     expect(kept).toBe(`${rewritten.trimEnd()}\n\n@comment(à revoir)\n`);
     expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // « @Garde2000 (chap. 3 » se lit comme un bloc entre parenthèses, que le parseur ne lit pas : il
+  // reprend après la parenthèse ouvrante et lit l'entrée qui suit. Le découpage sautait jusqu'à la
+  // parenthèse fermante, plus bas : il ne voyait pas l'entrée, et le contrôle écartait l'en-tête et
+  // le commentaire de l'historien.
+  it.each([
+    ['une clé', '% voir aussi @Garde2000 (chap. 3', '% fin du chapitre)'],
+    ['une adresse', '% contact jean@univ (bureau 12', '% voir :-)'],
+  ])('une parenthèse ouverte après %s, refermée après l’entrée : tout reste, à l’octet', (_name, opening, closing) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = `${opening}\n${A}\n${closing}\n${B}\n${JABREF}\n`;
+    const rewritten = rewrite(previous);
+    expect(parse(previous).map((c) => [c.type, c.id])).toEqual([
+      ['book', 'Garde2000'],
+      ['article', 'Leduc1990'],
+    ]);
+
+    const kept = expectSettled(previous);
+
+    expect(kept).toBe(`${opening}\n\n${rewritten.trimEnd()}\n\n${closing}\n\n${JABREF}\n`);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // Les types que BibTeX accepte (`@thèse{`, `@my.type{`) : l'entrée est réécrite comme les autres.
+  // Avec un motif plus étroit que celui de BibTeX, elle restait dans le fichier comme du texte hors
+  // des entrées, et n'était plus une référence.
+  it.each(['@thèse{', '@my.type{', '@misc:web{'])('une entrée %s : réécrite comme les autres, rien hors des entrées', (start) => {
+    const previous = `${A.replace('@book{', start)}\n${B}`;
+    const rewritten = rewrite(previous);
+
+    expect(rewritten.match(/^@.*$/gm)).toEqual([`${start}Garde2000,`, '@article{Leduc1990,']);
+    expect(keepOutsideEntries(previous, rewritten)).toBe(rewritten);
+  });
+});
+
+/**
+ * Le découpage et le parseur disent la même chose de l'endroit où commence chaque entrée : le
+ * découpage voit chaque entrée que lit le parseur, et rien d'autre. Sinon le fichier composé se
+ * relirait autrement que les entrées réécrites, et `keepOutsideEntries` écarterait une partie, en
+ * le disant au journal. Hors de ce corpus : une entrée écrite dans un `@comment`, que le parseur lit
+ * et que le découpage laisse au commentaire (étape 4 de J2, hors de cette PR).
+ */
+describe('keepOutsideEntries — le découpage et le parseur voient les mêmes entrées', () => {
+  const A = '@book{Garde2000,\n  title = {Le temps des archives},\n  year = {2000},\n}\n';
+  const B = '@article{Leduc1990,\n  title = {Le carnet},\n  year = {1990},\n}\n';
+  const FIXTURE_NAMES = ['zotero', 'better-bibtex', 'bibdesk', 'jabref', 'mendeley', 'blocs-bibdesk', 'blocs-jabref', 'blocs-preambule'];
+
+  // Chaque fixture porte deux entrées ; chaque cas écrit à la main, deux aussi.
+  it.each([
+    ...FIXTURE_NAMES.map((name) => [`la fixture ${name}`, fixture(name)]),
+    ['un commentaire % qui cite une clé', `% voir aussi @Garde2000 pour le contexte\n${A}\n% voir aussi @Leduc1990\n${B}`],
+    ['une adresse sur la ligne de l’entrée', `% voir aussi @Garde2000 ${A}\n${B}`],
+    ['des fins de ligne CRLF', `% voir aussi @Garde2000\r\n${A.replace(/\n/g, '\r\n')}\r\n${B.replace(/\n/g, '\r\n')}`],
+    ['des blocs entre parenthèses', `@comment(en-tête)\n${A}\n@comment(à revoir)\n${B}\n@preamble("x")\n`],
+    ['une parenthèse ouverte dans un commentaire', `% voir aussi @Garde2000 (chap. 3\n${A}\n% fin)\n${B}`],
+    ['des types que BibTeX accepte', `${A.replace('@book{', '@thèse{')}\n% voir @x.y (\n${B.replace('@article{', '@misc:web{')}`],
+  ])('%s', (_name, previous) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const rewritten = rewrite(previous);
+    expect(parse(previous)).toHaveLength(2);
+
+    const kept = keepOutsideEntries(previous, rewritten);
+
+    expect(warn).not.toHaveBeenCalled();
+    expectSameReading(kept, rewritten);
+    expect(keepOutsideEntries(kept, rewrite(kept))).toBe(kept);
     warn.mockRestore();
   });
 });

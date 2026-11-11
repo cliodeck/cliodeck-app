@@ -14,7 +14,7 @@
  * voit pas — on contrôle les entrées, pas les champs.
  */
 import type { Citation } from '../../types/citation';
-import { findMatchingBrace } from './BibTeXParser';
+import { ENTRY_TYPE, findMatchingBrace } from './BibTeXParser';
 
 export interface BibAudit {
   /** Clés des entrées du texte que le parseur n'a pas rendues, ou pas en entier. */
@@ -35,8 +35,12 @@ export interface BibAudit {
   hasStringMacros: boolean;
 }
 
-/** Un `@type{` ou `@type(` en début de ligne, BOM et indentation permis. */
-const ENTRY_START = /^[ \t\uFEFF]*@[ \t]*([A-Za-z][\w-]*)[ \t]*([{(])/gm;
+/**
+ * Un `@type{` ou `@type(` en début de ligne, BOM et indentation permis. Le type se lit comme le lit
+ * le parseur (`ENTRY_TYPE`, J2) : plus étroit que le sien, le motif laissait passer une entrée
+ * `@thèse{` que le parseur n'avait pas lue en entier.
+ */
+const ENTRY_START = new RegExp(String.raw`^[ \t\uFEFF]*@[ \t]*(${ENTRY_TYPE})[ \t]*([{(])`, 'gm');
 
 /** Ce que le parseur saute : ce ne sont pas des références, et rien n'en est relu. */
 const NOT_REFERENCES = new Set(['comment', 'preamble']);

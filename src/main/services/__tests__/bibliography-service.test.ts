@@ -128,5 +128,29 @@ describe('rewriteProjectBibliography — une arobase hors des entrées', () => {
         ['Leduc1990', 'book'],
       ]);
     });
+
+    // Limite connue de J2, laissée à la décision de l'auteur. Un `.bib` déjà réécrit avant J2 porte
+    // un débris de la ligne coupée : « @univ-paris.example » (avant H2 : seul en tête ; depuis H2 :
+    // après le début de la ligne), ou « @Garde2000 pour le contexte » devant l'entrée. Relu, chaque
+    // entrée retrouve son type ; le débris est du texte hors des entrées, repris à l'octet comme le
+    // veut H2, et pandoc le refuse encore. Retiré à la main, le fichier passe.
+    it.each([
+      ['réécrit avant H2', '@univ-paris.example', (debris: string) => `${debris}\n\n${GARDE2000}\n${LEDUC1990}`],
+      ['réécrit depuis H2', '@univ-paris.example', (debris: string) => `%% Tenu par jean.dupont\n\n${debris}\n\n${GARDE2000}\n${LEDUC1990}`],
+      ['un commentaire coupé', '@Garde2000 pour le contexte', (debris: string) => `% Bibliographie\n\n${GARDE2000}\n\n${debris}\n${LEDUC1990}\n% voir aussi\n`],
+    ])('un .bib abîmé avant J2 (%s) : les entrées retrouvent leur type, le débris reste, et pandoc le refuse encore', async (_name, debris, damaged) => {
+      const { entries, written } = await rewritten(damaged(debris));
+
+      expect(entries.match(/^@.*$/gm)).toEqual(['@book{Garde2000,', '@book{Leduc1990,']);
+      expect(written.split('\n')).toContain(debris);
+      const refused = spawnSync('pandoc', ['-f', 'biblatex', '-t', 'csljson', bibPath()], { encoding: 'utf8' });
+      expect(refused.status).not.toBe(0);
+      expect(refused.stderr).toContain(debris);
+
+      fs.writeFileSync(bibPath(), written.split('\n').filter((line) => line !== debris).join('\n'));
+      const repaired = spawnSync('pandoc', ['-f', 'biblatex', '-t', 'csljson', bibPath()], { encoding: 'utf8' });
+      expect(repaired.status).toBe(0);
+      expect((JSON.parse(repaired.stdout) as Array<{ id: string }>).map((item) => item.id)).toEqual(['Garde2000', 'Leduc1990']);
+    });
   });
 });

@@ -170,8 +170,19 @@ const skipBlanks = (text: string, index: number): number => {
   return index;
 };
 
+/**
+ * Un type d'entrée, comme BibTeX le lit : un identifiant qui ne commence pas par un chiffre et ne
+ * porte ni blanc ni `"#%'(),={}` (`@thèse{`, `@misc:web{`, `@video-recording2{`). Plus étroit
+ * (`[A-Za-z][\w-]*`), le motif faisait disparaître ces entrées des citations sans un mot. L'arobase,
+ * que BibTeX accepte dans un identifiant, en est exclue : le type est ce qui suit la dernière
+ * arobase avant l'accolade (J2).
+ *
+ * `bibAudit` lit le début d'une entrée avec ce motif.
+ */
+export const ENTRY_TYPE = String.raw`[^\s"#%'(),={}@0-9][^\s"#%'(),={}@]*`;
+
 /** Un `@type{` ou `@type(` : des blancs permis autour du type, comme pour BibTeX. */
-const BLOCK_START = /@\s*([A-Za-z][\w-]*)\s*([{(])/g;
+const BLOCK_START = new RegExp(String.raw`@\s*(${ENTRY_TYPE})\s*([{(])`, 'g');
 
 /**
  * Le premier bloc `@type{` ou `@type(` à partir de `from`, ou `null`. Le type est l'identifiant qui

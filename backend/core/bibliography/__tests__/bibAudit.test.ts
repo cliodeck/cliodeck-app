@@ -119,6 +119,18 @@ describe('auditParsedBib — les entrées que le parseur a laissées', () => {
     expect(audit('@book(Garde_2000,\n  title = {Le temps},\n)\n').unreadKeys).toEqual(['Garde_2000']);
   });
 
+  // Les types que BibTeX accepte (J2) : l'audit lit le début d'une entrée comme le parseur. Avec un
+  // motif plus étroit que le sien, une entrée accentuée qui ne se referme pas passait inaperçue.
+  it.each([
+    ['accentué', '@thèse{'],
+    ['à point', '@my.type{'],
+  ])('une entrée de type %s qui ne se referme pas est signalée', (_name, start) => {
+    const result = audit(`${start}K2,\n  title = {T2},\n\n@book{Garde_2000,\n  title = {Le temps},\n}\n`);
+
+    expect(result.parsed.map((c) => c.id)).toEqual(['Garde_2000']);
+    expect(result.unreadKeys).toEqual(['K2']);
+  });
+
   it('deux entrées de même clé : une seule lue, la clé est signalée', () => {
     const result = audit(
       ['@misc{Lester_1935,', '  title = {Diary, January},', '}', '@misc{Lester_1935,', '  note = {Diary, February},', '}'].join('\n')

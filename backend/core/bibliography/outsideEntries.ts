@@ -68,17 +68,27 @@ function findMatchingParen(text: string, open: number): number {
  * lit pas, reste du texte : la synchronisation et la fusion refusent d'ailleurs un tel fichier.
  *
  * Une entrée commence à l'arobase de son type, là où le parseur la commence (`findBlockStart`).
+ * Après un bloc entre parenthèses qui n'est pas un `@comment`, un `@preamble` ou un `@string`, la
+ * recherche reprend juste après la parenthèse ouvrante, comme celle du parseur : « @Garde2000
+ * (chap. 3 » dans un commentaire `%` se lit comme un tel bloc, et sa parenthèse peut ne se refermer
+ * qu'après l'entrée suivante, que le parseur lit. Sautée jusqu'à cette parenthèse, l'entrée
+ * n'était pas vue, et le contrôle de `keepOutsideEntries` écartait l'en-tête et les commentaires.
+ * Un `@comment(…)`, comme un `@comment{…}`, est sauté entier : une entrée écrite dedans, que le
+ * parseur lit, reste au commentaire, et le contrôle en décide (étape 4 de J2, hors de cette PR).
  */
 function entrySpans(bib: string): Array<{ start: number; end: number }> {
   const spans: Array<{ start: number; end: number }> = [];
   let from = 0;
   for (let block = findBlockStart(bib, from); block; block = findBlockStart(bib, from)) {
     const braces = block.delimiter === '{';
+    const reference = !NOT_REFERENCES.has(block.type.toLowerCase());
+    if (!braces && reference) {
+      from = block.open + 1;
+      continue;
+    }
     const close = braces ? findMatchingBrace(bib, block.open) : findMatchingParen(bib, block.open);
     from = close === -1 ? block.open + 1 : close + 1;
-    if (close !== -1 && braces && !NOT_REFERENCES.has(block.type.toLowerCase())) {
-      spans.push({ start: block.at, end: close + 1 });
-    }
+    if (close !== -1 && braces && reference) spans.push({ start: block.at, end: close + 1 });
   }
   return spans;
 }
