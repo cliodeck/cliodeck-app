@@ -159,6 +159,34 @@ describe('PrimarySourcesPanel — ce que la synchro n’a pas pu indexer', () =>
   });
 });
 
+// J6 : une lecture ratée du .tpy faisait « synchro réussie, 0 item », sans un
+// mot. La passe échoue désormais avant toute écriture, et le panneau le dit,
+// pour « Synchroniser » comme pour la synchro automatique, qui n'alerte pas.
+describe('PrimarySourcesPanel — un projet Tropy illisible', () => {
+  it('« Synchroniser » échoue : le panneau dit que le projet n’a pas pu être lu et que rien n’a changé', async () => {
+    tropy.sync.mockResolvedValue({
+      success: false,
+      errors: ['Sync failed: TropyReadError: Tropy read failed in listItems: no such table: items'],
+      issues: [{ code: 'tropy-unreadable' }],
+    });
+    const showAlert = vi.spyOn(useDialogStore.getState(), 'showAlert').mockResolvedValue(undefined);
+    render(<PrimarySourcesPanel />);
+
+    fireEvent.click(await screen.findByTitle('Synchroniser'));
+
+    expect(await screen.findByText(/le projet Tropy n'a pas pu être lu.*Rien n'a été modifié/)).toBeInTheDocument();
+    expect(showAlert).not.toHaveBeenCalled();
+  });
+
+  it('les trois langues citent le libellé exact du bouton « Synchroniser »', () => {
+    for (const lng of ['fr', 'en', 'de']) {
+      const strings = locale(lng).primarySources;
+      expect(strings.issues.tropyUnreadable as string, lng).toContain(strings.sync);
+      expect(strings.issues.tropyUnreadable as string, lng).toContain('Tropy');
+    }
+  });
+});
+
 // G3 : une page passée d'un item OCRisé à l'autre. Les deux sources attendent
 // la passe d'OCR suivante, sans forcer : un état qui dure jusqu'à elle.
 describe('PrimarySourcesPanel — des sources aux pages changées dans Tropy', () => {

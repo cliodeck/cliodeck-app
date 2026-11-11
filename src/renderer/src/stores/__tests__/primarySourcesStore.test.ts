@@ -205,6 +205,31 @@ describe('primarySourcesStore — l’échec d’une écriture se dit (S15-1-8, 
       error: 'not-saved',
     });
   });
+
+  // J6 : une lecture ratée du .tpy n'est pas « aucune image trouvée (fichiers
+  // déplacés ou manquants) » : l'historien irait chercher des fichiers qui
+  // sont à leur place.
+  it('OCR manuel : les photos de la source n’ont pas pu être lues dans Tropy, ce n’est pas « aucune image »', async () => {
+    tropy.getSourcePhotos = vi.fn(async () => ({
+      success: false,
+      error: 'Tropy read failed in getItemPhotos (subject 10): database disk image is malformed',
+    }));
+
+    expect(await usePrimarySourcesStore.getState().performManualOCR('src-a')).toEqual({
+      success: false,
+      error: 'failed',
+    });
+    expect(tropy.performBatchOCR).not.toHaveBeenCalled();
+  });
+
+  it('OCR manuel : une source sans photo dans Tropy reste « aucune image »', async () => {
+    tropy.getSourcePhotos = vi.fn(async () => ({ success: true, paths: [] }));
+
+    expect(await usePrimarySourcesStore.getState().performManualOCR('src-a')).toEqual({
+      success: false,
+      error: 'no-photos',
+    });
+  });
 });
 
 describe('primarySourcesStore — après une écriture, compteurs et rapport relus (S18-2-6)', () => {

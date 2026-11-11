@@ -459,7 +459,12 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
   performManualOCR: async (sourceId: string) => {
     try {
       const photosRes = await window.electron.tropy.getSourcePhotos(sourceId);
-      if (!photosRes.success || !photosRes.paths || photosRes.paths.length === 0) {
+      // Les photos n'ont pas pu être lues dans Tropy (J6) : ce n'est pas
+      // « aucune image trouvée (fichiers déplacés ou manquants) ».
+      if (!photosRes.success) {
+        return { success: false, error: 'failed' as const };
+      }
+      if (!photosRes.paths || photosRes.paths.length === 0) {
         return { success: false, error: 'no-photos' as const };
       }
       const result = await get().performOCR(sourceId, photosRes.paths, get().ocrLanguage);

@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import {
   TropyReader,
+  TropyReadError,
   TropyItem,
   PrimarySourceItem,
   PrimarySourcePhoto,
@@ -110,6 +111,17 @@ export type TropySyncIssue =
        */
       code: 'pages-images-missing';
       sources: number;
+    }
+  | {
+      /**
+       * Le .tpy n'a pas pu être lu (J6) : base verrouillée ou abîmée, table
+       * ou colonne qu'aucune version connue de Tropy n'écrit. La passe
+       * s'arrête avant toute écriture : rien n'est modifié. Elle se disait
+       * réussie, avec 0 item, et un item mal lu perdait ses photos en base.
+       * Un état qui peut durer (fichier abîmé) : dit dans le panneau, y
+       * compris après une synchro automatique, qui n'alerte pas.
+       */
+      code: 'tropy-unreadable';
     };
 
 /** Ce qui a empêché l'OCR d'un item, et vaudra pour toute la passe. */
@@ -258,6 +270,11 @@ export class TropySync {
 
       this.reader.openProject(tpyPath);
       result.projectName = this.reader.getProjectName();
+      // Toute la base du .tpy se lit ici, avant la première écriture : une
+      // lecture qui échoue au milieu lève `TropyReadError`, et la passe
+      // s'arrête sans rien avoir écrit, ni source, ni projet, ni date de
+      // synchro (J6). Une lecture de la base dans la boucle des items, après
+      // les premières écritures, laisserait une passe à moitié faite.
       const items = this.reader.listItems();
       result.totalItems = items.length;
 
@@ -412,6 +429,8 @@ export class TropySync {
           `${result.transcriptionsWritten} transcription(s) written (${result.ocrPerformed} page(s) OCR'd)`
       );
     } catch (error) {
+      // Le .tpy illisible se dit à l'écran ; le détail reste pour la console.
+      if (error instanceof TropyReadError) result.issues.push({ code: 'tropy-unreadable' });
       result.errors.push(`Sync failed: ${error}`);
       console.error('Sync error:', error);
     } finally {
