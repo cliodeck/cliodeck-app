@@ -69,6 +69,13 @@ const BOOK_CONTAINER_TYPES = new Set([
  * Champs BibLaTeX que Zotero alimente et qui vivent dans `customFields`.
  * Zotero en est propriétaire : la synchronisation les compare, et une
  * valeur disparue de Zotero disparaît du fichier.
+ *
+ * Le résumé (`abstract`) n'y est pas, et ne doit pas y entrer : beaucoup de
+ * résumés viennent d'un `.bib` importé (Better BibTeX, Mendeley, BibDesk)
+ * pour des notices qui n'en ont pas dans Zotero, et cette règle les
+ * effacerait. Le sien est à part (J3) : Zotero en a un, il l'emporte ;
+ * Zotero n'en a pas, celui du `.bib` reste (`ZoteroDiffEngine`,
+ * `ZoteroSyncResolver`).
  */
 export const ZOTERO_OWNED_FIELDS = [
   'entrysubtype',
@@ -204,6 +211,11 @@ export function zoteroItemToCitation(item: ZoteroItem, bibtexKey: string): Citat
   set('date', zoteroDate(field(data, 'date', 'dateDecided', 'issueDate', 'dateEnacted')));
   // Une date de consultation sans URL ne dit rien à personne.
   if (url) set('urldate', accessDate(field(data, 'accessDate')));
+  // Le résumé tel que Zotero le donne, sans nettoyage LaTeX : l'exporteur
+  // l'échappe comme tout champ libre. Sous `abstract`, le nom que le parseur
+  // relit et que le panneau affiche (`abstractOf`) ; jamais `notes`, écrit
+  // `note`, que biblatex imprime dans la bibliographie.
+  set('abstract', field(data, 'abstractNote'));
 
   const inBook = BOOK_CONTAINER_TYPES.has(itemType);
 

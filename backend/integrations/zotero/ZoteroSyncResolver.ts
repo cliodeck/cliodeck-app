@@ -47,6 +47,12 @@ function definedFields(citation: Citation): Partial<Citation> {
  * Fusion des champs BibLaTeX libres. Ceux que Zotero alimente (URL, DOI,
  * pages…) suivent Zotero, disparition comprise ; les autres — ajoutés à la
  * main dans le .bib — restent.
+ *
+ * Le résumé (`abstract`) a sa propre règle, que donne cet ordre : celui de
+ * Zotero, quand il en a un, remplace celui du `.bib` ; sinon celui du `.bib`
+ * reste. Il n'est pas dans ZOTERO_OWNED_FIELDS : un résumé disparu de Zotero,
+ * ou que Zotero n'a jamais eu (importé par Better BibTeX, Mendeley, BibDesk),
+ * n'efface pas celui du fichier.
  */
 function mergeCustomFields(
   local: Record<string, string> | undefined,

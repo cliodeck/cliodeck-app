@@ -622,3 +622,148 @@ describe('tags et notes Zotero', () => {
     expect(result.citations[0].zoteroNotes).toEqual([{ key: 'NOTE1', text: 'Note connue' }]);
   });
 });
+
+/**
+ * Le résumé suit une règle à part (J3) : Zotero en a un → il est écrit, et l'emporte sur celui du
+ * `.bib` ; Zotero n'en a pas → celui du `.bib` reste. Un résumé venu d'un `.bib` (Better BibTeX,
+ * Mendeley, BibDesk) n'est jamais effacé parce que Zotero n'en a pas.
+ */
+describe('résumé', () => {
+  const lib = (): Library => ({
+    collections: [collection('ARTICLE')],
+    contents: { ARTICLE: [item('AAA', { title: 'Digital Doping', lastName: 'Kansteiner' })] },
+  });
+
+  /** Le `.bib` d'un premier import, auquel on ajoute un résumé, comme le ferait un import de Better BibTeX. */
+  const withBibAbstract = (bibtex: string, zoteroKey: string, abstract: string): string =>
+    bibtex.replace(`zoterokey = {${zoteroKey}}`, `zoterokey = {${zoteroKey}},\n  abstract = {${abstract}}`);
+
+  it('Zotero a un résumé, le .bib n’en a pas : il est écrit, et la notice compte comme modifiée', async () => {
+    const library = lib();
+    const sync = new ZoteroSynchronizer(source(library));
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+
+    library.contents.ARTICLE[0].data.abstractNote = 'Un article sur l’IA et le métier d’historien.';
+    const second = applied(
+      await sync.synchronize({ local: reread(first), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+    );
+
+    expect(second.changed).toBe(true);
+    expect(second.report.modified).toEqual([{ id: 'Kansteiner_2022', title: 'Digital Doping', fields: ['abstract'] }]);
+    expect(reread(second)[0].customFields?.abstract).toBe('Un article sur l’IA et le métier d’historien.');
+  });
+
+  it('Zotero n’a pas de résumé, le .bib en a un : il reste, que la notice change ou non', async () => {
+    const library = lib();
+    const sync = new ZoteroSynchronizer(source(library));
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+    const local = new BibTeXParser().parse(withBibAbstract(first.bibtex, 'AAA', 'Résumé saisi dans le .bib'));
+
+    const unchanged = applied(await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' }));
+    expect(unchanged.changed).toBe(false);
+    expect(unchanged.report.modified).toEqual([]);
+
+    library.contents.ARTICLE[0].data.title = 'Digital Doping for Historians';
+    const retitled = applied(await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' }));
+    expect(retitled.report.modified.map((m) => m.fields)).toEqual([['title']]);
+    expect(reread(retitled)[0].customFields?.abstract).toBe('Résumé saisi dans le .bib');
+  });
+
+  it('Zotero a un autre résumé que le .bib : celui de Zotero l’emporte', async () => {
+    const library = lib();
+    const sync = new ZoteroSynchronizer(source(library));
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+    const local = new BibTeXParser().parse(withBibAbstract(first.bibtex, 'AAA', 'Ancien résumé, retouché à la main'));
+
+    library.contents.ARTICLE[0].data.abstractNote = 'Le résumé tenu à jour dans Zotero.';
+    const second = applied(await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' }));
+
+    expect(second.report.modified.map((m) => m.fields)).toEqual([['abstract']]);
+    expect(reread(second)[0].customFields?.abstract).toBe('Le résumé tenu à jour dans Zotero.');
+    expect(second.bibtex).not.toContain('Ancien résumé');
+  });
+
+  it('un résumé sans lettre latine ni espace (chinois, japonais) est écrit aussi', async () => {
+    // La comparaison des champs ne garde que les lettres ASCII et les blancs : un résumé en chinois
+    // y vaut une chaîne vide, comme un résumé absent, et serait passé pour déjà présent.
+    const library = lib();
+    const sync = new ZoteroSynchronizer(source(library));
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+
+    library.contents.ARTICLE[0].data.abstractNote = '本文讨论档案与数字史学的关系。';
+    const second = applied(
+      await sync.synchronize({ local: reread(first), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+    );
+
+    expect(second.report.modified.map((m) => m.fields)).toEqual([['abstract']]);
+    expect(reread(second)[0].customFields?.abstract).toBe('本文讨论档案与数字史学的关系。');
+  });
+
+  it('accolades, caractères spéciaux et sauts de ligne : relu tel qu’écrit, puis plus rien à faire', async () => {
+    const raw =
+      'Sur {les} archives} : 50 % des cas & d’autres_choses, #1, $2, ~3, C:\\dossier --- « guillemets », contact@example.org.\n\n' +
+      'Second paragraphe.';
+    const library = lib();
+    library.contents.ARTICLE[0].data.abstractNote = raw;
+    const sync = new ZoteroSynchronizer(source(library));
+
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+    // Les sauts de ligne ne survivent pas à la relecture (le parseur réduit les blancs), et `---`
+    // s'y lit en tiret cadratin, comme dans tout champ libre ; le reste revient tel quel.
+    expect(reread(first)[0].customFields?.abstract).toBe(raw.replace(/\s+/g, ' ').replace('---', '—'));
+
+    const second = applied(
+      await sync.synchronize({ local: reread(first), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+    );
+    // Rien à écrire : le fichier garde le résumé tel que la première synchronisation l'a écrit.
+    expect(second.changed).toBe(false);
+    expect(second.report.modified).toEqual([]);
+  });
+
+  it('première synchronisation après la mise à jour : seules les notices dont Zotero a un résumé nouveau changent, sans rien demander', async () => {
+    // Avant la mise à jour, `toCitation` ne lisait pas `abstractNote` : le `.bib` n'a que les
+    // résumés venus d'ailleurs (ici, B et C, écrits à la manière de Better BibTeX, et D).
+    const library: Library = {
+      collections: [collection('ARTICLE')],
+      contents: {
+        ARTICLE: [
+          item('AAA', { title: 'A', lastName: 'Alpha' }),
+          item('BBB', { title: 'B', lastName: 'Beta' }),
+          item('CCC', { title: 'C', lastName: 'Gamma' }),
+          item('DDD', { title: 'D', lastName: 'Delta' }),
+          item('EEE', { title: 'E', lastName: 'Epsilon' }),
+        ],
+      },
+    };
+    const sync = new ZoteroSynchronizer(source(library));
+    const before = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+    let bib = before.bibtex;
+    bib = withBibAbstract(bib, 'BBB', '50 \\% des cas --- en {France}');
+    bib = withBibAbstract(bib, 'CCC', 'Résumé retouché dans le .bib');
+    bib = withBibAbstract(bib, 'DDD', 'Résumé que seul le .bib connaît');
+    const local = new BibTeXParser().parse(bib);
+
+    const [a, b, c] = library.contents.ARTICLE;
+    a.data.abstractNote = 'Résumé que seul Zotero connaît';
+    b.data.abstractNote = '50 % des cas — en France';
+    c.data.abstractNote = 'Résumé de Zotero';
+
+    const after = applied(await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' }));
+
+    expect(after.report.added).toEqual([]);
+    expect(after.report.deleted).toEqual([]);
+    expect(after.report.modified).toEqual([
+      { id: 'Alpha_2022', title: 'A', fields: ['abstract'] },
+      { id: 'Gamma_2022', title: 'C', fields: ['abstract'] },
+    ]);
+    expect(after.report.unchangedCount).toBe(3);
+    const abstracts = Object.fromEntries(reread(after).map((x) => [x.zoteroKey, x.customFields?.abstract]));
+    expect(abstracts).toEqual({
+      AAA: 'Résumé que seul Zotero connaît',
+      BBB: '50 % des cas — en France',
+      CCC: 'Résumé de Zotero',
+      DDD: 'Résumé que seul le .bib connaît',
+      EEE: undefined,
+    });
+  });
+});

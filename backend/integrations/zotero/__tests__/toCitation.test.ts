@@ -242,3 +242,28 @@ describe('URL à accolades', () => {
     expect(c.customFields?.url).toBe('https://journalofdigitalhistory.org/en/article/$%7Bimport.meta.env.VITE_BASEURL%7D');
   });
 });
+
+describe('résumé', () => {
+  it('reprend `abstractNote` sous `abstract`, là où la fiche et la recherche du panneau le lisent', () => {
+    const c = zoteroItemToCitation(
+      item('journalArticle', { title: 'Digital Doping for Historians', abstractNote: 'Un article sur l’IA et l’histoire.' }),
+      'Kansteiner_2022'
+    );
+    expect(c.customFields?.abstract).toBe('Un article sur l’IA et l’histoire.');
+    // Jamais `notes`, que l'exporteur écrit en `note` et que biblatex imprime (L05-7).
+    expect(c.notes).toBeUndefined();
+  });
+
+  it('garde le texte tel que Zotero le donne, sans nettoyage LaTeX', () => {
+    const raw = 'Sur {les} archives : 50 % & \\emph{plus}.\n\nSecond paragraphe.';
+    const c = zoteroItemToCitation(item('journalArticle', { title: 'T', abstractNote: raw }), 'K');
+    expect(c.customFields?.abstract).toBe(raw);
+  });
+
+  it('n’écrit rien quand Zotero n’a pas de résumé', () => {
+    for (const abstractNote of [undefined, '', '   ']) {
+      const c = zoteroItemToCitation(item('journalArticle', { title: 'T', abstractNote }), 'K');
+      expect(c.customFields?.abstract).toBeUndefined();
+    }
+  });
+});

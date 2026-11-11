@@ -171,6 +171,20 @@ export class ZoteroDiffEngine {
       }
     }
 
+    // Le résumé, hors de ZOTERO_OWNED_FIELDS (cf. `toCitation`) : comparé
+    // seulement quand Zotero en a un. Un résumé que seul le `.bib` connaît
+    // n'est jamais un retrait. Absent du `.bib`, il est nouveau quoi qu'en
+    // dise `normalizeString`, qui réduit à rien un texte sans lettre ASCII ni
+    // blanc (un résumé en chinois ne serait jamais écrit).
+    const remoteAbstract = remote.customFields?.abstract;
+    const localAbstract = local.customFields?.abstract;
+    if (
+      remoteAbstract &&
+      (!localAbstract || this.normalizeString(localAbstract) !== this.normalizeString(remoteAbstract))
+    ) {
+      modifiedFields.push('abstract');
+    }
+
     // Compare attachments if requested
     // Pièces jointes non lues côté Zotero (`undefined`) : rien à comparer.
     if (options.compareAttachments && remote.zoteroAttachments !== undefined) {
