@@ -1,6 +1,6 @@
 /**
  * Ouverture de la base d'un projet Tropy, en lecture seule, sans rien laisser
- * à côté du .tpy (G2).
+ * à côté du .tpy (G2), sauf à partir de 2 Gio (J5).
  *
  * Une seule règle pour les deux lecteurs du .tpy : `TropyReader.openProject`
  * (synchro, aperçu, liste des items, photos d'une source pour l'OCR) et
@@ -9,6 +9,18 @@
  */
 import * as fs from 'fs';
 import Database from 'better-sqlite3';
+
+/**
+ * Plus gros fichier que `fs.readFileSync` lit d'un coup : `kIoMaxLength`
+ * (2^31 − 1 octets, un de moins que 2 Gio) de `lib/internal/fs/utils.js`,
+ * que Node ne publie pas. Au-delà, `readFileSync` lève
+ * `ERR_FS_FILE_TOO_LARGE` avant toute lecture (mesuré sous le Node 24.22
+ * d'Electron 45 : 2^31 − 1 octets se lisent, 2^31 non).
+ * `buffer.constants.MAX_LENGTH` n'est pas cette limite : il vaut 32 Gio − 1
+ * sous Electron 45. `tropy-database.test.ts` la confronte au vrai
+ * `readFileSync`.
+ */
+export const READ_FILE_SYNC_MAX_BYTES = 2 ** 31 - 1;
 
 /** En-tête SQLite en journal WAL (octets 18 et 19 de l'en-tête à 2). */
 function isWalDatabase(dbPath: string): boolean {
@@ -38,21 +50,26 @@ function isWalDatabase(dbPath: string): boolean {
  * c'est là que SQLite le range. Un `-shm` seul ne compte pas (aucune écriture
  * n'y attend) ; un `-wal` resté sans `-shm` — état anormal : copie partielle,
  * outil de synchronisation qui écarte le `-shm` — se lit, et SQLite recrée
- * alors un `-shm`, que Tropy retire en fermant le projet. Rien d'autre n'est
- * jamais créé : aucun `-wal`.
+ * alors un `-shm`, que Tropy retire en fermant le projet. En dessous de 2 Gio,
+ * rien d'autre n'est jamais créé : aucun `-wal`.
  *
  * La copie tient la base entière en mémoire tant que la connexion reste
  * ouverte : toute la synchro, OCR compris, pour `TropyReader`. Elle passe par
- * `fs.readFileSync`, qui refuse un fichier de plus de 2 Gio
- * (`ERR_FS_FILE_TOO_LARGE`) : une base en WAL de cette taille, Tropy fermé,
- * ne s'ouvre pas.
+ * `fs.readFileSync`, qui refuse un fichier de 2 Gio ou plus
+ * (`READ_FILE_SYNC_MAX_BYTES`). Au-delà, la base se lit donc elle-même, comme
+ * une base qui n'est pas en WAL (J5) : SQLite crée alors `-wal` et `-shm` à
+ * côté du .tpy et les y laisse, et Tropy les retire à sa prochaine ouverture.
  *
  * `dbPath` est le fichier SQLite (le `project.tpy` d'un paquet `.tropy`).
  * Rend une connexion ouverte, que l'appelant ferme.
  */
 export function openTropyDatabase(dbPath: string): Database.Database {
   const realPath = fs.realpathSync(dbPath);
-  if (!fs.existsSync(`${realPath}-wal`) && isWalDatabase(realPath)) {
+  if (
+    !fs.existsSync(`${realPath}-wal`) &&
+    isWalDatabase(realPath) &&
+    fs.statSync(realPath).size <= READ_FILE_SYNC_MAX_BYTES
+  ) {
     const image = fs.readFileSync(realPath);
     image[18] = 1;
     image[19] = 1;

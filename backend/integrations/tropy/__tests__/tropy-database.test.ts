@@ -16,7 +16,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { sqliteAvailable } from '../../../__tests__/helpers/native-guards';
 import { makeTpy, openTpyForWrite, tpyDatabasePath } from './helpers/make-tpy';
-import { openTropyDatabase } from '../tropy-database';
+import { openTropyDatabase, READ_FILE_SYNC_MAX_BYTES } from '../tropy-database';
 
 let root: string;
 
@@ -34,6 +34,27 @@ function listing(dir: string): string[] {
 
 function digest(file: string): string {
   return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+/** Premiers octets d'un fichier, sans lire le reste (une base de 2 Gio). */
+function head(file: string, length = 100): Buffer {
+  const bytes = Buffer.alloc(length);
+  const fd = fs.openSync(file, 'r');
+  try {
+    fs.readSync(fd, bytes, 0, length, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  return bytes;
+}
+
+/**
+ * Agrandit un fichier sans écrire : la fin est un trou, que le disque ne
+ * porte pas (APFS, ext4). Une base SQLite agrandie ainsi se lit encore : sa
+ * taille utile est dans son en-tête.
+ */
+function growSparse(file: string, size: number): void {
+  fs.truncateSync(file, size);
 }
 
 /** Nom du projet, lu par `openTropyDatabase`. */
@@ -140,6 +161,25 @@ describe.skipIf(!sqliteAvailable)('openTropyDatabase', () => {
     expect({ base: digest(copied), journal: digest(`${copied}-wal`) }).toEqual(bytes);
   });
 
+  // J5 : la copie en mémoire passe par `readFileSync`, qui refuse un fichier
+  // de 2 Gio ou plus. Une très grosse base, Tropy fermé, ne se liait plus ni
+  // ne se synchronisait. Au-delà, elle se lit elle-même ; SQLite crée alors
+  // `-wal` et `-shm`, que Tropy retire à sa prochaine ouverture (décision J5).
+  it('un .tpy en WAL de 2 Gio ou plus, Tropy fermé : se lit lui-même, -wal et -shm à côté, base intacte', () => {
+    const archives = path.join(root, 'archives');
+    const tpy = makeTpy(archives, { projectId: 'projet-A', name: 'Grèves nantaises', wal: true, items: [] });
+    growSparse(tpy, READ_FILE_SYNC_MAX_BYTES + 1);
+    expect(listing(archives)).toEqual([path.basename(tpy)]);
+    const header = head(tpy);
+
+    expect(projectName(tpy)).toBe('Grèves nantaises');
+
+    const name = path.basename(tpy);
+    expect(listing(archives)).toEqual([name, `${name}-shm`, `${name}-wal`]);
+    expect(fs.statSync(tpy).size).toBe(READ_FILE_SYNC_MAX_BYTES + 1);
+    expect(head(tpy)).toEqual(header);
+  });
+
   it('un -shm resté sans -wal : rien dans un journal, copie en mémoire, aucun -wal créé', () => {
     const archives = path.join(root, 'archives');
     const tpy = makeTpy(archives, { projectId: 'projet-A', name: 'Grèves nantaises', wal: true, items: [] });
@@ -151,5 +191,25 @@ describe.skipIf(!sqliteAvailable)('openTropyDatabase', () => {
 
     expect(listing(archives)).toEqual(before);
     expect(digest(tpy)).toBe(bytes);
+  });
+});
+
+// `READ_FILE_SYNC_MAX_BYTES` recopie une constante que Node ne publie pas : le
+// vrai `readFileSync` doit refuser un octet de plus. Si Node relevait sa limite,
+// ce test le dirait. Le côté « à la limite, la lecture passe » n'est pas
+// éprouvé ici : il remplirait 2 Gio de mémoire.
+describe('READ_FILE_SYNC_MAX_BYTES', () => {
+  it('le vrai readFileSync refuse un fichier d’un octet de plus (ERR_FS_FILE_TOO_LARGE)', () => {
+    const big = path.join(root, 'creux.bin');
+    fs.writeFileSync(big, '');
+    growSparse(big, READ_FILE_SYNC_MAX_BYTES + 1);
+
+    let error: unknown = null;
+    try {
+      fs.readFileSync(big);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toMatchObject({ code: 'ERR_FS_FILE_TOO_LARGE' });
   });
 });
