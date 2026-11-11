@@ -170,6 +170,24 @@ describe('auditParsedBib — pas de refus à tort', () => {
     expect(result.unreadKeys).toEqual([]);
   });
 
+  // J2 : une arobase hors des entrées, juste avant l'une d'elles, ne fait rien signaler, ni dans le
+  // fichier d'origine ni dans le fichier que ClioDeck en réécrit ; et chaque entrée garde son type.
+  it.each(['% voir aussi @Garde_2000 pour le contexte', '%% Tenu par jean.dupont@univ-paris.example', '@comment(à revoir : pagination)'])(
+    'témoin : « %s » juste avant chaque entrée, relu puis réécrit',
+    (line) => {
+      const original = audit(`${line}\n@book{Garde_2000,\n  title = {Le temps},\n}\n${line}\n@misc{carton,\n  title = {Carton},\n}\n`);
+      const rewritten = audit(new BibTeXExporter().exportToString(original.parsed));
+
+      for (const result of [original, rewritten]) {
+        expect(result.parsed.map((c) => [c.type, c.id])).toEqual([
+          ['book', 'Garde_2000'],
+          ['misc', 'carton'],
+        ]);
+        expect(result.unreadKeys).toEqual([]);
+      }
+    }
+  );
+
   it('une accolade de trop reste signalée quand un commentaire % la suit', () => {
     const result = audit(
       ['@book{Garde_2000,', '  title = {Le temps}},', '  year = {2000},', '}', '% fin {', '@misc{carton,', '  title = {Carton},', '}'].join('\n')

@@ -247,9 +247,10 @@ describe.each(CASES)('zotero:synchronize — $name : ce qui n’est pas une entr
 });
 
 /**
- * Une arobase hors des entrées : le parseur colle au type de l'entrée qui suit ce qui va de
- * l'arobase à l'accolade de l'entrée (défaut antérieur), et la réécriture l'écrit avec l'entrée.
- * Repris aussi en fin de fichier, ce texte s'y ajoutait à chaque synchronisation qui écrivait.
+ * Une arobase hors des entrées : le parseur collait au type de l'entrée qui suit ce qui allait de
+ * l'arobase à l'accolade de l'entrée, et la réécriture l'écrivait avec l'entrée. Repris aussi en
+ * fin de fichier, ce texte s'y ajoutait à chaque synchronisation qui écrivait (H2). Depuis J2, ce
+ * texte est hors des entrées, repris entier comme le reste.
  */
 describe('zotero:synchronize — une arobase hors des entrées', () => {
   const ENTRIES = [
@@ -293,13 +294,13 @@ describe('zotero:synchronize — une arobase hors des entrées', () => {
     expect(auditParsedBib(last, citations).unreadKeys).toEqual([]);
   });
 
-  it('une adresse dans l’en-tête, des groupes BibDesk en fin : l’en-tête et les groupes restent', async () => {
+  it('une adresse dans l’en-tête, des groupes BibDesk en fin : l’en-tête, entier, et les groupes restent', async () => {
     makeProject(`%% Tenu par jean.dupont@univ-paris.example\n\n${ENTRIES}\n${GROUPS}\n`);
 
     const written = await synchronizeThrice();
 
     for (const bib of written) {
-      expect(bib.startsWith('%% Tenu par jean.dupont\n')).toBe(true);
+      expect(bib.startsWith('%% Tenu par jean.dupont@univ-paris.example\n\n@book{Garde2000,\n')).toBe(true);
       expect(occurrences(bib, GROUPS)).toBe(1);
       expect(bib.endsWith(`${GROUPS}\n`)).toBe(true);
     }

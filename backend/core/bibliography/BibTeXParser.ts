@@ -170,6 +170,32 @@ const skipBlanks = (text: string, index: number): number => {
   return index;
 };
 
+/** Un `@type{` ou `@type(` : des blancs permis autour du type, comme pour BibTeX. */
+const BLOCK_START = /@\s*([A-Za-z][\w-]*)\s*([{(])/g;
+
+/**
+ * Le premier bloc `@type{` ou `@type(` à partir de `from`, ou `null`. Le type est l'identifiant qui
+ * suit la dernière arobase avant l'accolade ; ce qui précède cette arobase est du texte hors des
+ * entrées. Lu de la première arobase à l'accolade, le type emportait une arobase hors des entrées
+ * (« % voir aussi @Garde2000 », une adresse, un `@comment(…)`) : l'exporteur écrivait
+ * « @univ-paris.example » sur une ligne, « @book{Garde2000, » sur la suivante, et pandoc refusait
+ * le fichier (J2).
+ *
+ * `outsideEntries` découpe le fichier avec cette fonction : une entrée y commence là où le parseur
+ * la commence.
+ */
+export function findBlockStart(
+  text: string,
+  from: number
+): { at: number; type: string; open: number; delimiter: '{' | '(' } | null {
+  const blockStart = new RegExp(BLOCK_START);
+  blockStart.lastIndex = from;
+  const match = blockStart.exec(text);
+  if (!match) return null;
+  const open = match.index + match[0].length - 1;
+  return { at: match.index, type: match[1], open, delimiter: text[open] === '{' ? '{' : '(' };
+}
+
 export class BibTeXParser {
   /**
    * Entrées rejetées lors du DERNIER parse (réinitialisé à chaque appel).
@@ -212,17 +238,17 @@ export class BibTeXParser {
     let currentIndex = 0;
 
     while (currentIndex < content.length) {
-      // Chercher @type{
-      const atIndex = content.indexOf('@', currentIndex);
-      if (atIndex === -1) break;
+      // Chercher @type{ ; le type est l'identifiant qui suit la dernière arobase avant l'accolade
+      const block = findBlockStart(content, currentIndex);
+      if (!block) break;
 
-      currentIndex = atIndex + 1;
+      // Le parseur ne lit que les accolades : un bloc entre parenthèses (`@comment(…)`, une entrée
+      // que l'audit signale) n'est pas lu, et l'on cherche plus loin, après sa parenthèse
+      const openBraceIndex = block.open;
+      currentIndex = openBraceIndex + 1;
+      if (block.delimiter === '(') continue;
 
-      // Extraire le type
-      const openBraceIndex = content.indexOf('{', currentIndex);
-      if (openBraceIndex === -1) continue;
-
-      const typeString = content.slice(currentIndex, openBraceIndex).trim();
+      const typeString = block.type;
 
       // Mémoriser les abréviations @string, pour les entrées qui suivent
       if (typeString.toLowerCase() === 'string') {

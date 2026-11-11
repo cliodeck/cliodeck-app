@@ -624,9 +624,9 @@ describe('ce que le .bib du projet porte hors de ses entrées', () => {
     expect(idsOf(projectBib())).toEqual(['Garde2000', 'Leduc1990', 'Autre_2015']);
   });
 
-  // Le parseur colle au type de l'entrée qui suit ce qui va d'une arobase hors des entrées à son
-  // accolade, et la réécriture l'écrit avec l'entrée : repris aussi en fin de fichier, ce texte s'y
-  // ajoutait à chaque fusion qui écrivait.
+  // Le parseur collait au type de l'entrée qui suit ce qui allait d'une arobase hors des entrées à
+  // son accolade, et la réécriture l'écrivait avec l'entrée : repris aussi en fin de fichier, ce
+  // texte s'y ajoutait à chaque fusion qui écrivait (H2). Depuis J2, il est hors des entrées.
   it('« Fusionner » deux fois, une arobase dans un commentaire % entre deux entrées : rien ne s’ajoute en fin de fichier', async () => {
     const jabref = '@Comment{jabref-meta: databaseType:biblatex;}';
     const original = `${entry('Garde_2000', 'Le temps des archives')}\n% voir aussi @Garde_2000 pour le contexte\n${entry('Main_2010', 'Une note à la main')}\n${jabref}\n`;

@@ -12,20 +12,15 @@
  * devant une entrée la quitte donc : la réécriture peut retirer l'entrée ou en changer l'ordre, et
  * le rattacher à une entrée par sa clé ne serait plus simple ni sûr.
  *
- * Une arobase hors des entrées (« % voir aussi @Garde2000 », une adresse, un `@comment(…)`) : le
- * parseur colle au type de l'entrée qui suit tout ce qui va de cette arobase à l'accolade de
- * l'entrée, et l'exporteur l'écrit avec elle. Ce texte reste donc avec l'entrée (`parserStart`) ;
- * seul ce qui le précède est repris hors des entrées. Une ligne ainsi coupée en deux garde ses
- * octets, une fois chacun.
+ * Une arobase hors des entrées (« % voir aussi @Garde2000 », une adresse, un `@comment(…)`) est du
+ * texte hors des entrées, repris comme le reste : une entrée commence à l'arobase de son type, pour
+ * le découpage comme pour le parseur (`findBlockStart`, J2).
  *
  * Les `@string` restent tels quels, mais la réécriture écrit toujours les valeurs développées
  * (L05-7) : la définition est gardée, plus rien ne la cite.
  */
-import { BibTeXParser, findMatchingBrace } from './BibTeXParser';
+import { BibTeXParser, findBlockStart, findMatchingBrace } from './BibTeXParser';
 import { auditParsedBib } from './bibAudit';
-
-/** Un `@type{` ou `@type(` : des blancs permis autour du type, comme pour BibTeX. */
-const BLOCK_START = /@\s*([A-Za-z][\w-]*)\s*([{(])/g;
 
 /** Ces blocs ne sont pas des références : le parseur n'en fait pas de citation. */
 const NOT_REFERENCES = new Set(['comment', 'preamble', 'string']);
@@ -72,42 +67,20 @@ function findMatchingParen(text: string, open: number): number {
  * que du texte, et l'on cherche plus loin, comme le parseur. Une entrée entre parenthèses, qu'il ne
  * lit pas, reste du texte : la synchronisation et la fusion refusent d'ailleurs un tel fichier.
  *
- * Une entrée commence là où le parseur la commence (`parserStart`). Un bloc entre parenthèses ne
- * compte pas pour cela : le parseur ne le referme pas, il cherche l'accolade qui suit son arobase.
+ * Une entrée commence à l'arobase de son type, là où le parseur la commence (`findBlockStart`).
  */
 function entrySpans(bib: string): Array<{ start: number; end: number }> {
   const spans: Array<{ start: number; end: number }> = [];
-  const blockStart = new RegExp(BLOCK_START);
-  // Où le parseur reprend sa lecture : après le dernier bloc entre accolades.
-  let resume = 0;
-  for (let match = blockStart.exec(bib); match; match = blockStart.exec(bib)) {
-    const open = match.index + match[0].length - 1;
-    const braces = match[2] === '{';
-    const close = braces ? findMatchingBrace(bib, open) : findMatchingParen(bib, open);
-    if (close === -1) continue;
-    if (braces && !NOT_REFERENCES.has(match[1].toLowerCase())) {
-      spans.push({ start: parserStart(bib, resume, match.index), end: close + 1 });
+  let from = 0;
+  for (let block = findBlockStart(bib, from); block; block = findBlockStart(bib, from)) {
+    const braces = block.delimiter === '{';
+    const close = braces ? findMatchingBrace(bib, block.open) : findMatchingParen(bib, block.open);
+    from = close === -1 ? block.open + 1 : close + 1;
+    if (close !== -1 && braces && !NOT_REFERENCES.has(block.type.toLowerCase())) {
+      spans.push({ start: block.at, end: close + 1 });
     }
-    if (braces) resume = close + 1;
-    blockStart.lastIndex = close + 1;
   }
   return spans;
-}
-
-/**
- * Où le parseur fait commencer l'entrée dont l'arobase est en `at`, quand il reprend sa lecture en
- * `resume` : à la première arobase qu'aucune accolade ouvrante ne sépare de celle de l'entrée. Il
- * prend pour type tout ce qui va de là à l'accolade (« % voir aussi @Garde2000 » ou une adresse
- * juste avant l'entrée, un `@comment(…)`), et l'exporteur l'écrit avec l'entrée. Ce texte est donc
- * de l'entrée : compté aussi hors des entrées, il revenait en fin de fichier à chaque réécriture,
- * une fois de plus. Une arobase dans un `@comment{…}` qui précède l'entrée reste au bloc, gardé
- * entier : le texte que le parseur en colle au type s'écrit alors deux fois, sans s'ajouter
- * d'une réécriture à l'autre.
- */
-function parserStart(bib: string, resume: number, at: number): number {
-  const brace = at === 0 ? -1 : bib.lastIndexOf('{', at - 1);
-  const first = bib.indexOf('@', Math.max(resume, brace + 1));
-  return first === -1 ? at : Math.min(first, at);
 }
 
 /**

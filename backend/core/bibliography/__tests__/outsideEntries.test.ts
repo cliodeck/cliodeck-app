@@ -192,22 +192,6 @@ describe('keepOutsideEntries — ce qui changerait la relecture n’est pas repr
     warn.mockRestore();
   });
 
-  // Le parseur colle au type de la première entrée la fin d'un @comment d'en-tête qui porte une
-  // adresse, et la réécriture l'écrit avec l'entrée : gardé, le bloc la recollerait une seconde
-  // fois. Limite qui tient au parseur ; les groupes de la fin restent.
-  it('une adresse dans un @comment d’en-tête : le bloc n’est pas repris, les groupes de la fin restent', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const previous = `@comment{Tenu par jean@univ.example}\n\n${GARDE}\n\n${GROUPS}`;
-    const rewritten = rewrite(previous);
-
-    const kept = keepOutsideEntries(previous, rewritten);
-
-    expect(kept).toBe(`${rewritten.trimEnd()}\n\n${GROUPS}`);
-    expect(warn).toHaveBeenCalled();
-    expect(keepOutsideEntries(kept, rewrite(kept))).toBe(kept);
-    warn.mockRestore();
-  });
-
   it('une entrée dans un @comment entre deux entrées, un en-tête : l’en-tête reste, rien ne se double', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const previous = `% En-tête\n\n${GARDE}\n\n@comment{@article{Cache_1990, title={Dans un commentaire}}}\n\n${GARDE.replace('Garde_2000', 'Autre')}\n`;
@@ -243,11 +227,12 @@ describe('keepOutsideEntries — ce qui changerait la relecture n’est pas repr
 });
 
 /**
- * Une arobase hors des entrées, dans un commentaire `%`, une adresse, un bloc entre parenthèses :
- * le parseur colle au type de l'entrée qui suit tout ce qui va de cette arobase à l'accolade de
- * l'entrée (défaut antérieur, sur `main` aussi), et la réécriture l'écrit avec l'entrée. Ce texte
- * appartient donc à l'entrée : repris aussi hors des entrées, il revenait en fin de fichier à
- * chaque réécriture, une ligne de plus chaque fois.
+ * Une arobase hors des entrées, dans un commentaire `%`, une adresse, un bloc entre parenthèses.
+ * Le parseur collait au type de l'entrée qui suit tout ce qui allait de cette arobase à l'accolade
+ * de l'entrée, et la réécriture l'écrivait avec elle : repris aussi hors des entrées, ce texte
+ * revenait en fin de fichier à chaque réécriture (H2), et pandoc refusait le fichier. Depuis J2, le
+ * type est l'identifiant qui suit la dernière arobase avant l'accolade : ce texte est hors des
+ * entrées, repris comme le reste, et rien ne s'ajoute d'une réécriture à l'autre.
  */
 describe('keepOutsideEntries — une arobase hors des entrées', () => {
   const A = '@book{Garde2000,\n  title = {Le temps des archives},\n  year = {2000},\n}\n';
@@ -265,6 +250,35 @@ describe('keepOutsideEntries — une arobase hors des entrées', () => {
     expectSameReading(once, rewrite(previous));
     return once;
   }
+
+  // J2 : la ligne qui porte l'arobase est du texte hors des entrées, reprise entière, à l'octet, et
+  // l'entrée réécrite commence par son type. `expectSettled` relit et redécoupe le fichier composé :
+  // le parseur et le découpage disent la même chose de l'endroit où l'entrée commence.
+  const LINES = [
+    ['un commentaire % qui cite une clé', '% voir aussi @Garde2000 pour le contexte'],
+    ['une adresse', '%% Tenu par jean.dupont@univ-paris.example'],
+    ['un bloc entre parenthèses', '@comment(à revoir : pagination de Leduc1990)'],
+  ];
+
+  it.each(LINES)('%s juste avant la première entrée : la ligne reste en tête, entière ; l’entrée commence par son type', (_name, line) => {
+    const previous = `${line}\n${A}\n${B}\n${JABREF}\n`;
+    const rewritten = rewrite(previous);
+
+    const kept = expectSettled(previous);
+
+    expect(rewritten.match(/^@.*$/gm)).toEqual(['@book{Garde2000,', '@article{Leduc1990,']);
+    expect(kept).toBe(`${line}\n\n${rewritten.trimEnd()}\n\n${JABREF}\n`);
+  });
+
+  it.each(LINES)('%s juste avant une autre entrée : la ligne passe en fin, entière, avant ce qui suivait la dernière', (_name, line) => {
+    const previous = `${A}\n${line}\n${B}\n${JABREF}\n`;
+    const rewritten = rewrite(previous);
+
+    const kept = expectSettled(previous);
+
+    expect(rewritten.match(/^@.*$/gm)).toEqual(['@book{Garde2000,', '@article{Leduc1990,']);
+    expect(kept).toBe(`${rewritten.trimEnd()}\n\n${line}\n\n${JABREF}\n`);
+  });
 
   it('dans un commentaire % entre deux entrées : rien ne revient en fin de fichier', () => {
     const kept = expectSettled(`% Bibliographie\n\n${A}\n% voir aussi @Garde2000 pour le contexte\n${B}\n${JABREF}\n`);
@@ -289,29 +303,61 @@ describe('keepOutsideEntries — une arobase hors des entrées', () => {
     expect(kept.endsWith(`${JABREF}\n`)).toBe(true);
   });
 
-  // L'adresse colle l'arobase et ce qui la suit au type de la première entrée : l'en-tête garde le
-  // reste de sa ligne, et les groupes de la fin, qui n'y sont pour rien, restent.
-  it('une adresse dans l’en-tête : l’en-tête et les groupes de la fin restent', () => {
+  // L'adresse ne se colle plus au type de la première entrée (J2) : la ligne d'en-tête reste
+  // entière, et les groupes de la fin aussi.
+  it('une adresse dans l’en-tête : la ligne reste entière, en tête, et les groupes de la fin restent', () => {
     const previous = `%% Tenu par jean.dupont@univ-paris.example\n\n${A}\n${B}\n${GROUPS}`;
     const rewritten = rewrite(previous);
 
     const kept = expectSettled(previous);
 
-    expect(kept).toBe(`%% Tenu par jean.dupont\n\n${rewritten.trimEnd()}\n\n${GROUPS}`);
+    expect(kept).toBe(`%% Tenu par jean.dupont@univ-paris.example\n\n${rewritten.trimEnd()}\n\n${GROUPS}`);
   });
 
-  // Le fichier composé doit se redécouper à l'identique. Ici, l'en-tête ouvre un @comment qu'il
-  // ne referme pas, et une adresse suit, dans un bloc entre deux entrées : composé sans ce
-  // contrôle, l'en-tête restait à la première réécriture et partait à la deuxième (trouvé par un
-  // fuzz de la revue). Avec lui, le fichier ne change plus dès la première.
-  it('un @comment non refermé en tête, une adresse dans un bloc entre deux entrées : la réécriture suivante rend le même fichier', () => {
+  // Le bloc d'en-tête qui porte une adresse ne colle plus sa fin au type de la première entrée
+  // (J2) : c'est un bloc comme un autre, repris en tête, sans rien changer à la relecture.
+  it('une adresse dans un @comment d’en-tête : le bloc reste en tête, les groupes en fin', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const previous = '@comment{à finir\n@book{K1,\n  title = {T1},\n}\n@comment{Notices de paul@archives.fr}\n@book{K2,\n  title = {T2},\n}\n';
+    const previous = `@comment{Tenu par jean@univ.example}\n\n${GARDE}\n\n${GROUPS}`;
+    const rewritten = rewrite(previous);
 
     const kept = expectSettled(previous);
 
-    expect(count(kept, '@comment{Notices de paul@archives.fr}')).toBe(1);
-    expect(kept).not.toContain('@comment{à finir');
+    expect(kept).toBe(`@comment{Tenu par jean@univ.example}\n\n${rewritten.trimEnd()}\n\n${GROUPS}`);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // Trouvé par un fuzz de la revue de H2 : l'adresse collait au type de la seconde entrée une
+  // accolade fermante, qui refermait, dans le fichier composé, le @comment laissé ouvert en tête ;
+  // l'en-tête restait à la première réécriture et partait à la deuxième. Depuis J2, rien ne se colle
+  // au type : tout reste, et le fichier ne change plus.
+  it('un @comment non refermé en tête, une adresse dans un bloc entre deux entrées : tout reste, et la réécriture suivante rend le même fichier', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = '@comment{à finir\n@book{K1,\n  title = {T1},\n}\n@comment{Notices de paul@archives.fr}\n@book{K2,\n  title = {T2},\n}\n';
+    const rewritten = rewrite(previous);
+
+    const kept = expectSettled(previous);
+
+    expect(kept).toBe(`@comment{à finir\n\n${rewritten.trimEnd()}\n\n@comment{Notices de paul@archives.fr}\n`);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  // Le fichier composé doit se redécouper à l'identique. Ici, l'en-tête ouvre un @comment(…) qu'il
+  // ne referme pas, et un chemin finit par une barre oblique inverse, que la réécriture écrit
+  // `\textbackslash{}` : les accolades du fichier composé ne se comptent plus comme celles de
+  // l'ancien, et la parenthèse du bloc de fin referme celui de l'en-tête, qui avale l'entrée.
+  // Composé sans ce contrôle, l'en-tête restait à la première réécriture, et partait à la deuxième
+  // avec le bloc de fin (trouvé par un fuzz, J2). Avec lui, le fichier ne change plus dès la première.
+  it('un @comment( non refermé en tête, un chemin qui finit par une barre oblique inverse : la réécriture suivante rend le même fichier', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = '@comment(à finir\n\n@book{K1,\n  title = {C:\\dossier\\},\n}\n\n@comment(à revoir)\n';
+    const rewritten = rewrite(previous);
+
+    const kept = expectSettled(previous);
+
+    expect(kept).toBe(`${rewritten.trimEnd()}\n\n@comment(à revoir)\n`);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
