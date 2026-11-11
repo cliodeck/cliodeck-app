@@ -29,7 +29,6 @@ import {
   validate,
   ProjectCreateSchema,
   ProjectSaveSchema,
-  BibliographySourceSchema,
   StringPathSchema,
   ProjectSetCSLPathSchema,
   ProjectUpdateConfigSchema,
@@ -281,19 +280,6 @@ export function setupProjectHandlers(options: ProjectHandlersOptions = {}): Proj
       return result;
     } catch (error: unknown) {
       console.error('❌ project:save-book-settings error:', error);
-      return errorResponse(error);
-    }
-  });
-
-  ipcMain.handle('project:set-bibliography-source', async (_event, data: unknown) => {
-    console.log('📞 IPC Call: project:set-bibliography-source', data);
-    try {
-      const validatedData = validate(BibliographySourceSchema, data);
-      const result = await projectManager.setBibliographySource(validatedData);
-      console.log('📤 IPC Response: project:set-bibliography-source', result);
-      return result;
-    } catch (error: unknown) {
-      console.error('❌ project:set-bibliography-source error:', error);
       return errorResponse(error);
     }
   });

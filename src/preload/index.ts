@@ -87,12 +87,6 @@ const api = {
         numberSections?: boolean;
       };
     }) => ipcRenderer.invoke('project:save-book-settings', data),
-    setBibliographySource: (data: {
-      projectPath: string;
-      type: 'file' | 'zotero';
-      filePath?: string;
-      zoteroCollection?: string;
-    }) => ipcRenderer.invoke('project:set-bibliography-source', data),
     setCSLPath: (data: {
       projectPath: string;
       cslPath?: string;

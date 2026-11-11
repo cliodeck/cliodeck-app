@@ -34,13 +34,6 @@ export const ProjectSaveSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
-export const BibliographySourceSchema = z.object({
-  projectPath: z.string().min(1),
-  type: z.enum(['file', 'zotero']),
-  filePath: z.string().optional(),
-  zoteroCollection: z.string().optional(),
-});
-
 // PDF schemas
 export const PDFIndexSchema = z.object({
   filePath: z.string().min(1, 'File path is required'),

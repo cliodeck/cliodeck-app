@@ -3,7 +3,6 @@ import {
   validate,
   ProjectCreateSchema,
   ProjectSaveSchema,
-  BibliographySourceSchema,
   PDFIndexSchema,
   PDFSearchSchema,
   ChatSendSchema,
@@ -87,35 +86,6 @@ describe('ProjectSaveSchema', () => {
 
   it('rejects missing content', () => {
     expect(() => ProjectSaveSchema.parse({ path: '/p' })).toThrow();
-  });
-});
-
-describe('BibliographySourceSchema', () => {
-  it('accepts file type', () => {
-    const result = BibliographySourceSchema.parse({
-      projectPath: '/project/project.json',
-      type: 'file',
-      filePath: '/project/refs.bib',
-    });
-    expect(result.type).toBe('file');
-  });
-
-  it('accepts zotero type', () => {
-    const result = BibliographySourceSchema.parse({
-      projectPath: '/project/project.json',
-      type: 'zotero',
-      zoteroCollection: 'ABC123',
-    });
-    expect(result.type).toBe('zotero');
-  });
-
-  it('rejects invalid type', () => {
-    expect(() =>
-      BibliographySourceSchema.parse({
-        projectPath: '/p',
-        type: 'mendeley',
-      })
-    ).toThrow();
   });
 });
 
