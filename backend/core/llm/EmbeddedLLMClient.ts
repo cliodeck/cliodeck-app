@@ -6,6 +6,7 @@
  */
 
 import type { SearchResult } from '../../types/pdf-document.js';
+import { forgetLoadedClient, trackLoadedClient } from './embedded-engine-pool.js';
 
 // Types pour node-llama-cpp (évite les problèmes d'import ESM)
 interface LlamaInstance {
@@ -22,6 +23,8 @@ interface LlamaModelInstance {
   /** Fenêtre du modèle, en jetons (512 pour Nomic Embed v2). */
   trainContextSize?: number;
   tokenize?: (text: string) => ArrayLike<unknown>;
+  /** Libère le GGUF chargé ; idempotent. Jamais `llama.dispose()`, qui libère le backend du processus. */
+  dispose: () => Promise<void>;
 }
 
 interface LlamaContextInstance {
@@ -144,6 +147,16 @@ function splitNearMiddle(text: string): [string, string] | null {
   return [text.slice(0, middle), text.slice(middle)];
 }
 
+/** Libère un modèle chargé, sans lever : un échec ne retient pas les libérations suivantes. */
+async function disposeModel(model: LlamaModelInstance | null, tag: string): Promise<void> {
+  if (!model) return;
+  try {
+    await model.dispose();
+  } catch (error) {
+    console.warn(`⚠️ ${tag} Error disposing model:`, error);
+  }
+}
+
 export class EmbeddedLLMClient {
   // Generation model state
   private llama: LlamaInstance | null = null;
@@ -205,6 +218,7 @@ export class EmbeddedLLMClient {
       this.modelPath = modelPath;
       this.modelId = modelId || null;
       this.initialized = true;
+      trackLoadedClient(this);
 
       console.log('✅ [EMBEDDED] Embedded LLM initialized successfully');
       return true;
@@ -221,6 +235,8 @@ export class EmbeddedLLMClient {
       } catch (disposeError) {
         console.warn('⚠️ [EMBEDDED] Error disposing context during cleanup:', disposeError);
       }
+      // Un modèle chargé dont le contexte a échoué resterait en mémoire jusqu'à la sortie (A16).
+      await disposeModel(this.model, '[EMBEDDED]');
       this.model = null;
       this.llama = null;
       this.sequence = null;
@@ -265,6 +281,7 @@ export class EmbeddedLLMClient {
       this.embeddingModelPath = modelPath;
       this.embeddingModelId = modelId || null;
       this.embeddingInitialized = true;
+      trackLoadedClient(this);
 
       console.log(`✅ [EMBEDDED-EMB] Embedding model loaded: ${modelId}, dims=${this.embeddingDimensions}`);
       return true;
@@ -280,6 +297,7 @@ export class EmbeddedLLMClient {
       } catch (disposeError) {
         console.warn('⚠️ [EMBEDDED-EMB] Error disposing embedding context during cleanup:', disposeError);
       }
+      await disposeModel(this.embeddingModel, '[EMBEDDED-EMB]');
       this.embeddingModel = null;
       this.embeddingContext = null;
       this.embeddingModelPath = null;
@@ -598,9 +616,13 @@ ${userQuery}
   }
 
   /**
-   * Libère les ressources du modèle
+   * Libère les ressources du modèle : chaque contexte, puis son modèle (A16). Jamais
+   * `llama.dispose()` : il libère le backend de tout le processus, celui des autres clients compris
+   * (mesuré par L08). Tout est détaché avant la première attente : une seconde libération
+   * concurrente (le registre et la sortie de l'app) ne libère rien deux fois.
    */
   async dispose(): Promise<void> {
+    forgetLoadedClient(this);
     // Wait for any ongoing generation to complete
     if (this.isGenerating) {
       console.log('⏳ [EMBEDDED] Waiting for generation to complete before disposing...');
@@ -608,14 +630,10 @@ ${userQuery}
       await new Promise((r) => setTimeout(r, 500));
     }
 
-    // Dispose embedding resources
-    try {
-      if (this.embeddingContext) {
-        await this.embeddingContext.dispose();
-      }
-    } catch (error) {
-      console.warn('⚠️ [EMBEDDED] Error disposing embedding context:', error);
-    }
+    const embeddingContext = this.embeddingContext;
+    const embeddingModel = this.embeddingModel;
+    const context = this.context;
+    const model = this.model;
 
     this.embeddingModel = null;
     this.embeddingContext = null;
@@ -623,15 +641,6 @@ ${userQuery}
     this.embeddingModelId = null;
     this.embeddingInitialized = false;
     this.embeddingDimensions = 0;
-
-    // Dispose generation resources
-    try {
-      if (this.context) {
-        await this.context.dispose();
-      }
-    } catch (error) {
-      console.warn('⚠️ [EMBEDDED] Error disposing context:', error);
-    }
 
     this.model = null;
     this.llama = null;
@@ -641,6 +650,26 @@ ${userQuery}
     this.modelPath = null;
     this.modelId = null;
     this.isGenerating = false;
+
+    // Dispose embedding resources
+    try {
+      if (embeddingContext) {
+        await embeddingContext.dispose();
+      }
+    } catch (error) {
+      console.warn('⚠️ [EMBEDDED] Error disposing embedding context:', error);
+    }
+    await disposeModel(embeddingModel, '[EMBEDDED]');
+
+    // Dispose generation resources
+    try {
+      if (context) {
+        await context.dispose();
+      }
+    } catch (error) {
+      console.warn('⚠️ [EMBEDDED] Error disposing context:', error);
+    }
+    await disposeModel(model, '[EMBEDDED]');
 
     console.log('🧹 [EMBEDDED] Resources disposed');
   }
