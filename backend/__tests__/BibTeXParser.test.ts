@@ -237,6 +237,72 @@ describe('BibTeXParser', () => {
     });
   });
 
+  /**
+   * Le type d'une entrée est l'identifiant qui suit la dernière arobase avant son accolade (J2). Le
+   * parseur prenait tout ce qui allait de la première arobase à l'accolade : une arobase hors des
+   * entrées se collait au type de l'entrée suivante, l'exporteur écrivait « @univ-paris.example »
+   * sur une ligne et « @book{Garde2000, » sur la suivante, et pandoc refusait le fichier.
+   */
+  describe('parse — où commence une entrée', () => {
+    const GARDE = '@book{Garde2000,\n  title = {Le temps des archives},\n  year = {2000},\n}\n';
+
+    it.each([
+      ['un commentaire % qui cite une clé', `% voir aussi @Garde2000 pour le contexte\n${GARDE}`],
+      ['une adresse électronique dans l’en-tête', `%% Tenu par jean.dupont@univ-paris.example\n\n${GARDE}`],
+      ['un @comment entre parenthèses', `@comment(à revoir : pagination)\n\n${GARDE}`],
+      // Ce qu'écrivait la réécriture d'avant : relu, c'est une entrée `book` précédée d'un texte. Seule
+      // la lecture est réparée : le débris « @univ-paris.example » reste dans le fichier, hors des
+      // entrées, et pandoc le refuse encore (bibliography-service.test.ts).
+      ['la lecture d’un type abîmé par une réécriture d’avant', `%% Tenu par jean.dupont\n\n@univ-paris.example\n\n${GARDE}`],
+    ])('%s, juste avant l’entrée : une entrée book, de clé Garde2000', (_name, bibtex) => {
+      const reader = new BibTeXParser();
+
+      const citations = reader.parse(bibtex);
+
+      expect(citations.map((c) => [c.type, c.id, c.title, c.year])).toEqual([['book', 'Garde2000', 'Le temps des archives', '2000']]);
+      expect(reader.lastRejected).toEqual([]);
+      expect(auditParsedBib(bibtex, citations).unreadKeys).toEqual([]);
+    });
+
+    it.each([
+      ['des blancs autour du type', GARDE.replace('@book{', '@ book {'), 'book'],
+      ['un type à tiret et à chiffre', GARDE.replace('@book{', '@video-recording2{'), 'video-recording2'],
+      ['un type en capitales', GARDE.replace('@book{', '@BOOK{'), 'BOOK'],
+    ])('témoin : %s', (_name, bibtex, type) => {
+      expect(parser.parse(bibtex).map((c) => [c.type, c.id])).toEqual([[type, 'Garde2000']]);
+    });
+
+    // BibTeX lit pour type tout identifiant qui ne commence pas par un chiffre et ne porte ni blanc
+    // ni `"#%'(),={}` ; avant J2, le parseur lisait tout ce qui précédait l'accolade. Un motif plus
+    // étroit faisait disparaître ces entrées des citations sans un mot, l'audit ne les voyant pas.
+    it.each([
+      ['un type accentué', '@thèse{', 'thèse'],
+      ['un type à point', '@my.type{', 'my.type'],
+      ['un type à deux-points', '@misc:web{', 'misc:web'],
+      ['un type à signe plus', '@book+x{', 'book+x'],
+    ])('%s, que BibTeX accepte, se lit comme avant', (_name, start, type) => {
+      const bibtex = `${GARDE.replace('@book{', start)}\n${GARDE.replace('Garde2000', 'Autre')}`;
+
+      const citations = parser.parse(bibtex);
+
+      expect(citations.map((c) => [c.type, c.id])).toEqual([
+        [type, 'Garde2000'],
+        ['book', 'Autre'],
+      ]);
+      expect(auditParsedBib(bibtex, citations).unreadKeys).toEqual([]);
+    });
+
+    // Une entrée écrite dans un @comment{…} reste lue comme avant : hors de J2, sans nouvel accord.
+    it('témoin : une entrée écrite dans un @comment{…} se lit comme avant', () => {
+      const bibtex = `@comment{@article{Cache_1990, title={Dans un commentaire}}}\n\n${GARDE}`;
+
+      expect(parser.parse(bibtex).map((c) => [c.type, c.id])).toEqual([
+        ['article', 'Cache_1990'],
+        ['book', 'Garde2000'],
+      ]);
+    });
+  });
+
   describe('cleanValue', () => {
     it('should convert all common French accents', () => {
       const testCases = [

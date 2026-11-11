@@ -119,6 +119,18 @@ describe('auditParsedBib — les entrées que le parseur a laissées', () => {
     expect(audit('@book(Garde_2000,\n  title = {Le temps},\n)\n').unreadKeys).toEqual(['Garde_2000']);
   });
 
+  // Les types que BibTeX accepte (J2) : l'audit lit le début d'une entrée comme le parseur. Avec un
+  // motif plus étroit que le sien, une entrée accentuée qui ne se referme pas passait inaperçue.
+  it.each([
+    ['accentué', '@thèse{'],
+    ['à point', '@my.type{'],
+  ])('une entrée de type %s qui ne se referme pas est signalée', (_name, start) => {
+    const result = audit(`${start}K2,\n  title = {T2},\n\n@book{Garde_2000,\n  title = {Le temps},\n}\n`);
+
+    expect(result.parsed.map((c) => c.id)).toEqual(['Garde_2000']);
+    expect(result.unreadKeys).toEqual(['K2']);
+  });
+
   it('deux entrées de même clé : une seule lue, la clé est signalée', () => {
     const result = audit(
       ['@misc{Lester_1935,', '  title = {Diary, January},', '}', '@misc{Lester_1935,', '  note = {Diary, February},', '}'].join('\n')
@@ -170,6 +182,24 @@ describe('auditParsedBib — pas de refus à tort', () => {
     expect(result.unreadKeys).toEqual([]);
   });
 
+  // J2 : une arobase hors des entrées, juste avant l'une d'elles, ne fait rien signaler, ni dans le
+  // fichier d'origine ni dans le fichier que ClioDeck en réécrit ; et chaque entrée garde son type.
+  it.each(['% voir aussi @Garde_2000 pour le contexte', '%% Tenu par jean.dupont@univ-paris.example', '@comment(à revoir : pagination)'])(
+    'témoin : « %s » juste avant chaque entrée, relu puis réécrit',
+    (line) => {
+      const original = audit(`${line}\n@book{Garde_2000,\n  title = {Le temps},\n}\n${line}\n@misc{carton,\n  title = {Carton},\n}\n`);
+      const rewritten = audit(new BibTeXExporter().exportToString(original.parsed));
+
+      for (const result of [original, rewritten]) {
+        expect(result.parsed.map((c) => [c.type, c.id])).toEqual([
+          ['book', 'Garde_2000'],
+          ['misc', 'carton'],
+        ]);
+        expect(result.unreadKeys).toEqual([]);
+      }
+    }
+  );
+
   it('une accolade de trop reste signalée quand un commentaire % la suit', () => {
     const result = audit(
       ['@book{Garde_2000,', '  title = {Le temps}},', '  year = {2000},', '}', '% fin {', '@misc{carton,', '  title = {Carton},', '}'].join('\n')
@@ -220,5 +250,27 @@ describe('auditParsedBib — les @string que le parseur ne lit pas', () => {
     const result = audit('@string{AN = {Archives nationales}\n\n@book{Garde_2000,\n  title = {Le temps},\n  publisher = AN,\n}\n');
 
     expect(result.unreadKeys).toContain('string');
+  });
+});
+
+/**
+ * Limite assumée (voir l'en-tête de `bibAudit.ts`) : l'audit lit les débuts de ligne sans savoir
+ * s'ils tombent dans une valeur. Depuis J2, il lit le type comme le parseur, comme BibTeX : la
+ * limite s'étend aux identifiants à point ou accentués, que l'ancien motif ne lisait pas. Le
+ * fichier est refusé à tort, mais rien n'est perdu ; et ClioDeck, qui écrit chaque valeur sur une
+ * ligne, n'écrit jamais ce faux début.
+ */
+describe('auditParsedBib — une ligne de valeur qui commence comme une entrée', () => {
+  it.each([
+    ['ASCII, signalé avant J2', '@archives (2024)'],
+    ['à point', '@archives.bsky.social (2024)'],
+    ['accentué', '@Élysée (2024)'],
+    ['suivi d’une accolade', '@x.y {2024}'],
+  ])('limite assumée : « %s » au début d’une ligne de valeur compte pour une entrée, et le fichier réécrit n’en porte plus', (_name, start) => {
+    const result = audit(`@book{Garde_2000,\n  title = {Le temps},\n  abstract = {Une étude.\n${start} en parle.},\n}\n`);
+
+    expect(result.parsed.map((c) => c.id)).toEqual(['Garde_2000']);
+    expect(result.unreadKeys).toContain('Garde_2000');
+    expect(audit(new BibTeXExporter().exportToString(result.parsed)).unreadKeys).toEqual([]);
   });
 });
