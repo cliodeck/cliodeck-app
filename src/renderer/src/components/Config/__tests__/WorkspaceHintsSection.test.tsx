@@ -415,3 +415,30 @@ describe('ce qu’on ne sait pas écrire se dit, et le bouton le respecte', () =
     expect(fs.readFileSync(journal, 'utf8')).toBe('Texte privé.');
   });
 });
+
+describe('la section quittée juste après « Enregistré »', () => {
+  // « Enregistré » revient à l'état normal 1,5 s plus tard. Ce retour, parti après la fermeture des
+  // Réglages, touchait à une section démontée : sous Vitest, à un jsdom déjà défait, et la CI
+  // rougissait sans test en échec (« window is not defined », #287, #289).
+  it('le retour à l’état normal est annulé, sans attendre ses 1,5 s', async () => {
+    fs.writeFileSync(contextMd, ORIGINAL);
+    await openSettings();
+    const timers = vi.spyOn(globalThis, 'setTimeout');
+    const cleared = vi.spyOn(globalThis, 'clearTimeout');
+    try {
+      editZone(`${ORIGINAL}\n${PARAGRAPH}\n`);
+      await pressSave();
+      await awaitSaved();
+      const call = timers.mock.calls.findIndex(([, delay]) => delay === 1500);
+      expect(call).toBeGreaterThanOrEqual(0);
+      const back = timers.mock.results[call].value;
+
+      cleanup();
+
+      expect(cleared).toHaveBeenCalledWith(back);
+    } finally {
+      timers.mockRestore();
+      cleared.mockRestore();
+    }
+  });
+});

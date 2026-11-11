@@ -10,6 +10,11 @@ import {
   unreadableFailure,
 } from '../../services/context-file';
 
+function cancelOkTimer(timer: React.MutableRefObject<ReturnType<typeof setTimeout> | null>): void {
+  if (timer.current !== null) clearTimeout(timer.current);
+  timer.current = null;
+}
+
 export const WorkspaceHintsSection: React.FC = () => {
   const { t } = useTranslation();
   const [value, setValue] = useState('');
@@ -35,6 +40,12 @@ export const WorkspaceHintsSection: React.FC = () => {
   // même panneau, remplacerait ce qui est tapé dans la zone.
   const tRef = useRef(t);
   tRef.current = t;
+
+  // « Enregistré » revient à l'état normal 1,5 s plus tard ; le retour est annulé si la section
+  // disparaît avant (Réglages fermés). Parti après, il touchait à une section démontée, et sous
+  // Vitest à un jsdom déjà défait : la CI rougissait sans test en échec.
+  const okTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => cancelOkTimer(okTimer), []);
 
   useEffect(() => {
     const tr = tRef.current;
@@ -69,7 +80,11 @@ export const WorkspaceHintsSection: React.FC = () => {
       // Le texte attendu avance avec le fichier : un second Enregistrer n'est pas un conflit.
       setLoadedRaw(res.hints.raw);
       setStatus({ kind: 'ok' });
-      setTimeout(() => setStatus((now) => (now.kind === 'ok' ? { kind: 'idle' } : now)), 1500);
+      cancelOkTimer(okTimer);
+      okTimer.current = setTimeout(() => {
+        okTimer.current = null;
+        setStatus((now) => (now.kind === 'ok' ? { kind: 'idle' } : now));
+      }, 1500);
     } else {
       // Ce que devient le texte de la zone : il n'est perdu que si on l'y laisse en partant.
       const kept =
