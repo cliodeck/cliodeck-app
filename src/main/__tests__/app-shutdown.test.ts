@@ -114,6 +114,7 @@ import { projectServices, type LoadedProject, type ProjectOpenRequest } from '..
 import { operations } from '../services/cancellable-operation.js';
 
 const PROJECT = '/projets/These/project.json';
+const OTHER = '/projets/Article/project.json';
 const never = (): Promise<void> => new Promise<void>(() => undefined);
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -246,6 +247,9 @@ describe('before-quit — l’éditeur, puis l’arrêt, puis app.exit', () => {
         order.push('mayLeave');
         return overrides.mayLeave ? overrides.mayLeave() : true;
       }),
+      hideWindows: vi.fn(() => {
+        order.push('hideWindows');
+      }),
       shutdown: vi.fn(async () => {
         order.push('shutdown');
         return overrides.shutdown?.();
@@ -256,7 +260,7 @@ describe('before-quit — l’éditeur, puis l’arrêt, puis app.exit', () => {
     };
   }
 
-  it('dans l’ordre : le document, puis les services, puis la sortie', async () => {
+  it('dans l’ordre : le document, puis les fenêtres retirées de l’écran, puis les services, puis la sortie', async () => {
     const s = steps();
     const onQuit = createQuitHandler(s);
     const event = quitEvent();
@@ -264,7 +268,22 @@ describe('before-quit — l’éditeur, puis l’arrêt, puis app.exit', () => {
     await onQuit(event);
 
     expect(event.preventDefault).toHaveBeenCalled();
-    expect(s.order).toEqual(['mayLeave', 'shutdown', 'exit']);
+    // Le document est écrit : rien de ce qu'on taperait pendant l'arrêt (jusqu'à 8 s) ne le serait.
+    expect(s.order).toEqual(['mayLeave', 'hideWindows', 'shutdown', 'exit']);
+  });
+
+  it('les fenêtres quittent l’écran avant que l’arrêt ne finisse, et non après', async () => {
+    const stopping = deferred();
+    const s = steps({ shutdown: () => stopping.promise });
+    const onQuit = createQuitHandler(s);
+
+    const quitting = onQuit(quitEvent());
+    await vi.waitFor(() => expect(s.shutdown).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+
+    expect(s.hideWindows).toHaveBeenCalledTimes(1);
+    expect(s.exit).not.toHaveBeenCalled();
+    stopping.resolve();
+    await quitting;
   });
 
   it('un second Cmd+Q pendant l’arrêt ne relance rien', async () => {
@@ -292,12 +311,26 @@ describe('before-quit — l’éditeur, puis l’arrêt, puis app.exit', () => {
     const onQuit = createQuitHandler(s);
 
     await onQuit(quitEvent());
+    // L'auteur reste devant sa fenêtre : elle ne disparaît pas.
+    expect(s.hideWindows).not.toHaveBeenCalled();
     expect(s.shutdown).not.toHaveBeenCalled();
     expect(s.exit).not.toHaveBeenCalled();
 
     answer = true;
     await onQuit(quitEvent());
-    expect(s.order).toEqual(['mayLeave', 'mayLeave', 'shutdown', 'exit']);
+    expect(s.order).toEqual(['mayLeave', 'mayLeave', 'hideWindows', 'shutdown', 'exit']);
+  });
+
+  it('des fenêtres qui ne se retirent pas n’empêchent ni l’arrêt ni la sortie', async () => {
+    const s = steps();
+    s.hideWindows.mockImplementation(() => {
+      throw new Error('fenêtre détruite');
+    });
+
+    await createQuitHandler(s)(quitEvent());
+
+    expect(s.shutdown).toHaveBeenCalledTimes(1);
+    expect(s.exit).toHaveBeenCalledTimes(1);
   });
 
   it('un arrêt qui lève n’empêche pas la sortie', async () => {
@@ -338,6 +371,9 @@ describe('la vraie table des services : les journaux se ferment dans l’échéa
     });
     const onQuit = createQuitHandler({
       mayLeave: async () => true,
+      hideWindows: () => {
+        h.events.push('hide');
+      },
       shutdown: () =>
         shutdownApp({
           deadlineMs: QUIT_DEADLINE_MS,
@@ -381,6 +417,39 @@ describe('la vraie table des services : les journaux se ferment dans l’échéa
       expect(h.events.indexOf('close:usage')).toBeLessThan(exitAt);
       // Les autres aussi, dans l'ordre de la table : les journaux restent les derniers.
       expect(h.events.indexOf('close:pdf')).toBeLessThan(h.events.indexOf('close:usage'));
+    } finally {
+      chatTurn.finish();
+    }
+  });
+
+  it('Cmd+Q pendant une bascule retenue par un tour de chat qui ne se draine pas : les journaux du projet quitté se ferment avant app.exit', async () => {
+    vi.useFakeTimers();
+    const lifecycle = lifecycleOverRealTable();
+    expect((await lifecycle.open(PROJECT, {})).success).toBe(true);
+    const chatTurn = operations.begin('chat');
+    h.events.length = 0;
+
+    try {
+      // Ouvrir un autre projet : la fermeture du premier attend le drain du tour de chat, avec les
+      // délais d'une bascule (30 s), et ses journaux, fermés en dernier, attendent derrière lui.
+      const switching = watch(lifecycle.open(OTHER, {}));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(h.events).not.toContain('close:history');
+      const { onQuit, exit } = quitHandlerFor(lifecycle);
+
+      const quitting = watch(onQuit(quitEvent()));
+      await vi.advanceTimersByTimeAsync(QUIT_DEADLINE_MS);
+
+      expect(quitting.settled()).toBe(true);
+      expect(exit).toHaveBeenCalledTimes(1);
+      const exitAt = h.events.indexOf('exit');
+      expect(h.events.indexOf('close:history')).toBeGreaterThan(-1);
+      expect(h.events.indexOf('close:usage')).toBeGreaterThan(-1);
+      expect(h.events.indexOf('close:history')).toBeLessThan(exitAt);
+      expect(h.events.indexOf('close:usage')).toBeLessThan(exitAt);
+      // L'app quitte : l'autre projet ne se charge pas.
+      expect(switching.settled()).toBe(true);
+      expect(h.events).not.toContain('manager:load');
     } finally {
       chatTurn.finish();
     }

@@ -18,6 +18,8 @@ const engine = vi.hoisted(() => {
   const disposed: string[] = [];
   return {
     disposed,
+    /** Quand elle est posée, la libération d'un contexte d'embedding l'attend : une libération qui dure. */
+    embeddingContextGate: null as null | Promise<void>,
     llamaDispose: vi.fn(async () => {
       disposed.push('llama');
     }),
@@ -43,6 +45,7 @@ vi.mock('node-llama-cpp', () => {
         createEmbeddingContext: async () => ({
           getEmbeddingFor: async () => ({ vector: [1, 0] }),
           dispose: async () => {
+            await engine.embeddingContextGate;
             engine.disposed.push('embeddingContext');
           },
         }),
@@ -66,6 +69,7 @@ beforeEach(async () => {
   // Un test précédent a pu laisser un client chargé : il ne doit pas compter dans le suivant.
   await disposeAllEmbeddedClients();
   engine.disposed.length = 0;
+  engine.embeddingContextGate = null;
   engine.llamaDispose.mockClear();
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
 });
@@ -100,6 +104,32 @@ describe('disposeAllEmbeddedClients — la sortie', () => {
 
     expect(engine.disposed.filter((d) => d === 'model')).toHaveLength(2);
     expect(engine.disposed.filter((d) => d === 'embeddingModel')).toHaveLength(2);
+    expect(engine.llamaDispose).not.toHaveBeenCalled();
+  });
+
+  it('une libération déjà commencée ailleurs (un registre coupé par son délai) est attendue jusqu’à son terme', async () => {
+    const client = await loadedClient();
+    let release!: () => void;
+    engine.embeddingContextGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // Le registre d'un service du projet libère ce client, et la sortie ne l'attend plus.
+    const elsewhere = client.dispose();
+    let releasedAtExit: string[] | null = null;
+    const exit = disposeAllEmbeddedClients().then(() => {
+      releasedAtExit = [...engine.disposed];
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // La libération en cours n'a pas fini : la sortie ne rend pas la main avant elle.
+    expect(releasedAtExit).toBeNull();
+    release();
+    await exit;
+
+    expect(releasedAtExit).toEqual(expect.arrayContaining(['embeddingModel', 'model']));
+    await elsewhere;
+    // Une seule libération de chaque objet, partagée par les deux appels.
+    expect(engine.disposed.sort()).toEqual(['context', 'embeddingContext', 'embeddingModel', 'model']);
     expect(engine.llamaDispose).not.toHaveBeenCalled();
   });
 

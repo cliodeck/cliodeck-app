@@ -96,10 +96,15 @@ export async function shutdownApp(options: { deadlineMs: number } & ShutdownPart
   return { unfinished: [...pending] };
 }
 
-/** Les trois temps de `before-quit`, dans l'ordre. */
+/** Les temps de `before-quit`, dans l'ordre. */
 export interface QuitSteps {
   /** Écrit le document ouvert ; faux si l'auteur préfère rester (`mayLeaveRenderer`). */
   mayLeave(): Promise<boolean>;
+  /**
+   * Retire les fenêtres de l'écran, une fois le document écrit : l'arrêt peut durer jusqu'à
+   * l'échéance, et rien de ce qui se taperait pendant ce temps ne serait écrit.
+   */
+  hideWindows(): void;
   /** Arrête les services (`shutdownApp`). */
   shutdown(): Promise<unknown>;
   /** `app.exit()` : ne redéclenche pas `before-quit`. */
@@ -107,8 +112,9 @@ export interface QuitSteps {
 }
 
 /**
- * Le gestionnaire de `before-quit`. Un second Cmd+Q pendant l'arrêt est retenu et ne relance rien ;
- * mais si l'auteur choisit de rester, la sortie suivante repart de zéro.
+ * Le gestionnaire de `before-quit` : le document, puis les fenêtres retirées de l'écran, puis
+ * l'arrêt, puis `app.exit`. Un second Cmd+Q pendant l'arrêt est retenu et ne relance rien ; mais si
+ * l'auteur choisit de rester, sa fenêtre reste à l'écran et la sortie suivante repart de zéro.
  */
 export function createQuitHandler(steps: QuitSteps): (event: { preventDefault(): void }) => Promise<void> {
   let quitting = false;
@@ -122,6 +128,14 @@ export function createQuitHandler(steps: QuitSteps): (event: { preventDefault():
     if (!(await steps.mayLeave())) {
       quitting = false;
       return;
+    }
+    // Le document est écrit : une fenêtre encore à l'écran pendant l'arrêt (jusqu'à 8 s) recevrait
+    // une frappe que plus personne n'écrirait, et `app.exit` l'emporterait. Le renderer vit encore :
+    // une écriture qui traînait au flush peut toujours aboutir.
+    try {
+      steps.hideWindows();
+    } catch (error: unknown) {
+      console.warn(`⚠️ ${LOG} fenêtres non retirées :`, error);
     }
     try {
       const report = await steps.shutdown();

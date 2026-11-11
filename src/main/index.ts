@@ -187,14 +187,21 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Quitter (L03-9) : le document d'abord ; puis, dans une échéance, le projet ouvert (ses journaux
-// compris), le service des thèmes et les modèles embarqués ; puis `app.exit()`, quoi qu'il arrive.
+// Quitter (L03-9) : le document d'abord ; puis les fenêtres retirées de l'écran ; puis, dans une
+// échéance, le projet ouvert (ses journaux compris), le service des thèmes et les modèles embarqués ;
+// puis `app.exit()`, quoi qu'il arrive.
 // `app.exit()` ne ferme rien de lui-même : sans cet arrêt, la session du journal de recherche
 // restait « Active » et le tampon du journal d'usage se perdait.
 app.on(
   'before-quit',
   createQuitHandler({
     mayLeave: () => mayLeaveRenderer(mainWindow),
+    // Masquées, pas détruites : le renderer peut encore finir une écriture jusqu'à `app.exit`.
+    hideWindows: () => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.hide();
+      }
+    },
     shutdown: () =>
       shutdownApp({
         deadlineMs: QUIT_DEADLINE_MS,

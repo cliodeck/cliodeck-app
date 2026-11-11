@@ -1267,6 +1267,45 @@ describe('projectLifecycle — sortie de l’application (L03-9)', () => {
     expect(events).toEqual([]);
   });
 
+  it.each([
+    ['sa fermeture', { close: never }],
+    ['son abort', { abort: never, close: never }],
+  ] satisfies Array<[string, FakeServiceOptions]>)(
+    'une sortie pendant une bascule A → B retenue par %s : les journaux de A se ferment avant la fin de la sortie, et B ne s’ouvre pas',
+    async (_label, blocked) => {
+      vi.useFakeTimers();
+      const events: string[] = [];
+      const manager = fakeManager(events, { [A]: {}, [B]: {} });
+      const lc = lifecycle(manager, [
+        fakeService(events, 'history'),
+        fakeService(events, 'usage'),
+        fakeService(events, 'operations', blocked),
+      ]);
+      await lc.open(A, request);
+      events.length = 0;
+
+      // La bascule ferme A avec les délais d'une bascule (35 s par fermeture, 5 s par abort) : un tour
+      // de chat qui ne se draine pas la retient, et les journaux de A attendent derrière lui.
+      const switching = watch(lc.open(B, request));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(events).toContain('abort:operations');
+      expect(events).not.toContain('close:history');
+
+      let closedWhenDone: string[] | null = null;
+      void lc.shutdown(BUDGET).then(() => {
+        closedWhenDone = events.filter((event) => event.startsWith('close:'));
+      });
+      await vi.advanceTimersByTimeAsync(BUDGET);
+
+      // La sortie a rendu la main dans son budget, et les journaux de A étaient déjà fermés.
+      expect(closedWhenDone).toEqual(expect.arrayContaining(['close:usage', 'close:history']));
+      expect(switching.settled()).toBe(true);
+      expect(await switching.promise).toMatchObject({ success: false });
+      expect(events.filter((event) => event === 'load:B' || event.endsWith(':B'))).toEqual([]);
+      expect(events).not.toContain('manager:close');
+    }
+  );
+
   it('sans projet ouvert, la sortie ne fait rien et rend la main', async () => {
     const events: string[] = [];
     const manager = fakeManager(events, { [A]: {} });

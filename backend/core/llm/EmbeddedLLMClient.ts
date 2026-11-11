@@ -167,6 +167,8 @@ export class EmbeddedLLMClient {
   private initialized = false;
   private modelId: string | null = null;
   private isGenerating = false; // Prevent concurrent generation
+  /** La libération en cours : un second appel (le registre, puis la sortie de l'app) l'attend. */
+  private disposing: Promise<void> | null = null;
 
   // Embedding model state (separate from generation model)
   private embeddingModel: LlamaModelInstance | null = null;
@@ -618,11 +620,23 @@ ${userQuery}
   /**
    * Libère les ressources du modèle : chaque contexte, puis son modèle (A16). Jamais
    * `llama.dispose()` : il libère le backend de tout le processus, celui des autres clients compris
-   * (mesuré par L08). Tout est détaché avant la première attente : une seconde libération
-   * concurrente (le registre et la sortie de l'app) ne libère rien deux fois.
+   * (mesuré par L08).
+   *
+   * Une libération en cours est partagée : un second appel concurrent (le registre d'un service, puis
+   * la sortie de l'app) reçoit la même promesse, et rien n'est libéré deux fois. Le client reste suivi
+   * (`embedded-engine-pool`) jusqu'à la fin de sa libération : la sortie attend une libération
+   * commencée ailleurs, au lieu de trouver le suivi vide et de quitter avant `model.dispose()`.
    */
-  async dispose(): Promise<void> {
-    forgetLoadedClient(this);
+  dispose(): Promise<void> {
+    this.disposing ??= this.release().finally(() => {
+      this.disposing = null;
+      // Rechargé pendant la libération : il tient de nouveau un modèle, et reste suivi.
+      if (!this.initialized && !this.embeddingInitialized) forgetLoadedClient(this);
+    });
+    return this.disposing;
+  }
+
+  private async release(): Promise<void> {
     // Wait for any ongoing generation to complete
     if (this.isGenerating) {
       console.log('⏳ [EMBEDDED] Waiting for generation to complete before disposing...');

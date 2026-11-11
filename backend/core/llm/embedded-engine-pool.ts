@@ -7,8 +7,9 @@
  * à temps (le service PDF attend d'abord ses indexations) ; ceux d'un appel en cours hors du projet
  * (similarité, diapositives, un tour de chat qui ne s'est pas drainé) ne sont joignables que d'ici.
  *
- * Un client s'inscrit quand un modèle est chargé, et se retire en se libérant. Le partage d'un même
- * GGUF entre clients (`acquireEmbeddedClient`) reste à venir (L08-16).
+ * Un client s'inscrit quand un modèle est chargé, et se retire une fois sa libération finie : une
+ * libération commencée ailleurs (un registre coupé par son délai) reste visible d'ici, et la sortie
+ * l'attend. Le partage d'un même GGUF entre clients (`acquireEmbeddedClient`) reste à venir (L08-16).
  */
 import type { EmbeddedLLMClient } from './EmbeddedLLMClient.js';
 
@@ -24,7 +25,8 @@ export function forgetLoadedClient(client: EmbeddedLLMClient): void {
 
 /**
  * Libère tous les clients qui tiennent encore un modèle : chacun ses contextes, puis ses modèles,
- * jamais le backend `llama` du processus. Ne lève pas.
+ * jamais le backend `llama` du processus. Une libération déjà en cours est attendue, pas refaite
+ * (`EmbeddedLLMClient.dispose` la partage). Ne lève pas.
  */
 export async function disposeAllEmbeddedClients(): Promise<void> {
   const clients = [...loaded];

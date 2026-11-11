@@ -6,6 +6,9 @@
  * du journal de recherche restait « Active » à vie, et les événements du journal d'usage encore en
  * tampon (750 ms) se perdaient. Cmd+Q est la façon ordinaire de finir une journée.
  *
+ * Et dès que la sortie est décidée, les fenêtres quittent l'écran : l'arrêt peut durer jusqu'à 8 s,
+ * et ce qui se taperait pendant ce temps ne serait écrit par personne (revue de L03-9).
+ *
  * Vrai éditeur, vrai chat (un faux Ollama local répond), vrai projet dans un dossier temporaire.
  * Cmd+Q est `app.quit()`, ce que fait le rôle `quit` du menu : jamais un vrai raccourci clavier.
  * Les bases se lisent après coup, en lecture seule, par le Node d'Electron.
@@ -22,6 +25,8 @@ import { launchApp } from './_helpers/launch';
 import { startFakeOllama } from './_helpers/fake-ollama';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+/** Le singleton du service des thèmes, tel que le main compilé le charge. */
+const TOPIC_SERVICE_MODULE = join(REPO_ROOT, 'dist', 'src', 'main', 'services', 'topic-modeling-service.js');
 const ARTICLE = '# Séance\n\nLe préfet et la grève de 1934.\n';
 const PHRASE = ' Une phrase de fin de journée.';
 const QUESTION = 'Qui était le préfet en 1934 ?';
@@ -83,6 +88,15 @@ const quit = (app: ElectronApplication) =>
   app.evaluate(({ app: electronApp }) => {
     electronApp.quit();
   });
+
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 test('quitter clôt la séance : fin et durée au Journal, dernier événement d’usage écrit', async () => {
   test.setTimeout(150_000);
@@ -166,4 +180,75 @@ test('quitter clôt la séance : fin et durée au Journal, dernier événement d
   } finally {
     await ollama.close();
   }
+});
+
+test('la sortie décidée, les fenêtres quittent l’écran pendant tout l’arrêt : rien ne s’y tape plus', async () => {
+  test.setTimeout(90_000);
+  const root = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-sortie-'));
+  toClean.push(root);
+  const article = makeArticle(root);
+  const launched = await launchApp();
+  if (launched.kind === 'skip') {
+    test.skip(true, launched.reason);
+    return;
+  }
+  const { app, window, userDataDir } = launched.value;
+  toClean.push(userDataDir);
+  let fakePid = 0;
+  try {
+    await openProject(app, window, article.projectJson);
+
+    // Un service des thèmes qui ignore SIGTERM, branché dans le vrai singleton : `stop()` attend
+    // 5 s avant son SIGKILL, et l'arrêt dure ce temps-là. Un processus Node (le binaire d'Electron),
+    // sans enfant qui lui survivrait. Il dit « prêt » une fois son gestionnaire posé : un SIGTERM
+    // reçu avant le tuerait tout de suite, et l'arrêt ne durerait rien.
+    fakePid = await app.evaluate(async (_electron, modulePath) => {
+      const { createRequire } = process.getBuiltinModule('node:module');
+      const { spawn } = process.getBuiltinModule('node:child_process');
+      const service = (createRequire(modulePath)(modulePath) as { topicModelingService: Record<string, unknown> })
+        .topicModelingService;
+      const child = spawn(
+        process.execPath,
+        ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.stdout.write('prêt');"],
+        { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'ignore'] },
+      );
+      await new Promise<void>((ready, failed) => {
+        child.stdout?.once('data', () => ready());
+        child.once('exit', () => failed(new Error('le faux service est sorti avant d’être prêt')));
+      });
+      service.pythonProcess = child;
+      service.isRunning = true;
+      return child.pid ?? 0;
+    }, TOPIC_SERVICE_MODULE);
+    expect(fakePid).toBeGreaterThan(0);
+
+    const exited = app.waitForEvent('close');
+    await quit(app);
+    // Pendant l'arrêt (le faux service vit encore, son SIGKILL n'est pas parti), aucune fenêtre n'est
+    // à l'écran. Sans `hideWindows`, l'éditeur restait visible et modifiable pendant tout l'arrêt.
+    await expect
+      .poll(
+        () =>
+          app.evaluate(({ BrowserWindow }, pid) => {
+            let stopping = true;
+            try {
+              process.kill(pid, 0);
+            } catch {
+              stopping = false;
+            }
+            return { visible: BrowserWindow.getAllWindows().some((win) => win.isVisible()), stopping };
+          }, fakePid),
+        { timeout: 10_000 },
+      )
+      .toEqual({ visible: false, stopping: true });
+    await exited;
+    // Et l'arrêt a bien tué le faux service, qui ignorait SIGTERM (S13-1-15).
+    await expect.poll(() => isAlive(fakePid), { timeout: 5_000 }).toBe(false);
+  } finally {
+    await app.close().catch(() => undefined);
+    // Filet : le faux service, s'il survivait, tué par son PID.
+    if (fakePid && isAlive(fakePid)) process.kill(fakePid, 'SIGKILL');
+  }
+  // Le document écrit avant la sortie est intact.
+  expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
 });
