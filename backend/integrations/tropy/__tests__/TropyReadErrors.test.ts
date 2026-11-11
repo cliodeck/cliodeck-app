@@ -462,6 +462,7 @@ describe.skipIf(!sqliteAvailable)('TropySync : un .tpy illisible dès son ouvert
     ['réduit à sa première page', (dbPath: string) => fs.truncateSync(dbPath, 4096), false],
     ['qui n’est pas une base SQLite', (dbPath: string) => fs.writeFileSync(dbPath, 'pas une base '.repeat(400)), false],
     ['dont la table project est illisible', (dbPath: string) => alterTpy(dbPath, 'ALTER TABLE project RENAME TO project_abime'), false],
+    ['disparu (disque débranché, fichier déplacé)', (dbPath: string) => fs.unlinkSync(dbPath), false],
   ] as const)('un .tpy %s : échec, avis « projet Tropy illisible », brain.db inchangé', async (_label, damage, wal) => {
     const { result, before } = await syncAfterDamage(damage, wal);
 
