@@ -88,10 +88,15 @@ function bibliographyLoadFailure(error: unknown) {
 }
 
 /**
- * La fusion refusée, avant toute écriture, parce que le `.bib` du projet ne s'est pas lu en entier :
- * les codes de la synchronisation Zotero, que le renderer traduit. Ils ne s'affichent jamais tels quels.
+ * La fusion refusée, avant toute écriture, parce que le `.bib` du projet ne s'est pas lu en entier,
+ * ou que celui que `project.json` nomme est introuvable : les codes de la synchronisation Zotero, que
+ * le renderer traduit. Ils ne s'affichent jamais tels quels.
  */
 function mergeRefusal(error: unknown) {
+  if (error instanceof BibliographyMissingError) {
+    // Le chemin entier, que le panneau relit pour afficher son bandeau « introuvable ».
+    return { success: false as const, error: 'bib-missing', file: path.basename(error.filePath), bibtexPath: error.filePath };
+  }
   if (error instanceof BibNotFullyReadError) {
     return { success: false as const, error: 'bib-unread', file: path.basename(error.filePath), unreadKeys: error.unreadKeys };
   }
@@ -178,8 +183,11 @@ export function setupBibliographyHandlers() {
         // Sans project.json, on ne sait pas dans quel fichier fusionner : rien n'est écrit.
         if (!manifest) return { success: false, error: 'project-unreadable' };
         bibPath = path.resolve(projectPath, declared?.filePath || 'bibliography.bib');
+        // Nommé par project.json, le `.bib` a existé : absent, il n'est pas recréé (J1). Sans nom, un
+        // projet neuf le fait naître ici, et project.json le nomme ensuite.
+        const expected = Boolean(declared?.filePath);
         try {
-          ({ newCount: newCitations, duplicates } = await mergeIntoProjectBibliography(projectPath, bibPath, read.citations));
+          ({ newCount: newCitations, duplicates } = await mergeIntoProjectBibliography(projectPath, bibPath, read.citations, expected));
         } catch (error: unknown) {
           const refusal = mergeRefusal(error);
           if (!refusal) throw error;

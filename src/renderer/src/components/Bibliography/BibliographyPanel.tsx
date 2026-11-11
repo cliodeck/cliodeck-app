@@ -193,6 +193,7 @@ export const BibliographyPanel: React.FC = () => {
    * L'import n'a pas abouti : dire pourquoi et quoi faire, dans la langue de l'interface. Un fichier
    * importé qui ne se lit pas, une fusion arrêtée parce que le `.bib` du projet ne s'est pas lu en
    * entier : le main n'a rien écrit, et le bandeau, qui parle du `.bib` du projet, ne change pas.
+   * Une fusion arrêtée parce que ce `.bib` est introuvable : le panneau l'a relu, et le bandeau le dit.
    */
   const importFailureMessage = (error: unknown): string => {
     if (error instanceof BibliographyFileError) {
@@ -216,6 +217,8 @@ export const BibliographyPanel: React.FC = () => {
           listed.push(t('zotero.sync.more', { count: problem.unreadKeys.length - SHOWN_KEYS }));
         }
         detail = `${t('zotero.sync.unreadEntries', { count: problem.unreadKeys.length, file: problem.file })}\n${listed.join('\n')}`;
+      } else if (problem.kind === 'missing') {
+        detail = t('bibliography.bibMissing', { file: problem.file });
       } else {
         detail =
           problem.reason === 'encoding'

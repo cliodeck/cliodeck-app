@@ -13,6 +13,7 @@
  * registre de consentement ; seul le dialogue natif est simulé.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -396,6 +397,106 @@ describe('« Fusionner » : la fusion est écrite dans le .bib du projet', () =>
     const result = await importBib(source, 'merge');
 
     expect(result).toMatchObject({ success: true, unreadKeys: ['sans_titre'], total: 3 });
+  });
+});
+
+/**
+ * Le `.bib` que `project.json` nomme n'est plus là : déplacé, renommé ou supprimé hors de ClioDeck,
+ * ou évincé par iCloud. C'est la règle de la synchronisation Zotero (H3), reprise pour « Fusionner »
+ * (J1) : la fusion le faisait renaître des seules références importées, sans ce que l'ancien portait
+ * en propre (entrées, groupes, commentaires), et à côté de celui que l'historien avait renommé.
+ */
+describe('« Fusionner » : un .bib attendu mais absent n’est pas recréé', () => {
+  const renamed = () => path.join(projectDir, 'bibliography-ancienne.bib');
+  const metadataFile = () => path.join(projectDir, '.cliodeck', 'bibliography-metadata.json');
+
+  /** Chaque fichier du projet, sous-dossiers compris, par son empreinte. */
+  function tree(dir = projectDir, prefix = ''): Record<string, string> {
+    const files: Record<string, string> = {};
+    for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+      const relative = path.join(prefix, item.name);
+      if (item.isDirectory()) Object.assign(files, tree(path.join(dir, item.name), relative));
+      else files[relative] = createHash('sha256').update(fs.readFileSync(path.join(dir, item.name))).digest('hex');
+    }
+    return files;
+  }
+
+  /** Un projet synchronisé : `project.json` nomme son `.bib`, et les métadonnées sont écrites. */
+  async function synchronizedProject(): Promise<void> {
+    await openProject();
+    fs.writeFileSync(metadataFile(), JSON.stringify({ version: 2, lastUpdated: '2026-01-01T00:00:00.000Z', citations: {} }));
+  }
+
+  it('.bib renommé hors de ClioDeck : refus « introuvable », et aucun fichier du projet ne change', async () => {
+    await synchronizedProject();
+    fs.renameSync(projectBib(), renamed());
+    const before = tree();
+    const source = downloaded('collegue.bib', COLLEGUE);
+
+    const result = await importBib(source, 'merge');
+
+    expect(result).toEqual({ success: false, error: 'bib-missing', file: 'bibliography.bib', bibtexPath: projectBib() });
+    // Ni `.bib` recréé, ni copie de sécurité, ni `project.json`, ni métadonnées : la liste du dossier
+    // et chaque octet sont ceux d'avant.
+    expect(tree()).toEqual(before);
+    expect(fs.existsSync(projectBib())).toBe(false);
+    expect(fs.readFileSync(renamed(), 'utf8')).toBe(PROJET);
+  });
+
+  it('.bib évincé par iCloud (il n’en reste que la trace .bibliography.bib.icloud) : même refus, rien n’est recréé', async () => {
+    await synchronizedProject();
+    fs.rmSync(projectBib());
+    fs.writeFileSync(path.join(projectDir, '.bibliography.bib.icloud'), 'bplist00');
+    const before = tree();
+
+    expect(await importBib(downloaded('collegue.bib', COLLEGUE), 'merge')).toMatchObject({
+      success: false,
+      error: 'bib-missing',
+      file: 'bibliography.bib',
+    });
+    expect(tree()).toEqual(before);
+  });
+
+  it('le .bib remis à sa place : la fusion passe, et il garde ses entrées', async () => {
+    await synchronizedProject();
+    fs.renameSync(projectBib(), renamed());
+    const source = downloaded('collegue.bib', COLLEGUE);
+    expect(await importBib(source, 'merge')).toMatchObject({ success: false, error: 'bib-missing' });
+
+    fs.renameSync(renamed(), projectBib());
+
+    expect(await importBib(source, 'merge')).toMatchObject({ success: true, newCitations: 1, total: 3 });
+    expect(idsOf(projectBib())).toEqual(['Garde_2000', 'Main_2010', 'Autre_2015']);
+    expect(manifest().bibliographySource).toEqual(SOURCE);
+  });
+
+  // « Remplacer » choisit le fichier qui sera la bibliographie du projet : c'est le geste qui en recrée
+  // une, et il ne change pas.
+  it('témoin : « Remplacer » met le fichier importé à la place du .bib introuvable, comme avant', async () => {
+    await synchronizedProject();
+    fs.renameSync(projectBib(), renamed());
+
+    expect(await importBib(downloaded('bibliography.bib', COLLEGUE), 'replace')).toMatchObject({ success: true, total: 2 });
+    expect(fs.readFileSync(projectBib(), 'utf8')).toBe(COLLEGUE);
+    expect(manifest().bibliographySource).toEqual(SOURCE);
+  });
+
+  // Un projet neuf ne nomme aucun `.bib` : `createProject` n'écrit pas `bibliographySource`, que seuls
+  // l'import et la synchronisation posent, après avoir écrit le fichier. Sa première fusion le fait
+  // naître, comme avant.
+  it('témoin : un projet créé par « Nouveau projet », jamais synchronisé, fusionne dans un bibliography.bib neuf', async () => {
+    const parent = tempDir('cliodeck-nouveau-projet-');
+    const created = await projectManager.createProject({ name: 'Mémoire', type: 'article', path: parent });
+    expect(created.success).toBe(true);
+    projectDir = path.join(parent, 'Mémoire');
+    expect(manifest().bibliographySource).toBeUndefined();
+    expect((await projectManager.loadProject(projectJson())).success).toBe(true);
+
+    const result = await importBib(downloaded('collegue.bib', COLLEGUE), 'merge');
+
+    expect(result).toMatchObject({ success: true, newCitations: 2, total: 2, sourceSaved: true });
+    expect(idsOf(projectBib())).toEqual(['Garde_2000', 'Autre_2015']);
+    expect(manifest().bibliographySource).toEqual({ type: 'file', filePath: 'bibliography.bib' });
   });
 });
 

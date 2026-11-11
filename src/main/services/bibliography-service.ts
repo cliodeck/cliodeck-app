@@ -140,19 +140,23 @@ async function metadataOrNull(projectPath: string): Promise<BibliographyMetadata
 
 /**
  * Ajoute au `.bib` du projet les références d'`incoming` qu'il n'a pas encore (même item Zotero,
- * sinon même clé BibTeX), relu, fusionné et réécrit sous son verrou. Absent, il naît de la fusion.
- * Illisible, ou une seule de ses entrées non lue : rien n'est écrit. Rien de nouveau : il n'est pas
- * réécrit, et la copie de sécurité garde l'état qu'elle gardait. Ce qu'il porte hors de ses entrées
- * (groupes BibDesk ou JabRef, `@preamble`, commentaires) reste ; ce que le fichier importé porte hors
- * des siennes n'y entre pas.
+ * sinon même clé BibTeX), relu, fusionné et réécrit sous son verrou. Absent, il naît de la fusion,
+ * sauf s'il est `expected` (nommé par `project.json`) : déplacé, renommé ou évincé par iCloud, le
+ * recréer perdrait ce que l'ancien avait en propre, et rien n'est écrit (J1, la règle de la
+ * synchronisation Zotero, H3). Illisible, ou une seule de ses entrées non lue : rien n'est écrit.
+ * Rien de nouveau : il n'est pas réécrit, et la copie de sécurité garde l'état qu'elle gardait. Ce
+ * qu'il porte hors de ses entrées (groupes BibDesk ou JabRef, `@preamble`, commentaires) reste ; ce
+ * que le fichier importé porte hors des siennes n'y entre pas.
  */
 export function mergeIntoProjectBibliography(
   projectPath: string,
   bibtexPath: string,
-  incoming: Citation[]
+  incoming: Citation[],
+  expected: boolean
 ): Promise<{ newCount: number; duplicates: number }> {
   return withFileLock(bibtexPath, async () => {
     const read = await readBibFile(bibtexPath);
+    if (read.kind === 'absent' && expected) throw new BibliographyMissingError(bibtexPath);
     if (read.kind === 'unreadable') throw new UnreadableFileError(bibtexPath, read.reason, read.message);
     if (read.kind === 'ok' && read.unreadKeys.length > 0) throw new BibNotFullyReadError(bibtexPath, read.unreadKeys);
 

@@ -13,7 +13,8 @@
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { launchApp } from './_helpers/launch';
@@ -81,14 +82,18 @@ async function selectLastWord(window: Page): Promise<void> {
   for (let i = 0; i < LAST_WORD.length; i += 1) await window.keyboard.press('Shift+ArrowLeft');
 }
 
-async function withArticle(run: (app: ElectronApplication, window: Page, article: Article) => Promise<void>): Promise<void> {
+/** `prepared` : un article déjà préparé par le test (son `project.json`, sa bibliographie). */
+async function withArticle(
+  run: (app: ElectronApplication, window: Page, article: Article) => Promise<void>,
+  prepared?: Article,
+): Promise<void> {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {
     test.skip(true, outcome.reason);
     return;
   }
   const { app, window, userDataDir } = outcome.value;
-  const article = makeArticle();
+  const article = prepared ?? makeArticle();
   try {
     await stubOpenDialog(app, article.projectJson);
     await window.locator('button[title="Ouvrir un projet"]').first().click();
@@ -309,6 +314,94 @@ test('Bibliographie › Importer BibTeX › Fusionner, un .bib téléchargé : l
     }
   } finally {
     if (userDataDir) rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+    rmSync(downloads, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Ce qu'un import peut écrire dans le projet, par son empreinte : les fichiers du dossier (le `.bib`,
+ * `project.json`) et ceux de bibliographie de `.cliodeck` (copie de sécurité, métadonnées). Pas les
+ * bases de `.cliodeck`, que l'app ouverte écrit pour son compte.
+ */
+function listing(dir: string): Record<string, string> {
+  const hash = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
+  const files: Record<string, string> = {};
+  for (const item of readdirSync(dir, { withFileTypes: true })) {
+    if (item.isFile()) files[item.name] = hash(join(dir, item.name));
+  }
+  for (const name of readdirSync(join(dir, '.cliodeck'))) {
+    if (name.startsWith('bibliography')) files[join('.cliodeck', name)] = hash(join(dir, '.cliodeck', name));
+  }
+  return files;
+}
+
+/**
+ * « Fusionner » alors que le `.bib` que `project.json` nomme a été renommé depuis l'ouverture (J1).
+ * La fusion le faisait renaître des seules références importées, à côté de celui que l'historien
+ * avait renommé, sans ce que l'ancien avait en propre. Elle s'arrête sans rien écrire, et le panneau
+ * montre le bandeau « introuvable », comme la synchronisation Zotero refusée pour la même raison
+ * (H3). Le fichier remis à sa place et le projet rouvert, comme le dit le bandeau, la fusion passe.
+ */
+test('Bibliographie › Importer BibTeX › Fusionner, le .bib du projet renommé : le bandeau « introuvable », et rien n’est écrit', async () => {
+  const downloads = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-telechargements-'));
+  const article = makeArticle('Projet bib renommé');
+  const source = { type: 'file', filePath: 'refs.bib' };
+  const manifest = () => JSON.parse(readFileSync(article.projectJson, 'utf8')) as Record<string, unknown>;
+  writeFileSync(article.projectJson, JSON.stringify({ ...manifest(), bibliographySource: source }));
+  const projectBib = join(article.dir, 'refs.bib');
+  const renamed = join(article.dir, 'refs-renomme.bib');
+  const PROJECT_BIB = `${BIBTEX}\n@book{martin2015,\n  author = {Martin, Anne},\n  title = {Les dépôts d'archives},\n  year = {2015}\n}\n`;
+  writeFileSync(projectBib, PROJECT_BIB);
+  const downloaded = join(downloads, 'collegue.bib');
+  writeFileSync(downloaded, `${BIBTEX}\n@article{leroy2018,\n  author = {Leroy, Paul},\n  title = {Lire les registres},\n  year = {2018}\n}\n`);
+
+  try {
+    await withArticle(async (app, window) => {
+      await window.locator('#left-tab-bibliography').click();
+      await expect(window.locator('.citation-card')).toHaveCount(2, { timeout: 10_000 });
+
+      // Renommé dans le Finder, le projet ouvert : le panneau montre encore la liste lue à l'ouverture.
+      renameSync(projectBib, renamed);
+      const before = listing(article.dir);
+
+      await stubOpenDialog(app, downloaded);
+      await sendMenu(app, 'menu:import-bibtex');
+      await window.locator('.import-option-btn.merge-btn').click();
+
+      const banner = window.locator('.bibliography-problem');
+      await expect(banner).toContainText('refs.bib, est introuvable', { timeout: 10_000 });
+      const message = window.locator('#alert-dialog-message');
+      await expect(message).toContainText("Fusion interrompue : rien n'a été écrit.");
+      await expect(message).toContainText('refs.bib, est introuvable');
+      await expect(window.locator('.bib-import-summary-modal')).toHaveCount(0);
+      await expect(window.locator('.citation-card')).toHaveCount(0);
+      // Ni `.bib` recréé, ni copie de sécurité, ni project.json touché : chaque fichier est celui d'avant.
+      expect(listing(article.dir)).toEqual(before);
+      expect(manifest().bibliographySource).toEqual(source);
+      await window.locator('.alert-dialog-btn-ok').click();
+      await expect(message).toHaveCount(0);
+
+      // Remis à sa place, le projet rouvert : le bandeau part, et la fusion passe.
+      renameSync(renamed, projectBib);
+      const opened = await stubOpenDialog(app, article.projectJson);
+      // La commande montre le panneau Projets : la Bibliographie se rouvre ensuite.
+      await sendMenu(app, 'menu:open-project');
+      await expect.poll(opened, { timeout: 10_000 }).toBe(1);
+      await window.locator('#left-tab-bibliography').click();
+      await expect(window.locator('.citation-card')).toHaveCount(2, { timeout: 20_000 });
+      await expect(banner).toHaveCount(0);
+
+      await stubOpenDialog(app, downloaded);
+      await sendMenu(app, 'menu:import-bibtex');
+      await window.locator('.import-option-btn.merge-btn').click();
+      const summary = window.locator('.bib-import-summary-modal');
+      await expect(summary).toBeVisible({ timeout: 10_000 });
+      await expect(summary.locator('.stat-item', { hasText: 'Références au total' }).locator('.stat-value')).toHaveText('3');
+      const written = readFileSync(projectBib, 'utf8');
+      for (const key of ['dupont2020', 'martin2015', 'leroy2018']) expect(written).toContain(`{${key},`);
+    }, article);
+  } finally {
     rmSync(article.dir, { recursive: true, force: true });
     rmSync(downloads, { recursive: true, force: true });
   }
