@@ -34,6 +34,7 @@ import { configManager } from './services/config-manager.js';
 import { pdfService } from './services/pdf-service.js';
 import { setupApplicationMenu, type MenuDeps } from './menu.js';
 import { loadMenuTranslations, setLanguage, t } from './i18n.js';
+import { recoveredSettingsDetail, settingsFailureMessage } from './settings-recovery.js';
 import { guardWindowClose, mayLeaveRenderer } from './renderer-flush.js';
 import { sandboxStatus } from './utils/sandbox-status.js';
 import { createQuitHandler, QUIT_DEADLINE_MS, shutdownApp } from './services/app-shutdown.js';
@@ -123,11 +124,7 @@ const menuDeps: MenuDeps = {
 function tellRecoveredSettings(win: BrowserWindow): void {
   const recovered = configManager.getRecoveredFiles();
   if (recovered.length === 0) return;
-  const detail = recovered
-    .map(({ kind, copy }) =>
-      t(kind === 'config' ? 'settingsRecoveredConfig' : 'settingsRecoveredSecrets').replace('{{path}}', () => copy)
-    )
-    .join('\n\n');
+  const detail = recoveredSettingsDetail(recovered);
   dialog.showMessageBox(win, { type: 'warning', message: t('settingsRecoveredTitle'), detail }).catch((error: unknown) => {
     console.warn('[Config] message des réglages mis de côté non affiché :', error);
   });
@@ -151,10 +148,11 @@ app.whenReady().then(async () => {
   } catch (error) {
     // Un fichier qui ne se lit pas comme du JSON a déjà été mis de côté par `init`. Ce qui reste
     // (droits, disque) ne se répare pas d'ici. Sans ce `catch`, le rejet n'allait qu'au journal des
-    // plantages, et l'app restait en vie sans fenêtre, l'icône du Dock inerte (S11-1-10).
+    // plantages, et l'app restait en vie sans fenêtre, l'icône du Dock inerte (S11-1-10). La boîte
+    // nomme aussi une copie déjà faite : le lancement suivant ne la verrait plus.
     console.error('❌ configManager:', error);
-    const detail = error instanceof Error ? error.message : String(error);
-    dialog.showErrorBox(t('settingsUnreadableTitle'), t('settingsUnreadableMessage').replace('{{error}}', () => detail));
+    const { title, content } = settingsFailureMessage(error, configManager.getRecoveredFiles());
+    dialog.showErrorBox(title, content);
     // Aucun projet n'est ouvert : sortir sans passer par `before-quit` ne perd rien.
     app.exit(1);
     return;

@@ -21,6 +21,12 @@ interface ElectronStoreInstance {
   readonly store: AppConfig;
 }
 
+/** Un fichier de réglages illisible que `init` a mis de côté, et le chemin de sa copie. */
+export interface RecoveredSettingsFile {
+  kind: 'config' | 'secrets';
+  copy: string;
+}
+
 export class ConfigManager {
   private _store: ElectronStoreInstance | null = null;
   private initialized: boolean = false;
@@ -72,8 +78,8 @@ export class ConfigManager {
    * Les fichiers de réglages illisibles que `init` a mis de côté : l'auteur doit l'apprendre, avec
    * le nom de la copie (`index.ts`, après `createWindow`).
    */
-  getRecoveredFiles(): Array<{ kind: 'config' | 'secrets'; copy: string }> {
-    const files: Array<{ kind: 'config' | 'secrets'; copy: string }> = [];
+  getRecoveredFiles(): RecoveredSettingsFile[] {
+    const files: RecoveredSettingsFile[] = [];
     if (this.recoveredFrom) files.push({ kind: 'config', copy: this.recoveredFrom });
     const secrets = secureStorage.getRecoveredFrom();
     if (secrets) files.push({ kind: 'secrets', copy: secrets });

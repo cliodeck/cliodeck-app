@@ -136,3 +136,39 @@ test('cliodeck-config.json sans droit de lecture : une boîte d’erreur, puis l
   }
   expect(readFileSync(file, 'utf8')).toBe(content);
 });
+
+test('configuration illisible, puis clés sans droit de lecture : la boîte d’erreur nomme aussi la copie de la configuration', async () => {
+  const skip = shouldSkip();
+  test.skip(skip !== null, skip ?? '');
+  test.skip(process.platform === 'win32' || process.getuid?.() === 0, 'chmod 000 n’ôte pas la lecture ici.');
+  const dir = userData({ 'cliodeck-config.json': BROKEN_CONFIG, 'cliodeck-secrets.json': '{}' });
+  const secrets = join(dir, 'cliodeck-secrets.json');
+  chmodSync(secrets, 0o000);
+  try {
+    const app = await startElectron(dir, { startupDialogs: true });
+    const exitCode = new Promise<number | null>((done) => {
+      const child = app.process();
+      if (child.exitCode !== null) done(child.exitCode);
+      else child.once('exit', (code) => done(code));
+    });
+    const code = await Promise.race([exitCode, new Promise<'en vie'>((done) => setTimeout(done, 30_000, 'en vie'))]);
+    if (code === 'en vie') await app.close().catch(() => undefined);
+
+    expect(code).toBe(1);
+    // La configuration a été mise de côté avant l'échec des clés : au lancement suivant, elle se
+    // lira (ce sont les défauts), et plus rien ne nommera la copie. La boîte d'erreur la nomme.
+    const copies = copiesOf(dir, 'cliodeck-config.json');
+    expect(copies).toHaveLength(1);
+    expect(readFileSync(join(dir, copies[0]), 'utf8')).toBe(BROKEN_CONFIG);
+    const seen = startupDialogs(dir);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ kind: 'error', title: menuText('settingsUnreadableTitle') });
+    const content = seen[0].kind === 'error' ? seen[0].content : '';
+    expect(content).toContain('EACCES');
+    expect(content).toContain(
+      menuText('settingsRecoveredConfig').replace('{{path}}', join(realpathSync(dir), copies[0]))
+    );
+  } finally {
+    if (existsSync(secrets)) chmodSync(secrets, 0o644);
+  }
+});
