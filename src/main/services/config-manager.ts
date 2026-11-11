@@ -7,6 +7,7 @@ import {
   type NumericSection,
 } from '../../../backend/core/config/repair-numbers.js';
 import { secureStorage, SENSITIVE_KEYS } from './secure-storage.js';
+import { openStoreResilient } from './open-store-resilient.js';
 import os from 'os';
 import path from 'path';
 
@@ -24,6 +25,8 @@ export class ConfigManager {
   private _store: ElectronStoreInstance | null = null;
   private initialized: boolean = false;
   private readonly refusedRepairs = new Set<NumericSection>();
+  /** La copie de `cliodeck-config.json` mise de côté par `init`, illisible. */
+  private recoveredFrom: string | null = null;
 
   private getStore(): ElectronStoreInstance {
     if (!this._store) {
@@ -37,12 +40,22 @@ export class ConfigManager {
 
     // Dynamic import pour electron-store (ES module)
     const { default: Store } = await import('electron-store');
+    const { app } = await import('electron');
 
-    this._store = new Store<AppConfig>({
-      defaults: DEFAULT_CONFIG,
-      name: 'cliodeck-config',
-      projectName: 'cliodeck',
-    }) as unknown as ElectronStoreInstance;
+    // Le dossier d'electron-store par défaut, nommé ici : le fichier mis de côté est celui qu'il lit.
+    const cwd = app.getPath('userData');
+    const opened = await openStoreResilient(
+      () =>
+        new Store<AppConfig>({
+          defaults: DEFAULT_CONFIG,
+          name: 'cliodeck-config',
+          projectName: 'cliodeck',
+          cwd,
+        }) as unknown as ElectronStoreInstance,
+      path.join(cwd, 'cliodeck-config.json')
+    );
+    this._store = opened.store;
+    this.recoveredFrom = opened.recoveredFrom;
 
     // Initialize secure storage for API keys
     await secureStorage.init();
@@ -53,6 +66,18 @@ export class ConfigManager {
     this.initialized = true;
     console.log('✅ ConfigManager initialized');
     console.log(`   Config path: ${this._store.path}`);
+  }
+
+  /**
+   * Les fichiers de réglages illisibles que `init` a mis de côté : l'auteur doit l'apprendre, avec
+   * le nom de la copie (`index.ts`, après `createWindow`).
+   */
+  getRecoveredFiles(): Array<{ kind: 'config' | 'secrets'; copy: string }> {
+    const files: Array<{ kind: 'config' | 'secrets'; copy: string }> = [];
+    if (this.recoveredFrom) files.push({ kind: 'config', copy: this.recoveredFrom });
+    const secrets = secureStorage.getRecoveredFrom();
+    if (secrets) files.push({ kind: 'secrets', copy: secrets });
+    return files;
   }
 
   /**

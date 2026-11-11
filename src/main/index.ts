@@ -24,7 +24,7 @@ function recordFatal(kind: 'uncaughtException' | 'unhandledRejection', err: unkn
 process.on('uncaughtException', (err) => recordFatal('uncaughtException', err));
 process.on('unhandledRejection', (reason) => recordFatal('unhandledRejection', reason));
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { existsSync } from 'fs';
@@ -33,7 +33,7 @@ import { setupIPCHandlers } from './ipc/index.js';
 import { configManager } from './services/config-manager.js';
 import { pdfService } from './services/pdf-service.js';
 import { setupApplicationMenu } from './menu.js';
-import { loadMenuTranslations, setLanguage } from './i18n.js';
+import { loadMenuTranslations, setLanguage, t } from './i18n.js';
 import { guardWindowClose, mayLeaveRenderer } from './renderer-flush.js';
 import { sandboxStatus } from './utils/sandbox-status.js';
 import { createQuitHandler, QUIT_DEADLINE_MS, shutdownApp } from './services/app-shutdown.js';
@@ -54,7 +54,7 @@ function resolveAppUrl(): string {
     : pathToFileURL(path.join(__dirname, '../../../dist/renderer/index.html')).href;
 }
 
-function createWindow() {
+function createWindow(): BrowserWindow {
   const preloadPath = path.join(__dirname, '../../preload/index.js');
   console.log('📂 __dirname:', __dirname);
   console.log('📂 Preload path:', preloadPath);
@@ -62,7 +62,7 @@ function createWindow() {
 
   const iconPath = path.join(__dirname, '../../../build/icon.png');
 
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1400,
     height: 900,
     icon: iconPath,
@@ -74,10 +74,11 @@ function createWindow() {
       webSecurity: true,
     },
   });
+  mainWindow = win;
 
   // Deny all window.open / target=_blank attempts at the main-process level.
   // Links that should open externally must go through a dedicated IPC path.
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   // En dev : charger depuis Vite
   // En production : charger depuis dist
@@ -85,27 +86,46 @@ function createWindow() {
   const debugEnabled = process.env.CLIODESK_DEBUG === '1' || process.env.DEBUG === '1';
 
   const appUrl = resolveAppUrl();
-  attachNavigationGuard(mainWindow.webContents, appUrl);
+  attachNavigationGuard(win.webContents, appUrl);
 
   if (isDev) {
-    mainWindow.loadURL(appUrl);
-    mainWindow.webContents.openDevTools();
+    win.loadURL(appUrl);
+    win.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../../dist/renderer/index.html'));
+    win.loadFile(path.join(__dirname, '../../../dist/renderer/index.html'));
     // DevTools only in production if CLIODESK_DEBUG=1 or DEBUG=1
     if (debugEnabled) {
-      mainWindow.webContents.openDevTools();
+      win.webContents.openDevTools();
     }
   }
 
-  guardWindowClose(mainWindow);
+  guardWindowClose(win);
 
-  mainWindow.on('closed', () => {
+  win.on('closed', () => {
     mainWindow = null;
   });
 
   // Setup application menu with keyboard shortcuts
-  setupApplicationMenu(mainWindow);
+  setupApplicationMenu(win);
+
+  return win;
+}
+
+/**
+ * Un fichier de réglages illisible a été mis de côté au démarrage (`openStoreResilient`) : l'auteur
+ * l'apprend, avec le nom de la copie ; pour les clés d'API, qu'elles sont à ressaisir.
+ */
+function tellRecoveredSettings(win: BrowserWindow): void {
+  const recovered = configManager.getRecoveredFiles();
+  if (recovered.length === 0) return;
+  const detail = recovered
+    .map(({ kind, copy }) =>
+      t(kind === 'config' ? 'settingsRecoveredConfig' : 'settingsRecoveredSecrets').replace('{{path}}', () => copy)
+    )
+    .join('\n\n');
+  dialog.showMessageBox(win, { type: 'warning', message: t('settingsRecoveredTitle'), detail }).catch((error: unknown) => {
+    console.warn('[Config] message des réglages mis de côté non affiché :', error);
+  });
 }
 
 // Filet global : tout WebContents créé plus tard (webview, aperçu) hérite
@@ -115,9 +135,25 @@ app.on('web-contents-created', (_event, contents) => {
 });
 
 app.whenReady().then(async () => {
+  // Les textes du main d'abord : la boîte d'erreur ci-dessous en a besoin, avant toute configuration.
+  // Sans configuration lue, ils sont en français, la langue par défaut.
+  loadMenuTranslations();
+
   // Initialiser configManager (async pour electron-store ES module)
   console.log('🔧 Initializing configManager...');
-  await configManager.init();
+  try {
+    await configManager.init();
+  } catch (error) {
+    // Un fichier qui ne se lit pas comme du JSON a déjà été mis de côté par `init`. Ce qui reste
+    // (droits, disque) ne se répare pas d'ici. Sans ce `catch`, le rejet n'allait qu'au journal des
+    // plantages, et l'app restait en vie sans fenêtre, l'icône du Dock inerte (S11-1-10).
+    console.error('❌ configManager:', error);
+    const detail = error instanceof Error ? error.message : String(error);
+    dialog.showErrorBox(t('settingsUnreadableTitle'), t('settingsUnreadableMessage').replace('{{error}}', () => detail));
+    // Aucun projet n'est ouvert : sortir sans passer par `before-quit` ne perd rien.
+    app.exit(1);
+    return;
+  }
   console.log('✅ configManager initialized');
 
   // Propagate connector secrets from secureStorage into process.env so
@@ -149,9 +185,6 @@ app.whenReady().then(async () => {
     );
   }
 
-  // Charger les traductions des menus
-  loadMenuTranslations();
-
   // Charger la langue depuis la configuration
   const savedLanguage = configManager.get('language');
   if (savedLanguage && ['fr', 'en', 'de'].includes(savedLanguage)) {
@@ -172,7 +205,7 @@ app.whenReady().then(async () => {
   // Setup IPC handlers
   shutdownProject = setupIPCHandlers().shutdownProject;
 
-  createWindow();
+  tellRecoveredSettings(createWindow());
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

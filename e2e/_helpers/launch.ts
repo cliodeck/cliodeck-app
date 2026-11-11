@@ -34,6 +34,38 @@ const MAIN_ENTRY = join(REPO_ROOT, 'dist', 'src', 'main', 'index.js');
 /** Langue de l'interface pendant les tests : les libellés attendus en dépendent. */
 export const E2E_LANGUAGE = 'fr';
 
+/** Chargé par `-r` avant le main : les dialogues du démarrage, simulés (voir le module). */
+const STARTUP_DIALOGS_STUB = join(HERE, 'stub-startup-dialogs.cjs');
+
+export interface LaunchOptions {
+  language?: string;
+  /** Un second lancement, qui retrouve les récents du premier ; ou un userData préparé par le test. */
+  userDataDir?: string;
+  args?: string[];
+  /**
+   * Les dialogues que le main pose dans `whenReady`, avant que le pilote puisse appeler
+   * `app.evaluate` (fichier de réglages mis de côté, réglages illisibles) : simulés dès le
+   * lancement, et inscrits pour `startupDialogs`.
+   */
+  startupDialogs?: boolean;
+}
+
+/** Ce qu'un dialogue du démarrage a montré. */
+export type StartupDialogSeen =
+  | { kind: 'message'; type?: string; message: string; detail?: string }
+  | { kind: 'error'; title: string; content: string };
+
+const startupDialogsLog = (userDataDir: string) => join(userDataDir, 'e2e-startup-dialogs.jsonl');
+
+export function startupDialogs(userDataDir: string): StartupDialogSeen[] {
+  const logFile = startupDialogsLog(userDataDir);
+  if (!existsSync(logFile)) return [];
+  return readFileSync(logFile, 'utf8')
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => JSON.parse(line) as StartupDialogSeen);
+}
+
 export function shouldSkip(): string | null {
   if (process.env.CI === 'true' && !process.env.DISPLAY) {
     return 'No DISPLAY in CI sandbox — Electron cannot open a window.';
@@ -55,9 +87,7 @@ export function shouldSkip(): string | null {
  * never touch `~/.config/cliodeck`. The caller receives the path so it
  * can clean up on teardown.
  */
-export async function launchApp(
-  options: { language?: string; userDataDir?: string; args?: string[] } = {},
-): Promise<LaunchOutcome> {
+export async function launchApp(options: LaunchOptions = {}): Promise<LaunchOutcome> {
   const skip = shouldSkip();
   if (skip) return { kind: 'skip', reason: skip };
 
@@ -75,18 +105,7 @@ export async function launchApp(
     );
   }
 
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
-  }
-
-  const app = await electron.launch({
-    cwd: REPO_ROOT,
-    // `--use-mock-keychain` : un test qui enregistre une clé d'API ne touche pas au vrai trousseau.
-    args: ['.', '--no-sandbox', '--use-mock-keychain', `--user-data-dir=${userDataDir}`, ...(options.args ?? [])],
-    env,
-    timeout: 30_000,
-  });
+  const app = await startElectron(userDataDir, options);
 
   const window = await app.firstWindow({ timeout: 30_000 });
   // Depuis Electron 45, la première page rendue est le document vide de la
@@ -100,6 +119,34 @@ export async function launchApp(
   await stubLeaveDialog(app, join(userDataDir, 'e2e-leave-dialogs.jsonl'));
 
   return { kind: 'ok', value: { app, window, userDataDir } };
+}
+
+/**
+ * Le lancement seul, sans attendre de fenêtre : pour une app qui doit sortir sans en ouvrir
+ * (réglages illisibles). `launchApp` l'emploie.
+ */
+export async function startElectron(userDataDir: string, options: LaunchOptions = {}): Promise<ElectronApplication> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
+  }
+  if (options.startupDialogs) env.CLIODECK_E2E_STARTUP_DIALOGS = startupDialogsLog(userDataDir);
+
+  return electron.launch({
+    cwd: REPO_ROOT,
+    // `--use-mock-keychain` : un test qui enregistre une clé d'API ne touche pas au vrai trousseau.
+    // `-r` avant l'app : le module est chargé avant son main.
+    args: [
+      ...(options.startupDialogs ? ['-r', STARTUP_DIALOGS_STUB] : []),
+      '.',
+      '--no-sandbox',
+      '--use-mock-keychain',
+      `--user-data-dir=${userDataDir}`,
+      ...(options.args ?? []),
+    ],
+    env,
+    timeout: 30_000,
+  });
 }
 
 /** Ce que le dialogue natif de sortie a demandé à l'auteur. */

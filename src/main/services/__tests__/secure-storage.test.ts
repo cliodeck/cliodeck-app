@@ -19,6 +19,8 @@ const safeStorageState = {
 };
 
 vi.mock('electron', () => ({
+  // Le dossier du fichier des clés : le faux store ci-dessous n'y touche pas.
+  app: { getPath: () => '/dossier-de-l-app' },
   safeStorage: {
     isEncryptionAvailable: () => safeStorageState.available,
     encryptString: (s: string) => safeStorageState.encrypt(s),

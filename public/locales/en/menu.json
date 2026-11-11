@@ -53,5 +53,10 @@
   "unsavedLeave": "Quit without saving",
   "unsavedUntitledMessage": "This untitled document is not saved anywhere. If you quit now, its text will be lost.",
   "unsavedSaveFailedMessage": "Your latest changes could not be saved. If you quit now, they will be lost.",
-  "unsavedSaveSlowMessage": "Saving is taking a while. If you quit now, your changes will be lost."
+  "unsavedSaveSlowMessage": "Saving is taking a while. If you quit now, your changes will be lost.",
+  "settingsRecoveredTitle": "Unreadable settings were set aside",
+  "settingsRecoveredConfig": "ClioDeck's settings file could no longer be read. It was set aside, unchanged, as:\n{{path}}\n\nClioDeck starts again from the default settings, and the list of recent projects is empty: your projects themselves are untouched. Reopen them with File → Open project.",
+  "settingsRecoveredSecrets": "ClioDeck's API key file could no longer be read. It was set aside, unchanged, as:\n{{path}}\n\nThe API keys it held (LLM, Zotero, MCP) are no longer stored: re-enter them in the Settings.",
+  "settingsUnreadableTitle": "ClioDeck cannot start",
+  "settingsUnreadableMessage": "ClioDeck's settings could not be read:\n{{error}}\n\nCheck that this file is on the disk and that you are allowed to read it, then restart ClioDeck."
 }

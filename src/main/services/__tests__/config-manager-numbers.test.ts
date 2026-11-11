@@ -21,6 +21,7 @@ vi.mock('electron-store', async () => {
     },
   };
 });
+vi.mock('electron', () => ({ app: { getPath: () => place.dir } }));
 vi.mock('../secure-storage.js', () => ({
   SENSITIVE_KEYS: [],
   secureStorage: {
