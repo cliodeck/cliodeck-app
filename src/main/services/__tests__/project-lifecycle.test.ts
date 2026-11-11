@@ -1186,3 +1186,94 @@ describe('projectLifecycle — gestionnaire en retard', () => {
     expect(volume.syncCalls).toEqual([]);
   });
 });
+
+describe('projectLifecycle — sortie de l’application (L03-9)', () => {
+  /** Le budget que `shutdownApp` laisse au projet : celui de l'app, moins la libération des modèles. */
+  const BUDGET = 6_500;
+
+  it('ferme les services dans l’ordre inverse sans fermer le gestionnaire : une sauvegarde tardive reste acceptée', async () => {
+    const events: string[] = [];
+    const manager = fakeManager(events, { [A]: {} });
+    const lc = lifecycle(manager, [
+      fakeService(events, 'history'),
+      fakeService(events, 'usage'),
+      fakeService(events, 'pdf'),
+    ]);
+    await lc.open(A, request);
+    events.length = 0;
+
+    await lc.shutdown(BUDGET);
+
+    expect(events).toEqual(['abort:pdf', 'abort:usage', 'abort:history', 'close:pdf', 'close:usage', 'close:history']);
+    // Le renderer peut encore écrire jusqu'à `app.exit` : `editor:save-file` vérifie le projet courant.
+    expect(manager.current()).toBe('/projets/A');
+    expect(lc.current()).toBeNull();
+  });
+
+  it('chaque fermeture n’a que sa part du temps restant : deux services bloqués devant les journaux ne les font pas sauter', async () => {
+    vi.useFakeTimers();
+    const events: string[] = [];
+    const manager = fakeManager(events, { [A]: {} });
+    // Les journaux s'ouvrent les premiers, donc se ferment les derniers ; devant eux, une opération
+    // qui ne se draine pas et une fermeture sans réponse, chacune avec le délai d'une bascule.
+    const lc = lifecycle(manager, [
+      fakeService(events, 'history'),
+      fakeService(events, 'usage'),
+      fakeService(events, 'mcp', { close: never }),
+      fakeService(events, 'operations', { abort: never, close: never }),
+    ]);
+    await lc.open(A, request);
+    events.length = 0;
+
+    const done = watch(lc.shutdown(BUDGET));
+    await vi.advanceTimersByTimeAsync(BUDGET);
+
+    expect(done.settled()).toBe(true);
+    expect(events).toEqual(expect.arrayContaining(['close:usage', 'close:history']));
+    expect(events.indexOf('close:mcp')).toBeLessThan(events.indexOf('close:usage'));
+    expect(events).not.toContain('manager:close');
+  });
+
+  it('une sortie pendant une ouverture qui ne finit pas ne l’attend pas au-delà de l’échéance', async () => {
+    vi.useFakeTimers();
+    const events: string[] = [];
+    const rebuild = deferred();
+    const manager = fakeManager(events, { [A]: {} });
+    const lc = lifecycle(manager, [
+      fakeService(events, 'history'),
+      fakeService(events, 'pdf', { open: () => rebuild.promise }),
+      fakeService(events, 'manuscript'),
+    ]);
+    const opening = watch(lc.open(A, request));
+    await vi.advanceTimersByTimeAsync(0);
+    const handle = lc.current();
+    events.length = 0;
+
+    const done = watch(lc.shutdown(BUDGET));
+    // L'ouverture apprend tout de suite qu'elle est abandonnée.
+    expect(handle?.isCurrent()).toBe(false);
+    await vi.advanceTimersByTimeAsync(BUDGET);
+
+    expect(done.settled()).toBe(true);
+    expect(events).toEqual(expect.arrayContaining(['close:pdf', 'close:history']));
+    expect(events.indexOf('close:pdf')).toBeLessThan(events.indexOf('close:history'));
+
+    // Finie après la sortie, l'ouverture n'ouvre plus rien et ne recharge rien.
+    events.length = 0;
+    rebuild.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(opening.settled()).toBe(true);
+    expect(await opening.promise).toMatchObject({ success: false });
+    expect(events).toEqual([]);
+  });
+
+  it('sans projet ouvert, la sortie ne fait rien et rend la main', async () => {
+    const events: string[] = [];
+    const manager = fakeManager(events, { [A]: {} });
+    const lc = lifecycle(manager, [fakeService(events, 'history')]);
+
+    await lc.shutdown(BUDGET);
+
+    expect(events).toEqual([]);
+  });
+});

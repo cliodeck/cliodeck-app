@@ -12,6 +12,8 @@
  *   un nouveau handle et ouvrir ses services dans l'ordre ;
  * - fermer : avorter le signal du handle, appeler tous les `abort()`, puis les `close()` en ordre
  *   inverse d'ouverture, chacun pour soi, et enfin le gestionnaire de projet ;
+ * - quitter l'app (`shutdown`, L03-9) : la même fermeture, dans un budget que ses attentes se
+ *   partagent, sans fermer le gestionnaire ; ensuite, plus rien ne s'ouvre ;
  * - échouer : un service `required` qui échoue referme tout ce qui a été ouvert et rouvre A ; un
  *   `best-effort` laisse un avertissement ; un `background` est lancé sans attente.
  *
@@ -183,6 +185,14 @@ export interface ProjectLifecycle<TLoaded extends ManagerReply = ManagerReply, T
   open(projectFile: string, request: TRequest): Promise<ProjectOpenResult<TLoaded>>;
   /** Ferme le projet courant ; ne lève pas. */
   close(): Promise<void>;
+  /**
+   * Ferme le projet courant pour quitter l'app, en `budgetMs` au plus ; ne lève pas (L03-9). Les
+   * services se ferment comme à `close`, mais chacun n'a que sa part du temps qui reste ; la file
+   * n'est attendue que la moitié du budget ; le gestionnaire reste sur son projet, pour qu'une
+   * sauvegarde tardive du renderer soit acceptée jusqu'à `app.exit`. Après elle, plus rien ne
+   * s'ouvre.
+   */
+  shutdown(budgetMs: number): Promise<void>;
   /** Le handle de l'ouverture en cours, ou null. */
   current(): ProjectHandle | null;
 }
@@ -308,6 +318,15 @@ type EnterOutcome<TLoaded extends ManagerReply> =
   | { kind: 'entered'; loaded: TLoaded; warnings: string[] }
   | { kind: 'refused'; reply: Refusal; managerUnsure: boolean };
 
+/** L'app quitte : l'ouverture s'arrête là, et ce qu'elle a déjà ouvert se ferme avec la sortie. */
+function quitRefusal<TLoaded extends ManagerReply>(): EnterOutcome<TLoaded> {
+  return {
+    kind: 'refused',
+    reply: { success: false, code: 'project_unavailable', error: 'app-quit' },
+    managerUnsure: false,
+  };
+}
+
 /** Un appel qui change le gestionnaire (charger, fermer), resté sans réponse et qui court encore. */
 interface LateCall {
   /** Le dossier qu'il charge ; null pour une fermeture. */
@@ -335,6 +354,8 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
     checkDelay(`closeTimeoutMs de ${service.name}`, service.closeTimeoutMs);
   }
   let state: OpenState<TLoaded, TRequest> | null = null;
+  /** L'app quitte (`shutdown`) : plus aucun projet ne s'ouvre, et le gestionnaire ne se ferme plus. */
+  let exiting = false;
   let epoch = 0;
   let tail: Promise<unknown> = Promise.resolve();
   const lateCalls = new Set<LateCall>();
@@ -422,6 +443,8 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
    * laisser le main sur un projet que le renderer ne croit pas ouvert, et l'appelant l'apprend.
    */
   async function reconcile(): Promise<void> {
+    // L'app quitte : la sortie a fermé les services, et rien ne se recharge plus.
+    if (exiting) return;
     const managerPath = manager.getCurrentProjectPath();
     const target = state;
     if (target === null) {
@@ -464,35 +487,70 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
     }
   }
 
-  async function closeNow(): Promise<void> {
+  /**
+   * `exitBy` : l'heure (`Date.now()`) où l'app sort. Chaque attente n'a alors que sa part du temps qui
+   * reste, partagé entre celles qui restent à venir : un service bloqué n'y perd que la sienne, et les
+   * derniers fermés, les journaux, ont toujours la leur. Leur fermeture est synchrone : la part leur
+   * suffit, quelle qu'elle soit.
+   */
+  async function closeNow(exitBy?: number): Promise<void> {
     const closing = state;
     state = null;
     if (closing) {
       closing.handle.end();
       const reversed = [...closing.opened].reverse();
+      const closers = reversed.filter((service) => service.close);
+      const within = (ms: number, slots: number): number =>
+        exitBy === undefined ? ms : Math.min(ms, Math.max(1, Math.floor((exitBy - Date.now()) / slots)));
       // Toutes ensemble : chaque `abort()` ne fait que couper, et aucun n'attend l'autre.
+      const abortMs = within(timeouts.abortMs, closers.length + 1);
       await Promise.all(
         reversed
           .filter((service) => service.abort)
           .map(async (service) => {
-            const outcome = await settleWithin(`abort de ${service.name}`, timeouts.abortMs, () =>
-              service.abort?.()
-            );
+            const outcome = await settleWithin(`abort de ${service.name}`, abortMs, () => service.abort?.());
             if (outcome.kind === 'failed') console.error(`${LOG} abort de ${service.name} :`, outcome.error);
           })
       );
-      for (const service of reversed) {
-        if (!service.close) continue;
+      for (const [index, service] of closers.entries()) {
         const outcome = await settleWithin(
           `fermeture de ${service.name}`,
-          service.closeTimeoutMs ?? timeouts.closeMs,
+          within(service.closeTimeoutMs ?? timeouts.closeMs, closers.length - index),
           () => service.close?.()
         );
         if (outcome.kind === 'failed') console.error(`${LOG} fermeture de ${service.name} :`, outcome.error);
       }
     }
+    // L'app quitte : le gestionnaire reste sur son projet. Le renderer peut encore enregistrer jusqu'à
+    // `app.exit` (une écriture qui traînait au flush), et ses écritures sont validées contre lui.
+    if (exiting) return;
     const outcome = await changeManager('fermeture du projet', null, timeouts.closeMs, () => manager.close());
     if (outcome.kind === 'failed') console.error(`${LOG} fermeture du projet :`, outcome.error);
+  }
+
+  /**
+   * La sortie (`ProjectLifecycle.shutdown`). Elle prend sa place dans la file, comme une fermeture,
+   * mais une ouverture qui dure (un index PDF qui se reconstruit, jusqu'à dix minutes) ne la retient
+   * que la moitié du budget : au-delà, elle ferme sans l'attendre ce que cette ouverture a déjà
+   * ouvert, les journaux d'abord ouverts compris. Le handle courant s'avorte tout de suite, pour que
+   * l'ouverture s'arrête dès qu'elle le peut.
+   */
+  async function shutdownNow(budgetMs: number): Promise<void> {
+    const exitBy = Date.now() + budgetMs;
+    exiting = true;
+    state?.handle.end();
+    let closing: Promise<void> | null = null;
+    const closeOnce = (): Promise<void> => (closing ??= closeNow(exitBy));
+    let reachTurn!: () => void;
+    const turn = new Promise<void>((resolve) => {
+      reachTurn = resolve;
+    });
+    void enqueue(() => {
+      reachTurn();
+      return closeOnce();
+    });
+    await settleWithin('sortie, attente de la file', Math.max(1, Math.floor(budgetMs / 2)), () => turn);
+    await closeOnce();
   }
 
   /**
@@ -501,6 +559,7 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
    * court encore ; il peut encore basculer.
    */
   async function enter(projectFile: string, key: string, request: TRequest): Promise<EnterOutcome<TLoaded>> {
+    if (exiting) return quitRefusal();
     const dir = path.dirname(projectFile);
     const load = await changeManager(`chargement de ${projectFile}`, { dir, key }, timeouts.managerMs, () =>
       manager.loadProject(projectFile)
@@ -510,6 +569,7 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
       return { kind: 'refused', reply, managerUnsure: load.kind === 'timeout' || load.kind === 'busy' };
     }
     const loaded = load.value;
+    if (exiting) return quitRefusal();
 
     // Le dossier demandé, celui que range `ProjectManager.loadProject` : pas le chemin courant du
     // gestionnaire, qu'un appel en retard peut avoir changé entre-temps.
@@ -521,6 +581,8 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
 
     for (const service of services) {
       if (service.mode === 'background') continue;
+      // La sortie a fermé, sans l'attendre, ce que cette ouverture avait ouvert : rien de plus.
+      if (exiting) return quitRefusal();
       // Avant l'attente : un service qui échoue a pu s'ouvrir à moitié, et se ferme avec les autres.
       opening.opened.push(service);
       const ms = service.openTimeoutMs ?? timeouts.openMs;
@@ -540,6 +602,7 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
     }
 
     // Après les autres : une ouverture refusée ne laisse aucune tâche de fond derrière elle.
+    if (exiting) return quitRefusal();
     for (const service of services) {
       if (service.mode !== 'background') continue;
       opening.opened.push(service);
@@ -622,7 +685,8 @@ export function createProjectLifecycle<TLoaded extends ManagerReply = ManagerRep
 
   return {
     open: (projectFile, request) => enqueue(() => openNow(projectFile, request)),
-    close: () => enqueue(closeNow),
+    close: () => enqueue(() => closeNow()),
+    shutdown: shutdownNow,
     current: () => state?.handle ?? null,
   };
 }

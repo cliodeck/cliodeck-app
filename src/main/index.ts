@@ -36,12 +36,16 @@ import { setupApplicationMenu } from './menu.js';
 import { loadMenuTranslations, setLanguage } from './i18n.js';
 import { guardWindowClose, mayLeaveRenderer } from './renderer-flush.js';
 import { sandboxStatus } from './utils/sandbox-status.js';
+import { createQuitHandler, QUIT_DEADLINE_MS, shutdownApp } from './services/app-shutdown.js';
+import { disposeAllEmbeddedClients } from '../../backend/core/llm/embedded-engine-pool.js';
 
 // Obtenir __dirname en ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindow | null = null;
+/** La fermeture du projet ouvert, rendue par les handlers ; nulle avant `whenReady`, sans projet. */
+let shutdownProject: ((budgetMs: number) => Promise<void>) | null = null;
 
 /** URL servie par l'application — référence du garde de navigation. */
 function resolveAppUrl(): string {
@@ -166,7 +170,7 @@ app.whenReady().then(async () => {
   // via IPC handlers when a project is loaded (not at app startup)
 
   // Setup IPC handlers
-  setupIPCHandlers();
+  shutdownProject = setupIPCHandlers().shutdownProject;
 
   createWindow();
 
@@ -183,29 +187,26 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Arrêter proprement le service Topic Modeling lors de la fermeture de l'app
-app.on('before-quit', async (event) => {
-  // Empêcher la fermeture immédiate pour permettre un arrêt propre
-  event.preventDefault();
-
-  // D'abord le travail de l'utilisateur, ensuite les services. L'auteur qui préfère rester
-  // garde tout : la sortie a été annulée plus haut, et les services tournent encore.
-  if (!(await mayLeaveRenderer(mainWindow))) return;
-
-  try {
-    // Importer et arrêter le service s'il est en cours d'exécution
-    const { topicModelingService } = await import('./services/topic-modeling-service.js');
-    const status = topicModelingService.getStatus();
-
-    if (status.isRunning) {
-      console.log('🛑 Stopping topic modeling service before quit...');
-      await topicModelingService.stop();
-      console.log('✅ Topic modeling service stopped');
-    }
-  } catch (error) {
-    console.warn('⚠️ Could not stop topic modeling service:', error);
-  }
-
-  // Continuer la fermeture
-  app.exit();
-});
+// Quitter (L03-9) : le document d'abord ; puis, dans une échéance, le projet ouvert (ses journaux
+// compris), le service des thèmes et les modèles embarqués ; puis `app.exit()`, quoi qu'il arrive.
+// `app.exit()` ne ferme rien de lui-même : sans cet arrêt, la session du journal de recherche
+// restait « Active » et le tampon du journal d'usage se perdait.
+app.on(
+  'before-quit',
+  createQuitHandler({
+    mayLeave: () => mayLeaveRenderer(mainWindow),
+    shutdown: () =>
+      shutdownApp({
+        deadlineMs: QUIT_DEADLINE_MS,
+        stopTopicModeling: async () => {
+          const { topicModelingService } = await import('./services/topic-modeling-service.js');
+          await topicModelingService.stop();
+        },
+        closeProject: async (budgetMs) => {
+          await shutdownProject?.(budgetMs);
+        },
+        releaseEmbeddedModels: () => disposeAllEmbeddedClients(),
+      }),
+    exit: () => app.exit(),
+  })
+);

@@ -6,7 +6,7 @@
  */
 
 import { setupConfigHandlers } from './handlers/config-handlers.js';
-import { setupProjectHandlers } from './handlers/project-handlers.js';
+import { setupProjectHandlers, type ProjectHandlersHandle } from './handlers/project-handlers.js';
 import { setupPDFHandlers } from './handlers/pdf-handlers.js';
 import { setupBibliographyHandlers } from './handlers/bibliography-handlers.js';
 import { setupEditorHandlers } from './handlers/editor-handlers.js';
@@ -48,13 +48,15 @@ import { setupReadingNotesCorpusHandlers } from './handlers/reading-notes-corpus
  * - Similarity finder (5 handlers)
  *
  * Total: 68 IPC handlers
+ *
+ * Rend la fermeture du projet ouvert, pour la sortie de l'app (L03-9).
  */
-export function setupIPCHandlers() {
+export function setupIPCHandlers(): ProjectHandlersHandle {
   console.log('🔧 Setting up modular IPC handlers...');
 
   // Register all handler modules
   setupConfigHandlers();
-  setupProjectHandlers();
+  const projects = setupProjectHandlers();
   setupPDFHandlers();
   setupBibliographyHandlers();
   setupEditorHandlers();
@@ -78,4 +80,5 @@ export function setupIPCHandlers() {
   setupReadingNotesCorpusHandlers();
 
   console.log('✅ All IPC handlers registered successfully');
+  return projects;
 }
