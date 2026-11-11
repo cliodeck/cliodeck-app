@@ -45,27 +45,41 @@ interface MenuCommand {
 const listening = new WeakMap<WebContents, Set<string>>();
 const waiting = new WeakMap<WebContents, MenuCommand[]>();
 
+/**
+ * Les commandes en attente partent dans l'ordre des clics : la file s'arrête à la première dont le
+ * canal n'est pas encore écouté, et celles qui la suivent l'attendent. Livrer canal par canal les
+ * aurait fait partir dans l'ordre où `useMenuShortcuts` pose ses écouteurs. Le hook pose tous les
+ * siens dans le même effet, et chaque canal que le menu envoie y est écouté (`menu-window.test.ts`) :
+ * la file se vide à la dernière annonce, et aucune commande ne la retient pour toujours.
+ */
+function flush(contents: WebContents): void {
+  const queue = waiting.get(contents);
+  if (!queue) return;
+  const channels = listening.get(contents);
+  for (let head = queue[0]; head && channels?.has(head.channel); head = queue[0]) {
+    queue.shift();
+    if (head.isLeaving() || contents.isDestroyed()) continue;
+    contents.send(head.channel, ...head.args);
+  }
+  if (queue.length === 0) waiting.delete(contents);
+}
+
 function onRendererListening(event: IpcMainEvent, channel: unknown): void {
   if (typeof channel !== 'string') return;
   const contents = event.sender;
   const channels = listening.get(contents) ?? new Set<string>();
   channels.add(channel);
   listening.set(contents, channels);
-  const queue = waiting.get(contents) ?? [];
-  waiting.set(contents, queue.filter((command) => command.channel !== channel));
-  for (const command of queue) {
-    if (command.channel !== channel || command.isLeaving() || contents.isDestroyed()) continue;
-    contents.send(command.channel, ...command.args);
-  }
+  flush(contents);
 }
 
+/** Une commande prend son tour : tout de suite si rien n'attend et que son canal est écouté. */
 function deliver(win: BrowserWindow, command: MenuCommand): void {
   const contents = win.webContents;
-  if (listening.get(contents)?.has(command.channel)) {
-    contents.send(command.channel, ...command.args);
-    return;
-  }
-  waiting.set(contents, [...(waiting.get(contents) ?? []), command]);
+  const queue = waiting.get(contents) ?? [];
+  queue.push(command);
+  waiting.set(contents, queue);
+  flush(contents);
 }
 
 /**

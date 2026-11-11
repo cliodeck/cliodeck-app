@@ -19,6 +19,7 @@
  * menu, cliqué dans la vraie app, est dans `e2e/journey-menu-commands.spec.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { EventEmitter } from 'node:events';
 import type { BrowserWindow, MenuItemConstructorOptions } from 'electron';
@@ -81,13 +82,15 @@ function listening(fake: FakeWindow, ...channels: string[]): void {
   for (const channel of channels) h.ipc?.emit('menu:listening', { sender: fake.win.webContents }, channel);
 }
 
+/**
+ * Les canaux qu'écoute le renderer, dans l'ordre où `useMenuShortcuts` pose ses écouteurs : c'est
+ * l'ordre des annonces `menu:listening` d'une fenêtre qui se monte. Lus dans le hook lui-même.
+ */
 const MENU_CHANNELS = [
-  'menu:new-file', 'menu:open-file', 'menu:save-file', 'menu:new-project', 'menu:open-project',
-  'menu:export-pdf', 'menu:format-bold', 'menu:format-italic', 'menu:insert-link',
-  'menu:insert-citation', 'menu:insert-table', 'menu:insert-footnote', 'menu:insert-blockquote',
-  'menu:check-citations', 'menu:switch-panel', 'menu:import-bibtex', 'menu:connect-zotero',
-  'menu:open-settings', 'menu:open-usage-journal', 'menu:about',
-];
+  ...readFileSync(resolve(__dirname, '../../renderer/src/hooks/useMenuShortcuts.ts'), 'utf8').matchAll(
+    /\bon\('(menu:[a-z-]+)'/g
+  ),
+].map(([, channel]) => channel);
 
 /** L'app telle que `index.ts` la compose : la fenêtre du moment, sa recréation, la sortie. */
 function app(initial: FakeWindow | null) {
@@ -117,7 +120,7 @@ function app(initial: FakeWindow | null) {
     // Electron passe la fenêtre qui a le focus, ou rien quand il n'y en a pas.
     (item.click as (...args: unknown[]) => void)(item, undefined, {});
   };
-  return { state, createWindow, click };
+  return { state, createWindow, click, template };
 }
 
 const realPlatform = process.platform;
@@ -164,7 +167,7 @@ describe('macOS : la fenêtre fermée, le menu reste', () => {
     expect(state.created[0].received).toEqual([['menu:open-settings']]);
   });
 
-  it('deux commandes avant que le renderer n’écoute : les deux arrivent, dans l’ordre, une fois chacune', () => {
+  it('deux commandes avant que le renderer n’écoute : les deux arrivent, une fois chacune, dans une seule fenêtre', () => {
     const { state, createWindow, click } = app(null);
 
     click('Nouveau projet');
@@ -175,6 +178,52 @@ describe('macOS : la fenêtre fermée, le menu reste', () => {
     listening(state.created[0], ...MENU_CHANNELS);
     listening(state.created[0], ...MENU_CHANNELS);
     expect(state.created[0].received).toEqual([['menu:new-project'], ['menu:switch-panel', 'bibliography']]);
+  });
+
+  it('elles arrivent dans l’ordre des clics, même quand le renderer écoute la seconde avant la première', () => {
+    const { state, click } = app(null);
+
+    // `useMenuShortcuts` écoute `menu:open-project` avant `menu:switch-panel` : l'ordre inverse des clics.
+    expect(MENU_CHANNELS.indexOf('menu:open-project')).toBeLessThan(MENU_CHANNELS.indexOf('menu:switch-panel'));
+    click('Panneau Bibliographie');
+    click('Ouvrir projet');
+
+    listening(state.created[0], ...MENU_CHANNELS);
+
+    expect(state.created[0].received).toEqual([['menu:switch-panel', 'bibliography'], ['menu:open-project']]);
+  });
+
+  it('un clic dont le canal est déjà écouté attend derrière une commande encore en attente', () => {
+    const { state, click } = app(null);
+    click('Panneau Bibliographie');
+    const [win] = state.created;
+    listening(win, 'menu:open-project');
+
+    click('Ouvrir projet');
+
+    expect(win.received).toEqual([]);
+    listening(win, 'menu:switch-panel');
+    expect(win.received).toEqual([['menu:switch-panel', 'bibliography'], ['menu:open-project']]);
+  });
+
+  it('chaque commande que le menu envoie est écoutée par le renderer : aucune ne bloque la file', () => {
+    const win = fakeWindow();
+    const { template } = app(win);
+    listening(win, ...MENU_CHANNELS);
+    // Les deux liens de l'aide ouvrent le navigateur, Recharger ne passe pas par le renderer.
+    const notSent = new Set(['Documentation', 'Signaler un problème', 'Recharger', 'Forcer le rechargement']);
+    const clickable = (items: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] =>
+      items.flatMap((item) => [
+        ...(item.click && !notSent.has(String(item.label)) ? [item] : []),
+        ...(Array.isArray(item.submenu) ? clickable(item.submenu) : []),
+      ]);
+    const items = clickable(template);
+
+    for (const item of items) (item.click as (...args: unknown[]) => void)(item, undefined, {});
+
+    // Une commande qu'aucun écouteur n'attend resterait en tête de file, et retiendrait les suivantes.
+    expect(win.received).toHaveLength(items.length);
+    for (const [channel] of win.received) expect(MENU_CHANNELS, String(channel)).toContain(channel);
   });
 
   it('sans fenêtre, une commande sur le document ouvert (Sauvegarder, Gras, Recharger) ne recrée rien et ne lève pas', () => {
