@@ -150,6 +150,27 @@ describe('« Fusionner » un .bib rangé hors du projet', () => {
     expect(ids()).toEqual(['Garde_2000', 'Main_2010']);
   });
 
+  // Le `.bib` que `project.json` nomme a disparu depuis l'ouverture (renommé dans le Finder, évincé
+  // par iCloud) : le main refuse sans rien écrire (J1). Le panneau le montre comme après la
+  // synchronisation refusée pour la même raison (H3) : le bandeau « introuvable », plus la liste
+  // d'un fichier qui n'existe plus, et pas de récapitulatif. Sans traitement, l'alerte disait
+  // « bibImport.failed », suivi du code brut.
+  it('le .bib du projet est introuvable : la fusion refusée montre le bandeau « introuvable », sans récapitulatif', async () => {
+    importIpc.mockResolvedValue({ success: false, error: 'bib-missing', file: 'bibliography.bib', bibtexPath: BIB });
+    // Ce que rend le vrai handler pour un `.bib` absent (`bibliographyLoadFailure`).
+    loadWithMetadata.mockResolvedValue({ success: false, error: 'bibliography.bib est introuvable', citations: [], problem: 'missing' });
+
+    await importBib('bibImport.merge');
+
+    expect(loadWithMetadata).toHaveBeenCalledWith({ filePath: BIB, projectPath: PROJECT });
+    expect(screen.getByRole('alert')).toHaveTextContent('bibliography.bibMissing');
+    expect(ids()).toEqual([]);
+    expect(dialogs().alertMessage).toContain('bibImport.mergeRefused');
+    expect(dialogs().alertMessage).toContain('bibliography.bibMissing');
+    expect(dialogs().alertMessage).not.toContain('bibImport.failed');
+    expect(screen.queryByText('bibImportSummary.title')).toBeNull();
+  });
+
   it('refusé parce que le projet a changé : rien ne s’affiche dans l’autre', async () => {
     importIpc.mockResolvedValue({ success: false, error: 'project-changed' });
 

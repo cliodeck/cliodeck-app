@@ -72,14 +72,17 @@ interface BibliographyImportResponse extends Omit<BibliographyLoadResponse, 'cit
   /** Fusion ou remplacement refusés : le `.bib` du projet en cause, et pourquoi. */
   file?: string;
   detail?: string;
+  /** `bib-missing` : le chemin entier du `.bib` introuvable, que le panneau relit. */
+  bibtexPath?: string;
 }
 
 /**
- * La fusion arrêtée avant d'écrire : le `.bib` du projet ne s'est pas lu en entier (`problem`), ou
- * `project.json` ne dit plus lequel c'est (`problem` nul). Le main n'a rien écrit.
+ * La fusion arrêtée avant d'écrire : le `.bib` du projet ne s'est pas lu en entier, ou celui que
+ * `project.json` nomme est introuvable (`problem`) ; ou `project.json` ne dit plus lequel c'est
+ * (`problem` nul). Le main n'a rien écrit.
  */
 export class BibliographyMergeRefusedError extends Error {
-  readonly problem: Extract<BibliographyProblem, { kind: 'partial' | 'unreadable' }> | null;
+  readonly problem: BibliographyProblem | null;
 
   constructor(problem: BibliographyMergeRefusedError['problem'], message: string) {
     super(message);
@@ -121,6 +124,7 @@ function importFailure(sourcePath: string, result: BibliographyImportResponse): 
       result.error
     );
   }
+  if (result.error === 'bib-missing') return new BibliographyMergeRefusedError({ kind: 'missing', file }, result.error);
   if (result.error === 'project-unreadable') return new BibliographyMergeRefusedError(null, result.error);
   return loadFailure(sourcePath, result);
 }
@@ -251,7 +255,15 @@ export const createCitationSlice: BibliographySliceCreator<CitationSliceState> =
     });
     // Refusé par le main, ou le projet a changé pendant l'écriture : rien ne s'affiche dans l'autre.
     if (refusedAsProjectChanged(result) || !(await stillIn(projectPath))) return null;
-    if (!result.success || !result.bibPath) throw importFailure(sourcePath, result);
+    if (!result.success || !result.bibPath) {
+      // Le `.bib` que project.json nomme n'est plus là : le panneau le relit, et montre le bandeau
+      // « introuvable », comme après la synchronisation Zotero refusée pour la même raison (H3),
+      // plutôt que la liste d'un fichier disparu. La relecture lève, puisque le fichier manque.
+      if (result.error === 'bib-missing' && result.bibtexPath) {
+        await get().loadBibliographyWithMetadata(result.bibtexPath, projectPath).catch(() => undefined);
+      }
+      throw importFailure(sourcePath, result);
+    }
 
     // Le panneau se relit depuis le fichier du projet, rattachements Zotero compris.
     await get().loadBibliographyWithMetadata(result.bibPath, projectPath);
