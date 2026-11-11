@@ -149,15 +149,23 @@ export async function startElectron(userDataDir: string, options: LaunchOptions 
   });
 }
 
-/** Ce que le dialogue natif de sortie a demandé à l'auteur. */
+/** Une question native posée pendant le test, et ce que le bouchon y a répondu. */
 export interface LeaveDialogSeen {
   message: string;
   buttons: string[];
+  response: number;
 }
 
 interface LeaveDialogStub {
   __leaveAnswer: number;
 }
+
+/** « Quitter sans enregistrer » dans chaque langue, lu dans les fichiers que lit le main (`unsavedLeave`). */
+const LEAVE_LABELS = ['fr', 'en', 'de'].map(
+  (language) =>
+    (JSON.parse(readFileSync(join(REPO_ROOT, 'public', 'locales', language, 'menu.json'), 'utf8')) as Record<string, string>)
+      .unsavedLeave,
+);
 
 const leaveDialogLogs = new WeakMap<ElectronApplication, string>();
 
@@ -165,26 +173,40 @@ const leaveDialogLogs = new WeakMap<ElectronApplication, string>();
  * Un tampon sans titre non vide, ou une écriture refusée, pose une question native à
  * la fermeture. Personne n'y répondrait : `app.close()` resterait bloqué, et la suite
  * avec lui, y compris quand un test échoue en plein milieu. Le dialogue répond donc
- * « Quitter sans enregistrer » par défaut ; `answerLeaveDialog` change la réponse et
- * `leaveDialogs` dit ce qui a été demandé.
+ * « Quitter sans enregistrer » par défaut ; `answerLeaveDialog` change la réponse.
  *
- * Ce qui a été demandé s'écrit dans un fichier, lu côté test : sous Windows et Linux, la
- * dernière fenêtre fermée emporte l'app, et il n'y aurait plus personne à interroger.
+ * À cette question-là seulement, reconnue à son bouton dans les trois langues : le
+ * consentement à un envoi distant (`confirmCloudUsage`) et l'ajout d'un serveur MCP
+ * (`confirmMcpAdd`) passent aussi par `showMessageBox`, et leur bouton 1 accepte. Toute
+ * autre question reçoit `cancelId` (0 s'il manque), comme un dialogue qu'on ferme.
+ *
+ * `leaveDialogs` dit chaque question posée et la réponse donnée. Elles s'écrivent dans un
+ * fichier, lu côté test : sous Windows et Linux, la dernière fenêtre fermée emporte l'app, et
+ * il n'y aurait plus personne à interroger. `E2E_DIALOG_JOURNAL` nomme en plus un fichier où
+ * une suite entière les garde.
  */
 async function stubLeaveDialog(app: ElectronApplication, logFile: string): Promise<void> {
   leaveDialogLogs.set(app, logFile);
-  await app.evaluate(({ dialog }, file) => {
-    const { appendFileSync } = process.getBuiltinModule('node:fs');
-    const stub = globalThis as unknown as LeaveDialogStub;
-    stub.__leaveAnswer = 1;
-    (dialog as unknown as { showMessageBox: unknown }).showMessageBox = async (...args: unknown[]) => {
-      const { message, buttons } = args[args.length - 1] as LeaveDialogSeen;
-      appendFileSync(file, `${JSON.stringify({ message, buttons })}\n`);
-      return { response: stub.__leaveAnswer, checkboxChecked: false };
-    };
-  }, logFile);
+  const files = process.env.E2E_DIALOG_JOURNAL ? [logFile, process.env.E2E_DIALOG_JOURNAL] : [logFile];
+  await app.evaluate(
+    ({ dialog }, { files, leaveLabels }) => {
+      const { appendFileSync } = process.getBuiltinModule('node:fs');
+      const stub = globalThis as unknown as LeaveDialogStub;
+      stub.__leaveAnswer = 1;
+      (dialog as unknown as { showMessageBox: unknown }).showMessageBox = async (...args: unknown[]) => {
+        const { message, buttons, cancelId } = args[args.length - 1] as Partial<LeaveDialogSeen> & { cancelId?: number };
+        const leave = buttons !== undefined && leaveLabels.includes(buttons[1]);
+        const response = leave ? stub.__leaveAnswer : (cancelId ?? 0);
+        const line = `${JSON.stringify({ message, buttons, response })}\n`;
+        for (const file of files) appendFileSync(file, line);
+        return { response, checkboxChecked: false };
+      };
+    },
+    { files, leaveLabels: LEAVE_LABELS },
+  );
 }
 
+/** La réponse à la question de sortie, et à elle seule. */
 export function answerLeaveDialog(app: ElectronApplication, answer: 'stay' | 'leave'): Promise<void> {
   return app.evaluate((_electron, response) => {
     (globalThis as unknown as LeaveDialogStub).__leaveAnswer = response;
