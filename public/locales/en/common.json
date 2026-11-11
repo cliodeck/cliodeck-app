@@ -1250,14 +1250,6 @@
     "placeholder": "Start writing...",
     "noCitationFound": "No citation found"
   },
-  "pdfIndex": {
-    "unknownAuthor": "Unknown author",
-    "bibtexKey": "BibTeX key",
-    "pages": "Pages",
-    "chunks": "Chunks",
-    "indexedAt": "Indexed on",
-    "delete": "Delete"
-  },
   "dialog": {
     "ok": "OK",
     "cancel": "Cancel",
