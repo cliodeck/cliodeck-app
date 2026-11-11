@@ -6,7 +6,7 @@
  */
 
 import type { SearchResult } from '../../types/pdf-document.js';
-import { forgetLoadedClient, trackLoadedClient } from './embedded-engine-pool.js';
+import { forgetEmbeddedClient, isEmbeddedEngineClosing, trackEmbeddedClient } from './embedded-engine-pool.js';
 
 // Types pour node-llama-cpp (évite les problèmes d'import ESM)
 interface LlamaInstance {
@@ -147,6 +147,20 @@ function splitNearMiddle(text: string): [string, string] | null {
   return [text.slice(0, middle), text.slice(middle)];
 }
 
+/** Ce qu'un client tient : chaque modèle et son contexte. */
+interface HeldModels {
+  embeddingContext: LlamaEmbeddingContextInstance | null;
+  embeddingModel: LlamaModelInstance | null;
+  context: LlamaContextInstance | null;
+  model: LlamaModelInstance | null;
+}
+
+/**
+ * Tours de libération au plus pour un `dispose()` : un modèle rechargé pendant une libération est
+ * libéré au tour suivant. Au-delà, le client reste suivi, et la sortie le libère.
+ */
+const MAX_RELEASE_ROUNDS = 3;
+
 /** Libère un modèle chargé, sans lever : un échec ne retient pas les libérations suivantes. */
 async function disposeModel(model: LlamaModelInstance | null, tag: string): Promise<void> {
   if (!model) return;
@@ -169,6 +183,8 @@ export class EmbeddedLLMClient {
   private isGenerating = false; // Prevent concurrent generation
   /** La libération en cours : un second appel (le registre, puis la sortie de l'app) l'attend. */
   private disposing: Promise<void> | null = null;
+  /** Les chargements en cours (`initialize`, `initializeEmbedding`) : une libération les attend. */
+  private readonly loads = new Set<Promise<boolean>>();
 
   // Embedding model state (separate from generation model)
   private embeddingModel: LlamaModelInstance | null = null;
@@ -183,7 +199,11 @@ export class EmbeddedLLMClient {
    * @param modelPath Chemin vers le fichier GGUF
    * @param modelId ID du modèle (pour logging)
    */
-  async initialize(modelPath: string, modelId?: string): Promise<boolean> {
+  initialize(modelPath: string, modelId?: string): Promise<boolean> {
+    return this.trackLoad('[EMBEDDED]', () => this.loadGeneration(modelPath, modelId));
+  }
+
+  private async loadGeneration(modelPath: string, modelId?: string): Promise<boolean> {
     try {
       // Import dynamique de node-llama-cpp
       // @ts-ignore - Module chargé dynamiquement
@@ -220,7 +240,6 @@ export class EmbeddedLLMClient {
       this.modelPath = modelPath;
       this.modelId = modelId || null;
       this.initialized = true;
-      trackLoadedClient(this);
 
       console.log('✅ [EMBEDDED] Embedded LLM initialized successfully');
       return true;
@@ -253,7 +272,11 @@ export class EmbeddedLLMClient {
    * Initialise le modèle d'embedding embarqué (séparé du modèle de génération)
    * Réutilise l'instance Llama existante si disponible.
    */
-  async initializeEmbedding(modelPath: string, modelId?: string): Promise<boolean> {
+  initializeEmbedding(modelPath: string, modelId?: string): Promise<boolean> {
+    return this.trackLoad('[EMBEDDED-EMB]', () => this.loadEmbedding(modelPath, modelId));
+  }
+
+  private async loadEmbedding(modelPath: string, modelId?: string): Promise<boolean> {
     try {
       // @ts-ignore - Module chargé dynamiquement
       const nodeLlamaCpp = await import('node-llama-cpp').catch(() => null);
@@ -283,7 +306,6 @@ export class EmbeddedLLMClient {
       this.embeddingModelPath = modelPath;
       this.embeddingModelId = modelId || null;
       this.embeddingInitialized = true;
-      trackLoadedClient(this);
 
       console.log(`✅ [EMBEDDED-EMB] Embedding model loaded: ${modelId}, dims=${this.embeddingDimensions}`);
       return true;
@@ -622,32 +644,88 @@ ${userQuery}
    * `llama.dispose()` : il libère le backend de tout le processus, celui des autres clients compris
    * (mesuré par L08).
    *
+   * La promesse se résout quand le client ne tient plus aucun modèle. Un chargement en cours est
+   * attendu, puis libéré : sinon son modèle serait chargé après la libération, et à la sortie. Un
+   * modèle rechargé pendant la libération (un travail encore en vol) est libéré au tour suivant, au
+   * plus `MAX_RELEASE_ROUNDS` tours.
+   *
    * Une libération en cours est partagée : un second appel concurrent (le registre d'un service, puis
    * la sortie de l'app) reçoit la même promesse, et rien n'est libéré deux fois. Le client reste suivi
    * (`embedded-engine-pool`) jusqu'à la fin de sa libération : la sortie attend une libération
    * commencée ailleurs, au lieu de trouver le suivi vide et de quitter avant `model.dispose()`.
    */
   dispose(): Promise<void> {
-    this.disposing ??= this.release().finally(() => {
+    this.disposing ??= this.releaseAll().finally(() => {
       this.disposing = null;
-      // Rechargé pendant la libération : il tient de nouveau un modèle, et reste suivi.
-      if (!this.initialized && !this.embeddingInitialized) forgetLoadedClient(this);
+      this.forgetIfIdle();
     });
     return this.disposing;
   }
 
-  private async release(): Promise<void> {
-    // Wait for any ongoing generation to complete
-    if (this.isGenerating) {
-      console.log('⏳ [EMBEDDED] Waiting for generation to complete before disposing...');
-      // Give it a moment to finish
-      await new Promise((r) => setTimeout(r, 500));
+  /**
+   * Un chargement est visible de la sortie dès son début, et une libération l'attend. Une fois la
+   * sortie commencée, aucun modèle ne se charge plus : il serait chargé au moment d'`app.exit`.
+   * La vérification et l'inscription sont synchrones : un chargement est soit suivi, soit refusé.
+   */
+  private trackLoad(tag: string, load: () => Promise<boolean>): Promise<boolean> {
+    if (isEmbeddedEngineClosing()) {
+      console.warn(`⚠️ ${tag} Sortie en cours : le modèle n'est pas chargé.`);
+      return Promise.resolve(false);
     }
+    trackEmbeddedClient(this);
+    const loading = load();
+    this.loads.add(loading);
+    const settled = (): void => {
+      this.loads.delete(loading);
+      this.forgetIfIdle();
+    };
+    void loading.then(settled, settled);
+    return loading;
+  }
 
-    const embeddingContext = this.embeddingContext;
-    const embeddingModel = this.embeddingModel;
-    const context = this.context;
-    const model = this.model;
+  /** Un modèle est chargé, même à moitié (son contexte pas encore créé). */
+  private holdsModel(): boolean {
+    return this.model !== null || this.embeddingModel !== null;
+  }
+
+  /** Le client ne tient plus rien, ne charge rien et ne libère rien : la sortie n'a plus à le voir. */
+  private forgetIfIdle(): void {
+    if (this.loads.size === 0 && this.disposing === null && !this.holdsModel()) {
+      forgetEmbeddedClient(this);
+    }
+  }
+
+  private async releaseAll(): Promise<void> {
+    for (let round = 1; ; round++) {
+      // Wait for any ongoing generation to complete
+      if (this.isGenerating) {
+        console.log('⏳ [EMBEDDED] Waiting for generation to complete before disposing...');
+        // Give it a moment to finish
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      // Un chargement en cours finirait après la libération, son modèle chargé : on attend qu'il
+      // aboutisse (ou échoue) pour le libérer avec le reste.
+      while (this.loads.size > 0) {
+        await Promise.allSettled([...this.loads]);
+      }
+      // Aucun `await` entre la dernière vérification et la prise : aucun chargement n'est en cours.
+      await this.release(this.takeModels());
+      if (this.loads.size === 0 && !this.holdsModel()) return;
+      if (round >= MAX_RELEASE_ROUNDS) {
+        console.warn('⚠️ [EMBEDDED] Modèle rechargé pendant chaque libération : il reste suivi pour la sortie.');
+        return;
+      }
+    }
+  }
+
+  /** Prend les modèles et leurs contextes, et vide le client : plus aucun appel ne les trouve. */
+  private takeModels(): HeldModels {
+    const held: HeldModels = {
+      embeddingContext: this.embeddingContext,
+      embeddingModel: this.embeddingModel,
+      context: this.context,
+      model: this.model,
+    };
 
     this.embeddingModel = null;
     this.embeddingContext = null;
@@ -665,6 +743,10 @@ ${userQuery}
     this.modelId = null;
     this.isGenerating = false;
 
+    return held;
+  }
+
+  private async release({ embeddingContext, embeddingModel, context, model }: HeldModels): Promise<void> {
     // Dispose embedding resources
     try {
       if (embeddingContext) {

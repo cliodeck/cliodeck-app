@@ -32,7 +32,10 @@ export interface ShutdownParts {
    * (`ProjectLifecycle.shutdown`). Ses registres libèrent les modèles qu'ils tiennent.
    */
   closeProject(budgetMs: number): Promise<void>;
-  /** Tout client embarqué qui tient encore un modèle, projet ou pas (`disposeAllEmbeddedClients`). */
+  /**
+   * Tout client embarqué qui tient encore un modèle ou en charge un, projet ou pas ; aucun ne se
+   * charge plus ensuite (`disposeAllEmbeddedClients`).
+   */
   releaseEmbeddedModels(): Promise<void>;
 }
 

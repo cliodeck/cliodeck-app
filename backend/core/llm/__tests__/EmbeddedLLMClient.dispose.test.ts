@@ -7,17 +7,26 @@
  * libère un backend global au processus, celui de tous les autres clients (mesuré par L08).
  *
  * Et à la sortie, tout client qui tient encore un modèle est libéré, même celui d'un appel en cours
- * hors du projet (similarité, diapositives) que personne d'autre ne libérerait à temps.
+ * hors du projet (similarité, diapositives) que personne d'autre ne libérerait à temps. Un modèle en
+ * cours de chargement compte aussi : l'écriture du flush de sortie lance l'indexation du manuscrit,
+ * qui peut charger le modèle d'embedding pendant que la sortie libère tout.
  *
  * Aucun GGUF n'est chargé : `node-llama-cpp` est remplacé par un double qui inscrit chaque
- * libération dans `engine.disposed`.
+ * chargement dans `engine.loaded` et chaque libération dans `engine.disposed`. Le suivi des clients
+ * est un état du module, et la sortie le ferme pour de bon : chaque test repart de modules neufs.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type * as ClientModule from '../EmbeddedLLMClient.js';
+import type * as PoolModule from '../embedded-engine-pool.js';
 
 const engine = vi.hoisted(() => {
   const disposed: string[] = [];
   return {
     disposed,
+    /** Les modèles dont le chargement a commencé. */
+    loaded: [] as string[],
+    /** Quand elle est posée, le chargement d'un modèle l'attend : un chargement qui dure. */
+    loadGate: null as null | Promise<void>,
     /** Quand elle est posée, la libération d'un contexte d'embedding l'attend : une libération qui dure. */
     embeddingContextGate: null as null | Promise<void>,
     llamaDispose: vi.fn(async () => {
@@ -31,6 +40,8 @@ vi.mock('node-llama-cpp', () => {
     dispose: engine.llamaDispose,
     loadModel: async ({ modelPath }: { modelPath: string }) => {
       const name = modelPath.includes('embed') ? 'embeddingModel' : 'model';
+      engine.loaded.push(name);
+      await engine.loadGate;
       return {
         embeddingVectorSize: 2,
         dispose: async () => {
@@ -55,10 +66,24 @@ vi.mock('node-llama-cpp', () => {
   return { getLlama: async () => llama };
 });
 
-import { EmbeddedLLMClient } from '../EmbeddedLLMClient.js';
-import { disposeAllEmbeddedClients } from '../embedded-engine-pool.js';
+let EmbeddedLLMClient: typeof ClientModule.EmbeddedLLMClient;
+let disposeAllEmbeddedClients: typeof PoolModule.disposeAllEmbeddedClients;
 
-async function loadedClient(): Promise<EmbeddedLLMClient> {
+/** Une barrière : ce qui l'attend reste en suspens jusqu'à `open()`. */
+function gate(): { promise: Promise<void>; open: () => void } {
+  let open!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { promise, open };
+}
+
+/** Laisse courir tout ce qui peut avancer sans franchir une barrière. */
+async function settle(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function loadedClient(): Promise<ClientModule.EmbeddedLLMClient> {
   const client = new EmbeddedLLMClient();
   expect(await client.initialize('/modeles/qwen.gguf', 'qwen')).toBe(true);
   expect(await client.initializeEmbedding('/modeles/nomic-embed.gguf', 'nomic')).toBe(true);
@@ -66,12 +91,17 @@ async function loadedClient(): Promise<EmbeddedLLMClient> {
 }
 
 beforeEach(async () => {
-  // Un test précédent a pu laisser un client chargé : il ne doit pas compter dans le suivant.
-  await disposeAllEmbeddedClients();
+  // Un suivi neuf : celui d'un test précédent, fermé par sa sortie, refuserait tout chargement.
+  vi.resetModules();
+  ({ EmbeddedLLMClient } = await import('../EmbeddedLLMClient.js'));
+  ({ disposeAllEmbeddedClients } = await import('../embedded-engine-pool.js'));
   engine.disposed.length = 0;
+  engine.loaded.length = 0;
+  engine.loadGate = null;
   engine.embeddingContextGate = null;
   engine.llamaDispose.mockClear();
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 });
 
 describe('EmbeddedLLMClient.dispose', () => {
@@ -92,6 +122,49 @@ describe('EmbeddedLLMClient.dispose', () => {
 
     expect(engine.disposed.sort()).toEqual(['context', 'embeddingContext', 'embeddingModel', 'model']);
   });
+
+  it('une libération attend le modèle en cours de chargement, et le libère', async () => {
+    // Un registre se ferme (bascule, `retrievalService.clear`) pendant qu'un appel charge son modèle.
+    const loading = gate();
+    engine.loadGate = loading.promise;
+    const client = new EmbeddedLLMClient();
+    const load = client.initializeEmbedding('/modeles/nomic-embed.gguf', 'nomic');
+    await settle();
+    let disposed = false;
+    const release = client.dispose().then(() => {
+      disposed = true;
+    });
+
+    await settle();
+    // Rendre la main maintenant laisserait le modèle se charger après la libération.
+    expect(disposed).toBe(false);
+    loading.open();
+    await release;
+
+    expect(await load).toBe(true);
+    expect(engine.disposed).toEqual(['embeddingContext', 'embeddingModel']);
+    expect(client.isEmbeddingAvailable()).toBe(false);
+  });
+
+  it('un modèle rechargé pendant une libération est libéré par l’appel qui suit, sans réutiliser l’ancienne libération', async () => {
+    const client = await loadedClient();
+    const releasing = gate();
+    engine.embeddingContextGate = releasing.promise;
+    // Le registre libère le client ; sa libération dure.
+    const first = client.dispose();
+    await settle();
+    // Un travail encore en vol recharge le modèle d'embedding pendant ce temps.
+    expect(await client.initializeEmbedding('/modeles/nomic-embed.gguf', 'nomic')).toBe(true);
+    // La sortie libère à son tour.
+    const second = client.dispose();
+    releasing.open();
+    await Promise.all([first, second]);
+
+    expect(engine.disposed.filter((d) => d === 'embeddingModel')).toHaveLength(2);
+    expect(engine.disposed.filter((d) => d === 'model')).toHaveLength(1);
+    expect(client.isEmbeddingAvailable()).toBe(false);
+    expect(engine.llamaDispose).not.toHaveBeenCalled();
+  });
 });
 
 describe('disposeAllEmbeddedClients — la sortie', () => {
@@ -109,10 +182,8 @@ describe('disposeAllEmbeddedClients — la sortie', () => {
 
   it('une libération déjà commencée ailleurs (un registre coupé par son délai) est attendue jusqu’à son terme', async () => {
     const client = await loadedClient();
-    let release!: () => void;
-    engine.embeddingContextGate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const releasing = gate();
+    engine.embeddingContextGate = releasing.promise;
     // Le registre d'un service du projet libère ce client, et la sortie ne l'attend plus.
     const elsewhere = client.dispose();
     let releasedAtExit: string[] | null = null;
@@ -120,10 +191,10 @@ describe('disposeAllEmbeddedClients — la sortie', () => {
       releasedAtExit = [...engine.disposed];
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settle();
     // La libération en cours n'a pas fini : la sortie ne rend pas la main avant elle.
     expect(releasedAtExit).toBeNull();
-    release();
+    releasing.open();
     await exit;
 
     expect(releasedAtExit).toEqual(expect.arrayContaining(['embeddingModel', 'model']));
@@ -141,5 +212,41 @@ describe('disposeAllEmbeddedClients — la sortie', () => {
     await disposeAllEmbeddedClients();
 
     expect(engine.disposed).toEqual([]);
+  });
+
+  it('un modèle en cours de chargement est attendu, puis libéré, avant que la sortie rende la main', async () => {
+    // L'écriture du flush de sortie lance l'indexation du manuscrit, qui charge le modèle d'embedding.
+    const loading = gate();
+    engine.loadGate = loading.promise;
+    const client = new EmbeddedLLMClient();
+    const load = client.initializeEmbedding('/modeles/nomic-embed.gguf', 'nomic');
+    await settle();
+    let releasedAtExit: string[] | null = null;
+    const exit = disposeAllEmbeddedClients().then(() => {
+      releasedAtExit = [...engine.disposed];
+    });
+
+    await settle();
+    // Le suivi n'est pas vide : la sortie ne quitte pas avant la fin de ce chargement.
+    expect(releasedAtExit).toBeNull();
+    loading.open();
+    await exit;
+
+    expect(releasedAtExit).toEqual(['embeddingContext', 'embeddingModel']);
+    expect(await load).toBe(true);
+    expect(client.isEmbeddingAvailable()).toBe(false);
+    expect(engine.llamaDispose).not.toHaveBeenCalled();
+  });
+
+  it('une fois la sortie commencée, plus aucun modèle ne se charge', async () => {
+    await disposeAllEmbeddedClients();
+
+    // Un travail encore en vol (l'indexation relancée par un registre libéré) redemande le modèle.
+    const client = new EmbeddedLLMClient();
+    expect(await client.initializeEmbedding('/modeles/nomic-embed.gguf', 'nomic')).toBe(false);
+    expect(await client.initialize('/modeles/qwen.gguf', 'qwen')).toBe(false);
+
+    expect(engine.loaded).toEqual([]);
+    expect(client.isEmbeddingAvailable()).toBe(false);
   });
 });
