@@ -89,6 +89,32 @@ const quit = (app: ElectronApplication) =>
     electronApp.quit();
   });
 
+/**
+ * Un service des thèmes qui ignore SIGTERM, branché dans le vrai singleton : `stop()` attend
+ * 5 s avant son SIGKILL, et l'arrêt dure ce temps-là. Un processus Node (le binaire d'Electron),
+ * sans enfant qui lui survivrait. Il dit « prêt » une fois son gestionnaire posé : un SIGTERM
+ * reçu avant le tuerait tout de suite, et l'arrêt ne durerait rien. Rend son PID.
+ */
+const stubbornTopicService = (app: ElectronApplication): Promise<number> =>
+  app.evaluate(async (_electron, modulePath) => {
+    const { createRequire } = process.getBuiltinModule('node:module');
+    const { spawn } = process.getBuiltinModule('node:child_process');
+    const service = (createRequire(modulePath)(modulePath) as { topicModelingService: Record<string, unknown> })
+      .topicModelingService;
+    const child = spawn(
+      process.execPath,
+      ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.stdout.write('prêt');"],
+      { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    await new Promise<void>((ready, failed) => {
+      child.stdout?.once('data', () => ready());
+      child.once('exit', () => failed(new Error('le faux service est sorti avant d’être prêt')));
+    });
+    service.pythonProcess = child;
+    service.isRunning = true;
+    return child.pid ?? 0;
+  }, TOPIC_SERVICE_MODULE);
+
 const isAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
@@ -198,28 +224,7 @@ test('la sortie décidée, les fenêtres quittent l’écran pendant tout l’ar
   try {
     await openProject(app, window, article.projectJson);
 
-    // Un service des thèmes qui ignore SIGTERM, branché dans le vrai singleton : `stop()` attend
-    // 5 s avant son SIGKILL, et l'arrêt dure ce temps-là. Un processus Node (le binaire d'Electron),
-    // sans enfant qui lui survivrait. Il dit « prêt » une fois son gestionnaire posé : un SIGTERM
-    // reçu avant le tuerait tout de suite, et l'arrêt ne durerait rien.
-    fakePid = await app.evaluate(async (_electron, modulePath) => {
-      const { createRequire } = process.getBuiltinModule('node:module');
-      const { spawn } = process.getBuiltinModule('node:child_process');
-      const service = (createRequire(modulePath)(modulePath) as { topicModelingService: Record<string, unknown> })
-        .topicModelingService;
-      const child = spawn(
-        process.execPath,
-        ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); process.stdout.write('prêt');"],
-        { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'ignore'] },
-      );
-      await new Promise<void>((ready, failed) => {
-        child.stdout?.once('data', () => ready());
-        child.once('exit', () => failed(new Error('le faux service est sorti avant d’être prêt')));
-      });
-      service.pythonProcess = child;
-      service.isRunning = true;
-      return child.pid ?? 0;
-    }, TOPIC_SERVICE_MODULE);
+    fakePid = await stubbornTopicService(app);
     expect(fakePid).toBeGreaterThan(0);
 
     const exited = app.waitForEvent('close');
@@ -251,4 +256,142 @@ test('la sortie décidée, les fenêtres quittent l’écran pendant tout l’ar
   }
   // Le document écrit avant la sortie est intact.
   expect(readFileSync(article.document, 'utf8')).toBe(ARTICLE);
+});
+
+/** Clique une entrée du menu de l'app par son libellé, comme l'auteur : jamais une touche du système. */
+const clickMenu = (app: ElectronApplication, label: string) =>
+  app.evaluate(({ Menu }, wanted) => {
+    const find = (items: Electron.MenuItem[]): Electron.MenuItem | null => {
+      for (const item of items) {
+        if (item.label === wanted) return item;
+        const inner = item.submenu ? find(item.submenu.items) : null;
+        if (inner) return inner;
+      }
+      return null;
+    };
+    const item = find(Menu.getApplicationMenu()?.items ?? []);
+    if (!item) throw new Error(`Entrée de menu absente : ${wanted}`);
+    item.click();
+  }, label);
+
+/**
+ * Pendant l'arrêt (jusqu'à 8 s), la barre de menus de l'app reste active, et le Dock aussi, alors que
+ * la fenêtre est masquée (suivi de L03-9). Une commande du menu ne doit ni réafficher la fenêtre, ni
+ * en recréer une, ni partir au renderer : plus personne n'écrirait ce qu'elle déclencherait. Un clic
+ * sur le Dock non plus.
+ */
+test('pendant l’arrêt, le menu et le Dock ne réaffichent rien, et aucune commande ne part au renderer', async () => {
+  test.setTimeout(90_000);
+  const launched = await launchApp();
+  if (launched.kind === 'skip') {
+    test.skip(true, launched.reason);
+    return;
+  }
+  const { app, userDataDir } = launched.value;
+  toClean.push(userDataDir);
+  let fakePid = 0;
+  try {
+    fakePid = await stubbornTopicService(app);
+    expect(fakePid).toBeGreaterThan(0);
+
+    const exited = app.waitForEvent('close');
+    await quit(app);
+    await expect
+      .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((win) => win.isVisible())), {
+        timeout: 10_000,
+      })
+      .toBe(false);
+
+    // Ce que le main envoie au renderer de la fenêtre masquée, relevé au passage.
+    await app.evaluate(({ BrowserWindow }) => {
+      const contents = BrowserWindow.getAllWindows()[0].webContents;
+      const sent: string[] = [];
+      (globalThis as unknown as { __sentDuringQuit: string[] }).__sentDuringQuit = sent;
+      const send = contents.send.bind(contents);
+      contents.send = (channel: string, ...args: unknown[]) => {
+        sent.push(channel);
+        send(channel, ...args);
+      };
+    });
+    await clickMenu(app, 'Ouvrir projet');
+    await clickMenu(app, 'Nouveau fichier');
+    await app.evaluate(({ app: electronApp }) => {
+      electronApp.emit('activate');
+    });
+
+    const state = await app.evaluate(({ BrowserWindow }, pid) => {
+      let stopping = true;
+      try {
+        process.kill(pid, 0);
+      } catch {
+        stopping = false;
+      }
+      return {
+        windows: BrowserWindow.getAllWindows().length,
+        visible: BrowserWindow.getAllWindows().some((win) => win.isVisible()),
+        sent: (globalThis as unknown as { __sentDuringQuit: string[] }).__sentDuringQuit,
+        stopping,
+      };
+    }, fakePid);
+    // `stopping` : l'arrêt durait encore quand tout cela a été lu.
+    expect(state).toEqual({ windows: 1, visible: false, sent: [], stopping: true });
+    await exited;
+  } finally {
+    await app.close().catch(() => undefined);
+    if (fakePid && isAlive(fakePid)) process.kill(fakePid, 'SIGKILL');
+  }
+});
+
+test('macOS : fenêtre fermée puis Cmd+Q, pendant l’arrêt ni le menu ni le Dock ne recréent de fenêtre', async () => {
+  test.skip(process.platform !== 'darwin', 'Hors de macOS, fermer la dernière fenêtre quitte l’app.');
+  test.setTimeout(90_000);
+  const launched = await launchApp();
+  if (launched.kind === 'skip') {
+    test.skip(true, launched.reason);
+    return;
+  }
+  const { app, userDataDir } = launched.value;
+  toClean.push(userDataDir);
+  const windowCount = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+  let fakePid = 0;
+  try {
+    fakePid = await stubbornTopicService(app);
+    expect(fakePid).toBeGreaterThan(0);
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].close();
+    });
+    await expect.poll(windowCount, { timeout: 15_000 }).toBe(0);
+
+    // L'arrêt commencé se voit à l'appel de `stop()` : sans fenêtre, rien ne se masque.
+    await app.evaluate((_electron, modulePath) => {
+      const { createRequire } = process.getBuiltinModule('node:module');
+      const service = (createRequire(modulePath)(modulePath) as { topicModelingService: { stop: () => Promise<void> } })
+        .topicModelingService;
+      const stop = service.stop.bind(service);
+      service.stop = () => {
+        (globalThis as unknown as { __stopping: boolean }).__stopping = true;
+        return stop();
+      };
+    }, TOPIC_SERVICE_MODULE);
+    const exited = app.waitForEvent('close');
+    await quit(app);
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as unknown as { __stopping?: boolean }).__stopping === true), {
+        timeout: 10_000,
+      })
+      .toBe(true);
+
+    // Le Dock : sans fenêtre, `activate` en recréait une, que `app.exit` emportait aussitôt.
+    await app.evaluate(({ app: electronApp }) => {
+      electronApp.emit('activate');
+    });
+    expect({ windows: await windowCount(), stopping: isAlive(fakePid) }).toEqual({ windows: 0, stopping: true });
+    // Le menu : une commande qui ouvre quelque chose recrée la fenêtre, sauf pendant l'arrêt.
+    await clickMenu(app, 'Ouvrir projet');
+    expect({ windows: await windowCount(), stopping: isAlive(fakePid) }).toEqual({ windows: 0, stopping: true });
+    await exited;
+  } finally {
+    await app.close().catch(() => undefined);
+    if (fakePid && isAlive(fakePid)) process.kill(fakePid, 'SIGKILL');
+  }
 });

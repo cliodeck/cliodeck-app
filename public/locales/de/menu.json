@@ -53,5 +53,10 @@
   "unsavedLeave": "Beenden ohne Speichern",
   "unsavedUntitledMessage": "Dieses unbenannte Dokument ist nirgends gespeichert. Wenn Sie jetzt beenden, geht sein Text verloren.",
   "unsavedSaveFailedMessage": "Ihre letzten Änderungen konnten nicht gespeichert werden. Wenn Sie jetzt beenden, gehen sie verloren.",
-  "unsavedSaveSlowMessage": "Das Speichern dauert länger. Wenn Sie jetzt beenden, gehen Ihre Änderungen verloren."
+  "unsavedSaveSlowMessage": "Das Speichern dauert länger. Wenn Sie jetzt beenden, gehen Ihre Änderungen verloren.",
+  "settingsRecoveredTitle": "Unlesbare Einstellungen wurden beiseitegelegt",
+  "settingsRecoveredConfig": "Die Einstellungsdatei von ClioDeck war nicht mehr lesbar. Sie wurde unverändert beiseitegelegt, unter dem Namen:\n{{path}}\n\nClioDeck beginnt wieder mit den Standardeinstellungen, und die Liste der zuletzt geöffneten Projekte ist leer: Ihre Projekte selbst bleiben unberührt. Öffnen Sie sie über Datei → Projekt öffnen.",
+  "settingsRecoveredSecrets": "Die Datei der API-Schlüssel von ClioDeck war nicht mehr lesbar. Sie wurde unverändert beiseitegelegt, unter dem Namen:\n{{path}}\n\nDie darin enthaltenen API-Schlüssel (LLM, Zotero, MCP) sind nicht mehr gespeichert: Geben Sie sie in den Einstellungen erneut ein.",
+  "settingsUnreadableTitle": "ClioDeck kann nicht starten",
+  "settingsUnreadableMessage": "Die Einstellungen von ClioDeck konnten nicht gelesen werden:\n{{error}}\n\nPrüfen Sie, ob sich diese Datei auf dem Datenträger befindet und ob Sie sie lesen dürfen, und starten Sie ClioDeck dann neu."
 }

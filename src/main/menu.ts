@@ -1,4 +1,4 @@
-import { Menu, MenuItemConstructorOptions, BrowserWindow, app } from 'electron';
+import { Menu, MenuItemConstructorOptions, app, ipcMain, type BrowserWindow, type IpcMainEvent, type WebContents } from 'electron';
 import { t } from './i18n.js';
 import { mayLeaveRenderer } from './renderer-flush.js';
 
@@ -13,10 +13,107 @@ async function reloadAfterFlush(win: BrowserWindow, ignoreCache: boolean): Promi
 }
 
 /**
+ * Ce que le menu demande à l'app, au moment du clic. Ses clics se fermaient sur la fenêtre du
+ * lancement : sous macOS, l'app survit à la fermeture de sa fenêtre, la barre de menus reste, et
+ * chaque commande levait « Object has been destroyed » sans rien faire (S11-1-16).
+ */
+export interface MenuDeps {
+  /** La fenêtre principale, ou `null` après son `closed`. */
+  currentWindow(): BrowserWindow | null;
+  /** Recrée la fenêtre principale. */
+  createWindow(): BrowserWindow;
+  /**
+   * La sortie est engagée (`QuitHandler.isLeaving`) : la fenêtre est masquée jusqu'à `app.exit`, et
+   * plus personne n'écrirait ce qu'une commande déclencherait. Rien ne se recrée, ne s'affiche, ne
+   * s'envoie.
+   */
+  isLeaving(): boolean;
+}
+
+interface MenuCommand {
+  channel: string;
+  args: unknown[];
+  isLeaving: () => boolean;
+}
+
+/**
+ * Les commandes dont le renderer a posé l'écouteur, par `WebContents` : le preload le dit
+ * (`menu:listening`). Une fenêtre recréée n'écoute pas tout de suite : sa première page est le
+ * document vide (CLAUDE.md §6), et React pose ses écouteurs après `did-finish-load` (26 ms plus
+ * tard, mesuré sur l'app). Une commande envoyée avant se perdait ; elle attend dans `waiting`.
+ */
+const listening = new WeakMap<WebContents, Set<string>>();
+const waiting = new WeakMap<WebContents, MenuCommand[]>();
+
+/**
+ * Les commandes en attente partent dans l'ordre des clics : la file s'arrête à la première dont le
+ * canal n'est pas encore écouté, et celles qui la suivent l'attendent. Livrer canal par canal les
+ * aurait fait partir dans l'ordre où `useMenuShortcuts` pose ses écouteurs. Le hook pose tous les
+ * siens dans le même effet, et chaque canal que le menu envoie y est écouté (`menu-window.test.ts`) :
+ * la file se vide à la dernière annonce, et aucune commande ne la retient pour toujours.
+ */
+function flush(contents: WebContents): void {
+  const queue = waiting.get(contents);
+  if (!queue) return;
+  const channels = listening.get(contents);
+  for (let head = queue[0]; head && channels?.has(head.channel); head = queue[0]) {
+    queue.shift();
+    if (head.isLeaving() || contents.isDestroyed()) continue;
+    contents.send(head.channel, ...head.args);
+  }
+  if (queue.length === 0) waiting.delete(contents);
+}
+
+function onRendererListening(event: IpcMainEvent, channel: unknown): void {
+  if (typeof channel !== 'string') return;
+  const contents = event.sender;
+  const channels = listening.get(contents) ?? new Set<string>();
+  channels.add(channel);
+  listening.set(contents, channels);
+  flush(contents);
+}
+
+/** Une commande prend son tour : tout de suite si rien n'attend et que son canal est écouté. */
+function deliver(win: BrowserWindow, command: MenuCommand): void {
+  const contents = win.webContents;
+  const queue = waiting.get(contents) ?? [];
+  queue.push(command);
+  waiting.set(contents, queue);
+  flush(contents);
+}
+
+/**
  * Creates and returns the application menu with keyboard shortcuts
  */
-export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
+export function createApplicationMenu(deps: MenuDeps): Menu {
   const isMac = process.platform === 'darwin';
+
+  // Un seul écouteur, quel que soit le nombre de menus construits (un par changement de langue).
+  ipcMain.removeListener('menu:listening', onRendererListening);
+  ipcMain.on('menu:listening', onRendererListening);
+
+  /** La fenêtre du moment du clic, jamais une fenêtre détruite. */
+  const liveWindow = (): BrowserWindow | null => {
+    const win = deps.currentWindow();
+    return win && !win.isDestroyed() ? win : null;
+  };
+
+  /** Une commande qui ouvre quelque chose : sans fenêtre, elle la recrée, et attend son renderer. */
+  const send = (channel: string, ...args: unknown[]): void => {
+    if (deps.isLeaving()) return;
+    deliver(liveWindow() ?? deps.createWindow(), { channel, args, isLeaving: deps.isLeaving });
+  };
+
+  /** Une commande sur le document ouvert : sans fenêtre, elle n'a rien à viser. */
+  const sendToDocument = (channel: string, ...args: unknown[]): void => {
+    const win = deps.isLeaving() ? null : liveWindow();
+    if (win) deliver(win, { channel, args, isLeaving: deps.isLeaving });
+  };
+
+  const reload = (ignoreCache: boolean): void => {
+    const win = deps.isLeaving() ? null : liveWindow();
+    if (win) void reloadAfterFlush(win, ignoreCache);
+  };
 
   const template: MenuItemConstructorOptions[] = [
     // App Menu (Mac only)
@@ -31,7 +128,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
                 label: t('settings'),
                 accelerator: 'Cmd+,',
                 click: () => {
-                  mainWindow.webContents.send('menu:open-settings');
+                  send('menu:open-settings');
                 },
               },
               { type: 'separator' as const },
@@ -55,21 +152,21 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('newFile'),
           accelerator: 'CmdOrCtrl+N',
           click: () => {
-            mainWindow.webContents.send('menu:new-file');
+            send('menu:new-file');
           },
         },
         {
           label: t('openFile'),
           accelerator: 'CmdOrCtrl+O',
           click: () => {
-            mainWindow.webContents.send('menu:open-file');
+            send('menu:open-file');
           },
         },
         {
           label: t('save'),
           accelerator: 'CmdOrCtrl+S',
           click: () => {
-            mainWindow.webContents.send('menu:save-file');
+            sendToDocument('menu:save-file');
           },
         },
         { type: 'separator' as const },
@@ -77,14 +174,14 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('newProject'),
           accelerator: 'CmdOrCtrl+Shift+N',
           click: () => {
-            mainWindow.webContents.send('menu:new-project');
+            send('menu:new-project');
           },
         },
         {
           label: t('openProject'),
           accelerator: 'CmdOrCtrl+Shift+O',
           click: () => {
-            mainWindow.webContents.send('menu:open-project');
+            send('menu:open-project');
           },
         },
         { type: 'separator' as const },
@@ -92,7 +189,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('exportPDF'),
           accelerator: 'CmdOrCtrl+E',
           click: () => {
-            mainWindow.webContents.send('menu:export-pdf');
+            sendToDocument('menu:export-pdf');
           },
         },
         { type: 'separator' as const },
@@ -103,7 +200,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
                 label: t('settings'),
                 accelerator: 'Ctrl+,',
                 click: () => {
-                  mainWindow.webContents.send('menu:open-settings');
+                  send('menu:open-settings');
                 },
               },
               { type: 'separator' as const },
@@ -129,35 +226,35 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('bold'),
           accelerator: 'CmdOrCtrl+B',
           click: () => {
-            mainWindow.webContents.send('menu:format-bold');
+            sendToDocument('menu:format-bold');
           },
         },
         {
           label: t('italic'),
           accelerator: 'CmdOrCtrl+I',
           click: () => {
-            mainWindow.webContents.send('menu:format-italic');
+            sendToDocument('menu:format-italic');
           },
         },
         {
           label: t('insertLink'),
           accelerator: 'CmdOrCtrl+L',
           click: () => {
-            mainWindow.webContents.send('menu:insert-link');
+            sendToDocument('menu:insert-link');
           },
         },
         {
           label: t('insertCitation'),
           accelerator: 'CmdOrCtrl+\'',
           click: () => {
-            mainWindow.webContents.send('menu:insert-citation');
+            sendToDocument('menu:insert-citation');
           },
         },
         {
           label: t('insertTable'),
           accelerator: 'CmdOrCtrl+Shift+T',
           click: () => {
-            mainWindow.webContents.send('menu:insert-table');
+            sendToDocument('menu:insert-table');
           },
         },
         { type: 'separator' as const },
@@ -165,7 +262,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('insertFootnote'),
           accelerator: 'CmdOrCtrl+Shift+F',
           click: () => {
-            mainWindow.webContents.send('menu:insert-footnote');
+            sendToDocument('menu:insert-footnote');
           },
         },
         {
@@ -175,7 +272,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           // prendrait celui des clés de citation. Chaque système garde donc un geste qui n'y fait rien d'autre.
           accelerator: isMac ? 'CmdOrCtrl+Alt+Q' : 'CmdOrCtrl+Shift+Q',
           click: () => {
-            mainWindow.webContents.send('menu:insert-blockquote');
+            sendToDocument('menu:insert-blockquote');
           },
         },
         { type: 'separator' as const },
@@ -183,7 +280,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('checkCitations'),
           accelerator: 'CmdOrCtrl+Shift+C',
           click: () => {
-            mainWindow.webContents.send('menu:check-citations');
+            sendToDocument('menu:check-citations');
           },
         },
       ],
@@ -198,7 +295,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
         //   label: 'Basculer aperçu',
         //   accelerator: 'CmdOrCtrl+K',
         //   click: () => {
-        //     mainWindow.webContents.send('menu:toggle-preview');
+        //     sendToDocument('menu:toggle-preview');
         //   },
         // },
         // { type: 'separator' as const },
@@ -206,21 +303,21 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('panelProjects'),
           accelerator: 'Alt+1',
           click: () => {
-            mainWindow.webContents.send('menu:switch-panel', 'projects');
+            send('menu:switch-panel', 'projects');
           },
         },
         {
           label: t('panelBibliography'),
           accelerator: 'Alt+2',
           click: () => {
-            mainWindow.webContents.send('menu:switch-panel', 'bibliography');
+            send('menu:switch-panel', 'bibliography');
           },
         },
         {
           label: t('panelChat'),
           accelerator: 'Alt+3',
           click: () => {
-            mainWindow.webContents.send('menu:switch-panel', 'chat');
+            send('menu:switch-panel', 'chat');
           },
         },
         { type: 'separator' as const },
@@ -228,7 +325,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('usageJournal'),
           accelerator: 'CmdOrCtrl+J',
           click: () => {
-            mainWindow.webContents.send('menu:open-usage-journal');
+            send('menu:open-usage-journal');
           },
         },
         { type: 'separator' as const },
@@ -237,7 +334,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('reload'),
           accelerator: 'CmdOrCtrl+R',
           click: () => {
-            void reloadAfterFlush(mainWindow, false);
+            reload(false);
           },
         },
         {
@@ -245,7 +342,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('forceReload'),
           accelerator: 'Shift+CmdOrCtrl+R',
           click: () => {
-            void reloadAfterFlush(mainWindow, true);
+            reload(true);
           },
         },
         { role: 'toggleDevTools' as const },
@@ -266,13 +363,13 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
           label: t('importBibTeX'),
           accelerator: 'CmdOrCtrl+Shift+B',
           click: () => {
-            mainWindow.webContents.send('menu:import-bibtex');
+            send('menu:import-bibtex');
           },
         },
         {
           label: t('connectZotero'),
           click: () => {
-            mainWindow.webContents.send('menu:connect-zotero');
+            send('menu:connect-zotero');
           },
         },
       ],
@@ -320,7 +417,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
         {
           label: t('about'),
           click: () => {
-            mainWindow.webContents.send('menu:about');
+            send('menu:about');
           },
         },
       ],
@@ -333,7 +430,7 @@ export function createApplicationMenu(mainWindow: BrowserWindow): Menu {
 /**
  * Sets up the application menu
  */
-export function setupApplicationMenu(mainWindow: BrowserWindow): void {
-  const menu = createApplicationMenu(mainWindow);
+export function setupApplicationMenu(deps: MenuDeps): void {
+  const menu = createApplicationMenu(deps);
   Menu.setApplicationMenu(menu);
 }

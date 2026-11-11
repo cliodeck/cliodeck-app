@@ -114,14 +114,27 @@ export interface QuitSteps {
   exit(): void;
 }
 
+/** Le gestionnaire de `before-quit`, et ce qu'il dit de la sortie en cours. */
+export interface QuitHandler {
+  (event: { preventDefault(): void }): Promise<void>;
+  /**
+   * Vrai dès que la sortie est engagée — le document écrit, les fenêtres retirées de l'écran — et
+   * jusqu'à `app.exit`. Pendant l'arrêt (jusqu'à 8 s), la barre de menus et le Dock restent actifs :
+   * le menu et `activate` le lisent pour ne rien recréer, ne rien réafficher, ne rien envoyer.
+   */
+  isLeaving(): boolean;
+}
+
 /**
  * Le gestionnaire de `before-quit` : le document, puis les fenêtres retirées de l'écran, puis
  * l'arrêt, puis `app.exit`. Un second Cmd+Q pendant l'arrêt est retenu et ne relance rien ; mais si
  * l'auteur choisit de rester, sa fenêtre reste à l'écran et la sortie suivante repart de zéro.
  */
-export function createQuitHandler(steps: QuitSteps): (event: { preventDefault(): void }) => Promise<void> {
+export function createQuitHandler(steps: QuitSteps): QuitHandler {
   let quitting = false;
-  return async (event) => {
+  // Jamais remis à faux : `app.exit` suit quoi qu'il arrive.
+  let leaving = false;
+  const onQuit = async (event: { preventDefault(): void }): Promise<void> => {
     // Toujours retenu : sans cela, Electron quitterait sans attendre l'arrêt en cours.
     event.preventDefault();
     if (quitting) return;
@@ -135,6 +148,7 @@ export function createQuitHandler(steps: QuitSteps): (event: { preventDefault():
     // Le document est écrit : une fenêtre encore à l'écran pendant l'arrêt (jusqu'à 8 s) recevrait
     // une frappe que plus personne n'écrirait, et `app.exit` l'emporterait. Le renderer vit encore :
     // une écriture qui traînait au flush peut toujours aboutir.
+    leaving = true;
     try {
       steps.hideWindows();
     } catch (error: unknown) {
@@ -148,4 +162,5 @@ export function createQuitHandler(steps: QuitSteps): (event: { preventDefault():
     }
     steps.exit();
   };
+  return Object.assign(onQuit, { isLeaving: () => leaving });
 }

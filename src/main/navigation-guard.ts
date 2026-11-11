@@ -1,8 +1,9 @@
 /**
  * Garde de navigation du processus principal.
  *
- * `setWindowOpenHandler` ne couvre que `window.open` et `target=_blank` : il
- * laissait passer la navigation du frame principal. Or les réponses de
+ * Le refus de toute nouvelle fenêtre (`setWindowOpenHandler`) ne couvre que
+ * `window.open` et `target=_blank` : il laissait passer la navigation du
+ * frame principal. Or les réponses de
  * l'assistant sont rendues en HTML avec les ancres autorisées, et leur
  * contenu peut être dicté par une source non fiable (PDF, archive Tropy,
  * note Obsidian, serveur MCP, réponse du modèle). Un clic suffisait donc à
@@ -94,11 +95,17 @@ const guarded = new WeakSet<WebContents>();
 
 /**
  * Applique la règle à un `WebContents` : navigation de frame (principal et
- * enfants) et création de tout nouveau `WebContents`. Idempotent.
+ * enfants), redirection et nouvelle fenêtre. Idempotent.
  */
 export function attachNavigationGuard(contents: WebContents, appUrl: string): void {
   if (guarded.has(contents)) return;
   guarded.add(contents);
+
+  const recordExternal = (target: string): void => {
+    void recordRefusedNavigation(target).catch((err) => {
+      console.warn('[NavigationGuard] journal de sécurité indisponible:', err);
+    });
+  };
 
   const handle = (event: { preventDefault: () => void }, target: string): void => {
     const decision = classifyNavigation(target, appUrl);
@@ -106,13 +113,22 @@ export function attachNavigationGuard(contents: WebContents, appUrl: string): vo
 
     event.preventDefault();
     if (decision === 'external') {
-      void recordRefusedNavigation(target).catch((err) => {
-        console.warn('[NavigationGuard] journal de sécurité indisponible:', err);
-      });
+      recordExternal(target);
       return;
     }
     console.warn('[NavigationGuard] navigation bloquée:', target);
   };
+
+  // Une nouvelle fenêtre (`window.open`, `target=_blank`) : jamais, et rien ne s'ouvre. Un lien que
+  // l'historien active est ouvert par le preload, qui empêche la nouvelle fenêtre : ce qui arrive ici
+  // n'a pas eu de geste. Le refus vivait dans `index.ts`, sur la seule fenêtre principale : tout autre
+  // `WebContents` (fenêtre d'impression des présentations, webview) gardait le comportement
+  // d'Electron, qui crée la fenêtre.
+  contents.setWindowOpenHandler(({ url }) => {
+    if (classifyNavigation(url, appUrl) === 'external') recordExternal(url);
+    else console.warn('[NavigationGuard] nouvelle fenêtre refusée:', url);
+    return { action: 'deny' };
+  });
 
   // Frame principal.
   contents.on('will-navigate', handle);

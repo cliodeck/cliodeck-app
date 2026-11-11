@@ -24,7 +24,7 @@ function recordFatal(kind: 'uncaughtException' | 'unhandledRejection', err: unkn
 process.on('uncaughtException', (err) => recordFatal('uncaughtException', err));
 process.on('unhandledRejection', (reason) => recordFatal('unhandledRejection', reason));
 
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { existsSync } from 'fs';
@@ -32,8 +32,9 @@ import { attachNavigationGuard } from './navigation-guard.js';
 import { setupIPCHandlers } from './ipc/index.js';
 import { configManager } from './services/config-manager.js';
 import { pdfService } from './services/pdf-service.js';
-import { setupApplicationMenu } from './menu.js';
-import { loadMenuTranslations, setLanguage } from './i18n.js';
+import { setupApplicationMenu, type MenuDeps } from './menu.js';
+import { loadMenuTranslations, setLanguage, t } from './i18n.js';
+import { recoveredSettingsDetail, settingsFailureMessage } from './settings-recovery.js';
 import { guardWindowClose, mayLeaveRenderer } from './renderer-flush.js';
 import { sandboxStatus } from './utils/sandbox-status.js';
 import { createQuitHandler, QUIT_DEADLINE_MS, shutdownApp } from './services/app-shutdown.js';
@@ -54,7 +55,7 @@ function resolveAppUrl(): string {
     : pathToFileURL(path.join(__dirname, '../../../dist/renderer/index.html')).href;
 }
 
-function createWindow() {
+function createWindow(): BrowserWindow {
   const preloadPath = path.join(__dirname, '../../preload/index.js');
   console.log('📂 __dirname:', __dirname);
   console.log('📂 Preload path:', preloadPath);
@@ -62,7 +63,7 @@ function createWindow() {
 
   const iconPath = path.join(__dirname, '../../../build/icon.png');
 
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1400,
     height: 900,
     icon: iconPath,
@@ -74,10 +75,9 @@ function createWindow() {
       webSecurity: true,
     },
   });
+  mainWindow = win;
 
-  // Deny all window.open / target=_blank attempts at the main-process level.
-  // Links that should open externally must go through a dedicated IPC path.
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // Aucune nouvelle fenêtre (`window.open`, `target=_blank`) : le garde le refuse, sur tout WebContents.
 
   // En dev : charger depuis Vite
   // En production : charger depuis dist
@@ -85,27 +85,49 @@ function createWindow() {
   const debugEnabled = process.env.CLIODESK_DEBUG === '1' || process.env.DEBUG === '1';
 
   const appUrl = resolveAppUrl();
-  attachNavigationGuard(mainWindow.webContents, appUrl);
+  attachNavigationGuard(win.webContents, appUrl);
 
   if (isDev) {
-    mainWindow.loadURL(appUrl);
-    mainWindow.webContents.openDevTools();
+    win.loadURL(appUrl);
+    win.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../../../dist/renderer/index.html'));
+    win.loadFile(path.join(__dirname, '../../../dist/renderer/index.html'));
     // DevTools only in production if CLIODESK_DEBUG=1 or DEBUG=1
     if (debugEnabled) {
-      mainWindow.webContents.openDevTools();
+      win.webContents.openDevTools();
     }
   }
 
-  guardWindowClose(mainWindow);
+  guardWindowClose(win);
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
   });
 
-  // Setup application menu with keyboard shortcuts
-  setupApplicationMenu(mainWindow);
+  return win;
+}
+
+/**
+ * Le menu vise la fenêtre du moment du clic, la recrée au besoin (macOS), et ne fait plus rien une
+ * fois la sortie engagée. Posé une fois, avant la première fenêtre : il ne dépend d'aucune.
+ */
+const menuDeps: MenuDeps = {
+  currentWindow: () => mainWindow,
+  createWindow,
+  isLeaving: () => onBeforeQuit.isLeaving(),
+};
+
+/**
+ * Un fichier de réglages illisible a été mis de côté au démarrage (`openStoreResilient`) : l'auteur
+ * l'apprend, avec le nom de la copie ; pour les clés d'API, qu'elles sont à ressaisir.
+ */
+function tellRecoveredSettings(win: BrowserWindow): void {
+  const recovered = configManager.getRecoveredFiles();
+  if (recovered.length === 0) return;
+  const detail = recoveredSettingsDetail(recovered);
+  dialog.showMessageBox(win, { type: 'warning', message: t('settingsRecoveredTitle'), detail }).catch((error: unknown) => {
+    console.warn('[Config] message des réglages mis de côté non affiché :', error);
+  });
 }
 
 // Filet global : tout WebContents créé plus tard (webview, aperçu) hérite
@@ -115,9 +137,26 @@ app.on('web-contents-created', (_event, contents) => {
 });
 
 app.whenReady().then(async () => {
+  // Les textes du main d'abord : la boîte d'erreur ci-dessous en a besoin, avant toute configuration.
+  // Sans configuration lue, ils sont en français, la langue par défaut.
+  loadMenuTranslations();
+
   // Initialiser configManager (async pour electron-store ES module)
   console.log('🔧 Initializing configManager...');
-  await configManager.init();
+  try {
+    await configManager.init();
+  } catch (error) {
+    // Un fichier qui ne se lit pas comme du JSON a déjà été mis de côté par `init`. Ce qui reste
+    // (droits, disque) ne se répare pas d'ici. Sans ce `catch`, le rejet n'allait qu'au journal des
+    // plantages, et l'app restait en vie sans fenêtre, l'icône du Dock inerte (S11-1-10). La boîte
+    // nomme aussi une copie déjà faite : le lancement suivant ne la verrait plus.
+    console.error('❌ configManager:', error);
+    const { title, content } = settingsFailureMessage(error, configManager.getRecoveredFiles());
+    dialog.showErrorBox(title, content);
+    // Aucun projet n'est ouvert : sortir sans passer par `before-quit` ne perd rien.
+    app.exit(1);
+    return;
+  }
   console.log('✅ configManager initialized');
 
   // Propagate connector secrets from secureStorage into process.env so
@@ -149,9 +188,6 @@ app.whenReady().then(async () => {
     );
   }
 
-  // Charger les traductions des menus
-  loadMenuTranslations();
-
   // Charger la langue depuis la configuration
   const savedLanguage = configManager.get('language');
   if (savedLanguage && ['fr', 'en', 'de'].includes(savedLanguage)) {
@@ -161,9 +197,7 @@ app.whenReady().then(async () => {
   // Écouter les changements de langue pour mettre à jour le menu
   ipcMain.on('language-changed', (_event, language: 'fr' | 'en' | 'de') => {
     setLanguage(language);
-    if (mainWindow) {
-      setupApplicationMenu(mainWindow);
-    }
+    setupApplicationMenu(menuDeps);
   });
 
   // Note: pdfService is now project-scoped and initialized on-demand
@@ -172,10 +206,14 @@ app.whenReady().then(async () => {
   // Setup IPC handlers
   shutdownProject = setupIPCHandlers().shutdownProject;
 
-  createWindow();
+  // Setup application menu with keyboard shortcuts
+  setupApplicationMenu(menuDeps);
+
+  tellRecoveredSettings(createWindow());
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    // Pendant l'arrêt, un clic sur le Dock ne recrée rien : `app.exit` l'emporterait aussitôt.
+    if (!onBeforeQuit.isLeaving() && BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
@@ -192,28 +230,26 @@ app.on('window-all-closed', () => {
 // puis `app.exit()`, quoi qu'il arrive.
 // `app.exit()` ne ferme rien de lui-même : sans cet arrêt, la session du journal de recherche
 // restait « Active » et le tampon du journal d'usage se perdait.
-app.on(
-  'before-quit',
-  createQuitHandler({
-    mayLeave: () => mayLeaveRenderer(mainWindow),
-    // Masquées, pas détruites : le renderer peut encore finir une écriture jusqu'à `app.exit`.
-    hideWindows: () => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.hide();
-      }
-    },
-    shutdown: () =>
-      shutdownApp({
-        deadlineMs: QUIT_DEADLINE_MS,
-        stopTopicModeling: async () => {
-          const { topicModelingService } = await import('./services/topic-modeling-service.js');
-          await topicModelingService.stop();
-        },
-        closeProject: async (budgetMs) => {
-          await shutdownProject?.(budgetMs);
-        },
-        releaseEmbeddedModels: () => disposeAllEmbeddedClients(),
-      }),
-    exit: () => app.exit(),
-  })
-);
+const onBeforeQuit = createQuitHandler({
+  mayLeave: () => mayLeaveRenderer(mainWindow),
+  // Masquées, pas détruites : le renderer peut encore finir une écriture jusqu'à `app.exit`.
+  hideWindows: () => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.hide();
+    }
+  },
+  shutdown: () =>
+    shutdownApp({
+      deadlineMs: QUIT_DEADLINE_MS,
+      stopTopicModeling: async () => {
+        const { topicModelingService } = await import('./services/topic-modeling-service.js');
+        await topicModelingService.stop();
+      },
+      closeProject: async (budgetMs) => {
+        await shutdownProject?.(budgetMs);
+      },
+      releaseEmbeddedModels: () => disposeAllEmbeddedClients(),
+    }),
+  exit: () => app.exit(),
+});
+app.on('before-quit', onBeforeQuit);

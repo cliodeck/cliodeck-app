@@ -321,6 +321,43 @@ describe('before-quit — l’éditeur, puis l’arrêt, puis app.exit', () => {
     expect(s.order).toEqual(['mayLeave', 'mayLeave', 'hideWindows', 'shutdown', 'exit']);
   });
 
+  it('la sortie engagée se lit : pas pendant la question, dès que les fenêtres se retirent, et jusqu’à app.exit', async () => {
+    // Le menu et le Dock la lisent : pendant l'arrêt (jusqu'à 8 s), la barre de menus reste active
+    // alors que la fenêtre est masquée. Une commande y recréerait ou réafficherait une fenêtre, ou
+    // enverrait au renderer une commande que plus personne n'écrirait.
+    const stopping = deferred();
+    const seen: Record<string, boolean> = {};
+    const s = steps({
+      mayLeave: async () => {
+        seen.mayLeave = onQuit.isLeaving();
+        return true;
+      },
+      shutdown: () => stopping.promise,
+    });
+    s.hideWindows.mockImplementation(() => {
+      seen.hideWindows = onQuit.isLeaving();
+    });
+    const onQuit = createQuitHandler(s);
+    expect(onQuit.isLeaving()).toBe(false);
+
+    const quitting = onQuit(quitEvent());
+    await vi.waitFor(() => expect(s.shutdown).toHaveBeenCalledTimes(1), { timeout: 10_000 });
+    expect(onQuit.isLeaving()).toBe(true);
+    stopping.resolve();
+    await quitting;
+
+    expect(seen).toEqual({ mayLeave: false, hideWindows: true });
+    expect(onQuit.isLeaving()).toBe(true);
+  });
+
+  it('l’auteur choisit de rester : la sortie n’est pas engagée, le menu sert encore', async () => {
+    const onQuit = createQuitHandler(steps({ mayLeave: async () => false }));
+
+    await onQuit(quitEvent());
+
+    expect(onQuit.isLeaving()).toBe(false);
+  });
+
   it('des fenêtres qui ne se retirent pas n’empêchent ni l’arrêt ni la sortie', async () => {
     const s = steps();
     s.hideWindows.mockImplementation(() => {

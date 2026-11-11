@@ -1,4 +1,6 @@
-import { safeStorage } from 'electron';
+import { app, safeStorage } from 'electron';
+import path from 'path';
+import { openStoreResilient } from './open-store-resilient.js';
 
 /**
  * SecureStorage - Encrypts and stores sensitive data (API keys) using Electron's safeStorage API.
@@ -89,6 +91,11 @@ export class SecureStorage {
   private readonly unreadable = new Set<string>();
   /** Un avertissement par clé et par lancement : `getLLMConfig` relit toutes les clés à chaque lecture de la configuration. */
   private readonly warned = new Set<string>();
+  /**
+   * La copie de `cliodeck-secrets.json` mise de côté par `init`, illisible. Ses clés ne sont plus
+   * stockées : absentes, pas « illisibles » au sens de `unreadable`, elles sont à ressaisir.
+   */
+  private recoveredFrom: string | null = null;
 
   async init(): Promise<void> {
     if (this.initialized) return;
@@ -109,11 +116,19 @@ export class SecureStorage {
     // Dynamic import for electron-store (ES module)
     const { default: Store } = await import('electron-store');
 
-    this._store = new Store({
-      name: 'cliodeck-secrets',
-      projectName: 'cliodeck',
-      // No defaults - secrets start empty
-    }) as unknown as SecretStoreInstance;
+    const cwd = app.getPath('userData');
+    const opened = await openStoreResilient(
+      () =>
+        new Store({
+          name: 'cliodeck-secrets',
+          projectName: 'cliodeck',
+          cwd,
+          // No defaults - secrets start empty
+        }) as unknown as SecretStoreInstance,
+      path.join(cwd, 'cliodeck-secrets.json')
+    );
+    this._store = opened.store;
+    this.recoveredFrom = opened.recoveredFrom;
 
     this.initialized = true;
     console.log('🔒 [SecureStorage] Initialized');
@@ -268,6 +283,11 @@ export class SecureStorage {
     const names = Object.keys(store.store).filter((k) => store.get(k) !== undefined);
     for (const name of names) this.getKey(name);
     return names.filter((k) => !this.unreadable.has(k)).sort();
+  }
+
+  /** La copie du fichier des clés mise de côté par `init`, ou `null`. */
+  getRecoveredFrom(): string | null {
+    return this.recoveredFrom;
   }
 
   /** Clés présentes mais indéchiffrables ici (voir `unreadable`). */

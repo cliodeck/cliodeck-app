@@ -53,5 +53,10 @@
   "unsavedLeave": "Quitter sans enregistrer",
   "unsavedUntitledMessage": "Ce document sans titre n'est enregistré nulle part. Si vous quittez maintenant, son texte sera perdu.",
   "unsavedSaveFailedMessage": "Vos dernières modifications n'ont pas pu être enregistrées. Si vous quittez maintenant, elles seront perdues.",
-  "unsavedSaveSlowMessage": "L'enregistrement prend du temps, si vous quittez maintenant, vos modifications seront perdues"
+  "unsavedSaveSlowMessage": "L'enregistrement prend du temps, si vous quittez maintenant, vos modifications seront perdues",
+  "settingsRecoveredTitle": "Des réglages illisibles ont été mis de côté",
+  "settingsRecoveredConfig": "Le fichier des réglages de ClioDeck ne se lisait plus. Il a été mis de côté, tel quel, sous le nom :\n{{path}}\n\nClioDeck repart des réglages par défaut, et la liste des projets récents est vide : vos projets, eux, ne sont pas touchés. Rouvrez-les par Fichier → Ouvrir projet.",
+  "settingsRecoveredSecrets": "Le fichier des clés API de ClioDeck ne se lisait plus. Il a été mis de côté, tel quel, sous le nom :\n{{path}}\n\nLes clés API qu'il contenait (LLM, Zotero, MCP) ne sont plus enregistrées : ressaisissez-les dans les Paramètres.",
+  "settingsUnreadableTitle": "ClioDeck ne peut pas démarrer",
+  "settingsUnreadableMessage": "Les réglages de ClioDeck n'ont pas pu être lus :\n{{error}}\n\nVérifiez que ce fichier est bien sur le disque et que vous avez le droit de le lire, puis relancez ClioDeck."
 }

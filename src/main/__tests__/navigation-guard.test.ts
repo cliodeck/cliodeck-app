@@ -93,6 +93,9 @@ describe('attachNavigationGuard — idempotence', () => {
         events.push(event);
         return contents;
       },
+      setWindowOpenHandler() {
+        events.push('window-open-handler');
+      },
     };
     return { contents: contents as unknown as WebContents, events };
   }
@@ -136,7 +139,7 @@ describe('attachNavigationGuard — une navigation externe n’est jamais ouvert
 
   /** Faux WebContents qui émet les vrais noms d'événements, avec les arguments d'Electron 45. */
   function emitterContents() {
-    const emitter = new EventEmitter();
+    const emitter = Object.assign(new EventEmitter(), { setWindowOpenHandler: () => undefined });
     attachNavigationGuard(emitter as unknown as WebContents, APP);
     const event = (url: string, isMainFrame = true) => ({ url, isMainFrame, preventDefault: vi.fn() });
     return {
@@ -270,5 +273,88 @@ describe('attachNavigationGuard — une navigation externe n’est jamais ouvert
     expect(mocks.openExternal).not.toHaveBeenCalled();
     expect(warn.mock.calls.some((args) => args.join(' ').includes('http://127.0.0.1:9/sans-projet'))).toBe(true);
     expect(journal()).toEqual([]);
+  });
+});
+
+/**
+ * Une nouvelle fenêtre (`window.open`, `target=_blank`) n'ouvre jamais rien (amendement après E1).
+ * Le refus vivait dans `index.ts`, sur la seule fenêtre principale : tout autre `WebContents`
+ * (fenêtre d'impression des présentations, webview) gardait le comportement par défaut d'Electron,
+ * qui crée la fenêtre. Un lien que l'historien active est ouvert par le preload, avant toute
+ * nouvelle fenêtre : ce qui arrive ici n'a pas eu de geste.
+ */
+describe('attachNavigationGuard — aucune nouvelle fenêtre, sur tout WebContents', () => {
+  const APP = PROD;
+  let root: string;
+
+  type OpenHandler = (details: { url: string; disposition: string }) => { action: string };
+
+  /** Faux WebContents qui garde le gestionnaire de nouvelle fenêtre que le garde lui pose. */
+  function openerContents(): (url: string) => { action: string } {
+    let handler: OpenHandler | null = null;
+    const contents = {
+      on: () => contents,
+      setWindowOpenHandler: (h: OpenHandler) => {
+        handler = h;
+      },
+    };
+    attachNavigationGuard(contents as unknown as WebContents, APP);
+    return (url) => {
+      if (!handler) throw new Error('aucun gestionnaire de nouvelle fenêtre posé par le garde');
+      return handler({ url, disposition: 'new-window' });
+    };
+  }
+
+  function journal(): Array<{ kind: string; url?: string }> {
+    let raw = '';
+    try {
+      raw = readFileSync(join(root, '.cliodeck', 'security-events.jsonl'), 'utf8');
+    } catch {
+      return [];
+    }
+    return raw
+      .split('\n')
+      .filter((l) => l.trim() !== '')
+      .map((l) => JSON.parse(l) as { kind: string; url?: string });
+  }
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'cliodeck-garde-fenetre-'));
+    mocks.projectPath = root;
+    mocks.openExternal.mockClear();
+  });
+
+  afterEach(() => {
+    mocks.projectPath = null;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('window.open("https://…") sans geste : refusé, rien ne s’ouvre, et le refus est au journal de sécurité', async () => {
+    const open = openerContents();
+
+    expect(open('https://attaquant.example/onglet')).toEqual({ action: 'deny' });
+
+    expect(mocks.openExternal).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(journal()).toHaveLength(1));
+    expect(journal()[0]).toMatchObject({ kind: 'external_navigation_blocked', url: 'https://attaquant.example/onglet' });
+  });
+
+  it('une URL file: : refusée, rien ne s’ouvre, et rien au journal (comme une navigation bloquée)', async () => {
+    const open = openerContents();
+
+    expect(open('file:///etc/passwd')).toEqual({ action: 'deny' });
+
+    expect(mocks.openExternal).not.toHaveBeenCalled();
+    // Témoin : quand il est au journal, une ligne pour le fichier y serait aussi.
+    open('https://temoin.example/');
+    await vi.waitFor(() => expect(journal()).toHaveLength(1));
+    expect(journal()[0].url).toBe('https://temoin.example/');
+  });
+
+  it('le document de l’application lui-même : refusé aussi, l’app n’a qu’une fenêtre', () => {
+    const open = openerContents();
+
+    expect(open(APP)).toEqual({ action: 'deny' });
+    expect(mocks.openExternal).not.toHaveBeenCalled();
   });
 });

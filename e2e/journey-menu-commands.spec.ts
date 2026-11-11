@@ -364,3 +364,57 @@ test('Format › Bloc citation : Cmd+Option+Q sous macOS, et l’entrée du menu
       .toBe(ARTICLE.replace('Huit mille', '> Huit mille'));
   });
 });
+
+/**
+ * macOS : l'app survit à la fermeture de sa fenêtre, et la barre de menus reste (S11-1-16). Le menu
+ * fermait ses clics sur la fenêtre du lancement : Fichier › Ouvrir projet levait « Object has been
+ * destroyed » et ne faisait rien. La commande recrée la fenêtre, et son renderer la reçoit une fois
+ * React monté, pas seulement le main qui l'envoie. Fenêtre fermée par `close()` (la croix, Cmd+W),
+ * entrée cliquée par le menu lui-même : aucune touche n'est envoyée au système.
+ */
+test('macOS : fenêtre fermée, Fichier › Ouvrir projet la rouvre, et le projet s’ouvre dans la fenêtre recréée', async () => {
+  test.skip(process.platform !== 'darwin', 'Hors de macOS, fermer la dernière fenêtre quitte l’app.');
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, userDataDir } = outcome.value;
+  const article = makeArticle('Projet rouvert par le menu');
+  const stderr: string[] = [];
+  app.process().stderr?.on('data', (chunk: Buffer) => stderr.push(chunk.toString()));
+  const windowCount = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+  try {
+    const opened = await stubOpenDialog(app, article.projectJson);
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].close();
+    });
+    await expect.poll(windowCount, { timeout: 15_000 }).toBe(0);
+
+    const reopened = app.waitForEvent('window', { timeout: 15_000 });
+    await app.evaluate(({ Menu }) => {
+      const find = (items: Electron.MenuItem[]): Electron.MenuItem | null => {
+        for (const item of items) {
+          if (item.label === 'Ouvrir projet') return item;
+          const inner = item.submenu ? find(item.submenu.items) : null;
+          if (inner) return inner;
+        }
+        return null;
+      };
+      const item = find(Menu.getApplicationMenu()?.items ?? []);
+      if (!item) throw new Error('Entrée de menu absente : Ouvrir projet');
+      item.click();
+    });
+    const window = await reopened;
+
+    await expect(window.locator('.status-bar')).toContainText('Projet rouvert par le menu', { timeout: 20_000 });
+    await expect(editor(window)).toContainText('Huit mille mots');
+    expect(await opened()).toBe(1);
+    expect(await windowCount()).toBe(1);
+    expect(stderr.join('')).not.toMatch(/Object has been destroyed|uncaughtException/);
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(article.dir, { recursive: true, force: true });
+  }
+});

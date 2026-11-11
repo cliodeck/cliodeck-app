@@ -118,6 +118,19 @@ describe('un écouteur par commande', () => {
     for (const channel of MENU_CHANNELS) expect(electron().listenerCount(channel), channel).toBe(1);
   });
 
+  it('au montage, le preload dit au main que chaque commande est écoutée (menu:listening)', () => {
+    // Une fenêtre recréée par le menu (macOS, fenêtre fermée) : le main garde la commande jusqu'à
+    // ce que son écouteur soit posé. Envoyée à `did-finish-load`, elle partait avant le montage de
+    // React, et se perdait.
+    const send = vi.spyOn(electron().module.ipcRenderer, 'send');
+
+    renderHook(() => useMenuShortcuts());
+
+    const announced = send.mock.calls.filter(([channel]) => channel === 'menu:listening').map(([, c]) => c);
+    expect(new Set(announced)).toEqual(new Set(MENU_CHANNELS));
+    send.mockRestore();
+  });
+
   it('après le changeLanguage du lancement, même vers la langue en cours : toujours un seul', async () => {
     renderHook(() => useMenuShortcuts());
 
