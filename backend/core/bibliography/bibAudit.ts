@@ -7,11 +7,18 @@
  * de ce que le parseur avait rendu : tout le reste disparaissait, sans un mot (S07-1-2).
  *
  * Ce n'est pas un second lecteur de `.bib` : on compte les entrées du texte, une par `@type{clé`
- * en début de ligne, contre celles que le parseur a rendues. Limites assumées : une valeur qui
- * contient `@x{y,` en début de ligne compte pour une entrée, et la clé `y` est signalée à tort ;
- * entre deux entrées, une accolade dans un texte libre qui n'est pas une ligne de commentaire `%`
- * fait signaler à tort l'entrée qui précède ; un champ lu à moitié dans une entrée rendue ne se
- * voit pas — on contrôle les entrées, pas les champs.
+ * en début de ligne, contre celles que le parseur a rendues. Limites assumées :
+ * - une ligne de valeur qui commence par une arobase, un type d'entrée (`ENTRY_TYPE`), puis une
+ *   accolade ou une parenthèse (`@x{y,`, « @archives (2024) ») compte pour une entrée : elle et
+ *   l'entrée qui la contient sont signalées à tort, et la synchronisation comme « Fusionner »
+ *   refusent le fichier, sans rien perdre. Depuis J2, le type se lit comme BibTeX le lit : la limite
+ *   s'étend aux identifiants à point, à deux-points ou accentués (« @archives.bsky.social ( »,
+ *   « @Élysée ( »), que l'ancien motif ne lisait pas. ClioDeck écrit chaque valeur sur une ligne :
+ *   seul un `.bib` écrit par un autre outil est touché ;
+ * - entre deux entrées, une accolade dans un texte libre qui n'est pas une ligne de commentaire `%`
+ *   fait signaler à tort l'entrée qui précède ;
+ * - un champ lu à moitié dans une entrée rendue ne se voit pas — on contrôle les entrées, pas les
+ *   champs.
  */
 import type { Citation } from '../../types/citation';
 import { ENTRY_TYPE, findMatchingBrace } from './BibTeXParser';

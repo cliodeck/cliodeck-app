@@ -14,7 +14,13 @@
  *
  * Une arobase hors des entrées (« % voir aussi @Garde2000 », une adresse, un `@comment(…)`) est du
  * texte hors des entrées, repris comme le reste : une entrée commence à l'arobase de son type, pour
- * le découpage comme pour le parseur (`findBlockStart`, J2).
+ * le découpage comme pour le parseur (`findBlockStart`, J2). Limite connue : suivie d'un
+ * identifiant puis d'une accolade ouvrante (« @Garde2000 {p. 12} », « jean@univ.fr {perso} »), une
+ * arobase se lit, pour l'un comme pour l'autre, comme le début d'une entrée. Le parseur la rejette,
+ * faute de titre, mais le découpage la compte : la ligne est coupée à l'arobase, et la copie de
+ * sécurité, refaite à chaque réécriture, ne la garde entière que jusqu'à la suivante. Le cas d'une
+ * clé l'était déjà avant J2 ; en lisant le type comme BibTeX, J2 l'étend aux adresses et aux URL.
+ * Suivie d'une parenthèse, la ligne reste entière.
  *
  * Les `@string` restent tels quels, mais la réécriture écrit toujours les valeurs développées
  * (L05-7) : la définition est gardée, plus rien ne la cite.

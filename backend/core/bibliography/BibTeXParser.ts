@@ -177,7 +177,11 @@ const skipBlanks = (text: string, index: number): number => {
  * que BibTeX accepte dans un identifiant, en est exclue : le type est ce qui suit la dernière
  * arobase avant l'accolade (J2).
  *
- * `bibAudit` lit le début d'une entrée avec ce motif.
+ * `bibAudit` lit le début d'une entrée avec ce motif. Plus large que l'ancien, il étend deux limites
+ * connues, dites dans `bibAudit` et `outsideEntries` : une ligne de valeur qui commence par
+ * « @archives.bsky.social ( » fait refuser le fichier, et « jean@univ.fr {perso} » dans un
+ * commentaire `%` se coupe à la réécriture. Le rétrécir les réduirait, mais ferait perdre en
+ * silence des entrées que BibTeX lit.
  */
 export const ENTRY_TYPE = String.raw`[^\s"#%'(),={}@0-9][^\s"#%'(),={}@]*`;
 

@@ -252,3 +252,25 @@ describe('auditParsedBib — les @string que le parseur ne lit pas', () => {
     expect(result.unreadKeys).toContain('string');
   });
 });
+
+/**
+ * Limite assumée (voir l'en-tête de `bibAudit.ts`) : l'audit lit les débuts de ligne sans savoir
+ * s'ils tombent dans une valeur. Depuis J2, il lit le type comme le parseur, comme BibTeX : la
+ * limite s'étend aux identifiants à point ou accentués, que l'ancien motif ne lisait pas. Le
+ * fichier est refusé à tort, mais rien n'est perdu ; et ClioDeck, qui écrit chaque valeur sur une
+ * ligne, n'écrit jamais ce faux début.
+ */
+describe('auditParsedBib — une ligne de valeur qui commence comme une entrée', () => {
+  it.each([
+    ['ASCII, signalé avant J2', '@archives (2024)'],
+    ['à point', '@archives.bsky.social (2024)'],
+    ['accentué', '@Élysée (2024)'],
+    ['suivi d’une accolade', '@x.y {2024}'],
+  ])('limite assumée : « %s » au début d’une ligne de valeur compte pour une entrée, et le fichier réécrit n’en porte plus', (_name, start) => {
+    const result = audit(`@book{Garde_2000,\n  title = {Le temps},\n  abstract = {Une étude.\n${start} en parle.},\n}\n`);
+
+    expect(result.parsed.map((c) => c.id)).toEqual(['Garde_2000']);
+    expect(result.unreadKeys).toContain('Garde_2000');
+    expect(audit(new BibTeXExporter().exportToString(result.parsed)).unreadKeys).toEqual([]);
+  });
+});

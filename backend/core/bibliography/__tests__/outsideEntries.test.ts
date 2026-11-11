@@ -400,6 +400,40 @@ describe('keepOutsideEntries — une arobase hors des entrées', () => {
     expect(rewritten.match(/^@.*$/gm)).toEqual([`${start}Garde2000,`, '@article{Leduc1990,']);
     expect(keepOutsideEntries(previous, rewritten)).toBe(rewritten);
   });
+
+  // Limite connue, à décider (revue de J2) : dans une ligne `%`, une arobase suivie d'un identifiant
+  // puis d'une accolade ouvrante se lit comme le début d'une entrée. Le parseur la rejette, faute de
+  // titre, mais le découpage la compte : la réécriture coupe la ligne à l'arobase, et la copie de
+  // sécurité ne la garde entière que jusqu'à la réécriture suivante. Le cas d'une clé
+  // (`@Garde2000 {`) l'était déjà avant J2 ; en lisant le type comme BibTeX, J2 l'étend aux
+  // adresses et aux URL (le point, le deux-points). Avec une parenthèse, la ligne reste entière
+  // (plus haut). Le témoin dit ce qui tient déjà : les entrées se lisent, et le fichier ne change
+  // plus d'une réécriture à l'autre. Les `it.fails` disent ce qu'on attend : ils échouent tant que
+  // la limite tient, et passeront au vert quand elle sera levée.
+  const BRACE_LINES = [
+    ['une clé', '% voir aussi @Garde2000 {p. 12}'],
+    ['une adresse', '%% Tenu par jean@univ.fr {perso}'],
+    ['une URL', '% Profil : https://mastodon.social/@historien/{billets}'],
+  ];
+
+  it.each(BRACE_LINES)('témoin : %s suivie d’une accolade, dans une ligne de commentaire : les entrées se lisent, le fichier ne change plus', (_name, line) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = `${line}\n${A}\n${B}`;
+
+    expect(parse(previous).map((c) => [c.type, c.id])).toEqual([
+      ['book', 'Garde2000'],
+      ['article', 'Leduc1990'],
+    ]);
+    expect(rewrite(previous).match(/^@.*$/gm)).toEqual(['@book{Garde2000,', '@article{Leduc1990,']);
+    expectSettled(previous);
+  });
+
+  it.fails.each(BRACE_LINES)('%s suivie d’une accolade, dans une ligne de commentaire : la ligne reste entière', (_name, line) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const previous = `${line}\n${A}\n${B}`;
+
+    expect(keepOutsideEntries(previous, rewrite(previous)).startsWith(`${line}\n`)).toBe(true);
+  });
 });
 
 /**
