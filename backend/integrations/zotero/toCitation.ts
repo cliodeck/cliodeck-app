@@ -215,7 +215,14 @@ export function zoteroItemToCitation(item: ZoteroItem, bibtexKey: string): Citat
   // l'échappe comme tout champ libre. Sous `abstract`, le nom que le parseur
   // relit et que le panneau affiche (`abstractOf`) ; jamais `notes`, écrit
   // `note`, que biblatex imprime dans la bibliographie.
-  set('abstract', field(data, 'abstractNote'));
+  //
+  // Sur une seule ligne, comme toute valeur que ClioDeck écrit (`bibAudit`) :
+  // une ligne du résumé qui commencerait par « @nom ( » serait comptée comme
+  // une entrée, et la synchronisation suivante refusée. Les blancs se
+  // réduisent comme la relecture du `.bib` les réduit (ASCII, espaces
+  // insécables gardés), plus les séparateurs de ligne Unicode, qui coupent
+  // une ligne pour l'audit.
+  set('abstract', field(data, 'abstractNote')?.replace(/[ \t\r\n\f\v\u2028\u2029]+/g, ' '));
 
   const inBook = BOOK_CONTAINER_TYPES.has(itemType);
 

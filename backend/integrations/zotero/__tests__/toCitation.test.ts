@@ -255,9 +255,17 @@ describe('résumé', () => {
   });
 
   it('garde le texte tel que Zotero le donne, sans nettoyage LaTeX', () => {
-    const raw = 'Sur {les} archives : 50 % & \\emph{plus}.\n\nSecond paragraphe.';
+    const raw = 'Sur {les} archives : 50 % & \\emph{plus}, « $x^2$ » --- <i>fin</i>.';
     const c = zoteroItemToCitation(item('journalArticle', { title: 'T', abstractNote: raw }), 'K');
     expect(c.customFields?.abstract).toBe(raw);
+  });
+
+  it('réduit sauts de ligne et tabulations à une espace, comme la relecture du .bib, et garde les espaces insécables', () => {
+    // Une ligne du résumé qui commencerait par « @nom ( » serait comptée comme une entrée par
+    // l'audit du `.bib` (`bibAudit`), et la synchronisation suivante refusée.
+    const raw = 'Premier paragraphe.\n\n@WW1_live (2014) est un compte.\r\n\tSuite\u2028fin\u2029,\u00a0: bis';
+    const c = zoteroItemToCitation(item('journalArticle', { title: 'T', abstractNote: raw }), 'K');
+    expect(c.customFields?.abstract).toBe('Premier paragraphe. @WW1_live (2014) est un compte. Suite fin ,\u00a0: bis');
   });
 
   it('n’écrit rien quand Zotero n’a pas de résumé', () => {

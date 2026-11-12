@@ -3,6 +3,7 @@ import type { IZoteroDataSource } from '../IZoteroDataSource';
 import type { ZoteroAttachment, ZoteroCollection, ZoteroItem } from '../ZoteroAPI';
 import { ZoteroSynchronizer, type SyncReport, type SynchronizeResult } from '../ZoteroSynchronizer';
 import { BibTeXParser } from '../../../core/bibliography/BibTeXParser';
+import { auditParsedBib } from '../../../core/bibliography/bibAudit';
 import { createCitation, type Citation } from '../../../types/citation';
 
 /**
@@ -683,21 +684,34 @@ describe('résumé', () => {
     expect(second.bibtex).not.toContain('Ancien résumé');
   });
 
-  it('un résumé sans lettre latine ni espace (chinois, japonais) est écrit aussi', async () => {
-    // La comparaison des champs ne garde que les lettres ASCII et les blancs : un résumé en chinois
-    // y vaut une chaîne vide, comme un résumé absent, et serait passé pour déjà présent.
-    const library = lib();
-    const sync = new ZoteroSynchronizer(source(library));
-    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+  // La comparaison des autres champs ne garde que les lettres ASCII et les blancs : un résumé chinois
+  // y vaut une chaîne vide, comme un résumé absent, et serait passé pour déjà présent. Celle du
+  // résumé garde toutes les écritures, mais pas les signes : un résumé fait de seuls signes est
+  // nouveau parce que le `.bib` n'en a pas, quoi que dise la comparaison.
+  const firstAbstracts: Record<string, string> = {
+    'sans lettre latine ni espace (chinois)': '本文讨论档案与数字史学的关系。',
+    'fait de seuls signes': '***',
+  };
+  for (const [name, text] of Object.entries(firstAbstracts)) {
+    it(`un résumé ${name}, absent du .bib, est écrit aussi`, async () => {
+      const library = lib();
+      const sync = new ZoteroSynchronizer(source(library));
+      const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
 
-    library.contents.ARTICLE[0].data.abstractNote = '本文讨论档案与数字史学的关系。';
-    const second = applied(
-      await sync.synchronize({ local: reread(first), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
-    );
+      library.contents.ARTICLE[0].data.abstractNote = text;
+      const second = applied(
+        await sync.synchronize({ local: reread(first), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+      );
 
-    expect(second.report.modified.map((m) => m.fields)).toEqual([['abstract']]);
-    expect(reread(second)[0].customFields?.abstract).toBe('本文讨论档案与数字史学的关系。');
-  });
+      expect(second.report.modified.map((m) => m.fields)).toEqual([['abstract']]);
+      expect(reread(second)[0].customFields?.abstract).toBe(text);
+
+      const third = applied(
+        await sync.synchronize({ local: reread(second), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+      );
+      expect(third.changed).toBe(false);
+    });
+  }
 
   it('accolades, caractères spéciaux et sauts de ligne : relu tel qu’écrit, puis plus rien à faire', async () => {
     const raw =
@@ -765,5 +779,104 @@ describe('résumé', () => {
       DDD: 'Résumé que seul le .bib connaît',
       EEE: undefined,
     });
+  });
+
+  // La comparaison des autres champs ne garde que les lettres ASCII : un résumé chinois s'y réduit
+  // à rien, un résumé russe ou grec à ses blancs, et « é » → « è » n'y change rien. Changé dans
+  // Zotero, il passait pour identique et n'était jamais écrit.
+  const rewrites: Record<string, [string, string]> = {
+    chinois: ['本文讨论档案与数字史学的关系。', '本文讨论上海档案馆的民国档案。'],
+    russe: ['Это статья об архивах.', 'Это книга о музеях.'],
+    grec: ['Μελέτη των αρχείων.', 'Ιστορία των μουσείων.'],
+    'accent seul': ['Résumé de la période', 'Résumè de la période'],
+    hindi: ['पुरालेख का इतिहास', 'पुरालेखों का इतिहास'],
+  };
+  for (const [script, [before, after]] of Object.entries(rewrites)) {
+    it(`un résumé changé dans Zotero l’emporte aussi hors de l’alphabet latin : ${script}`, async () => {
+      const library = lib();
+      library.contents.ARTICLE[0].data.abstractNote = before;
+      const sync = new ZoteroSynchronizer(source(library));
+      const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+
+      library.contents.ARTICLE[0].data.abstractNote = after;
+      const second = applied(
+        await sync.synchronize({ local: reread(first), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+      );
+
+      expect(second.report.modified.map((m) => m.fields)).toEqual([['abstract']]);
+      expect(reread(second)[0].customFields?.abstract).toBe(after);
+    });
+  }
+
+  it('première synchronisation : un résumé non latin du .bib, autre que celui de Zotero, est remplacé', async () => {
+    const library = lib();
+    const sync = new ZoteroSynchronizer(source(library));
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+    const local = new BibTeXParser().parse(withBibAbstract(first.bibtex, 'AAA', 'Это статья об архивах.'));
+
+    library.contents.ARTICLE[0].data.abstractNote = 'Это книга о музеях.';
+    const second = applied(await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' }));
+
+    expect(second.report.modified.map((m) => m.fields)).toEqual([['abstract']]);
+    expect(reread(second)[0].customFields?.abstract).toBe('Это книга о музеях.');
+  });
+
+  // La comparaison du résumé ne doit pas faire passer pour « modifiée », à chaque synchronisation, une
+  // notice dont le `.bib` relu diffère du texte de Zotero par la seule écriture du fichier.
+  const roundTrips: Record<string, string> = {
+    'HTML de Crossref': '<jats:p>Cet article <i>examine</i> les archives.</jats:p>',
+    'commandes LaTeX': 'Une étude \\emph{importante} des \\textit{archives}, l’\\\'etude.',
+    'mathématiques': 'Avec $x^2$ et a^b.',
+    'barres obliques inverses': 'Chemin C:\\Users\\dossier et \\\\ double.',
+    'fins de ligne Windows et tabulations': 'Ligne un.\r\nLigne deux.\tCol2',
+    'tirets et guillemets': 'Entre 1914--1918, ``cité\'\' et "dit" --- puis ...',
+    'espace insécable': 'Mot\u00a0: suite',
+    accolades: '{\\bf gras} et {groupe}',
+    'chinois et russe': '本文讨论档案。 Это статья.',
+  };
+  for (const [name, text] of Object.entries(roundTrips)) {
+    it(`relu après écriture, le résumé n’est plus « modifié » : ${name}`, async () => {
+      const library = lib();
+      library.contents.ARTICLE[0].data.abstractNote = text;
+      const sync = new ZoteroSynchronizer(source(library));
+      const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+
+      const second = applied(
+        await sync.synchronize({ local: reread(first), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+      );
+
+      expect(second.report.modified).toEqual([]);
+      expect(second.changed).toBe(false);
+    });
+  }
+
+  it('le même résumé, composé autrement (NFC dans le .bib, NFD dans Zotero) : rien à réécrire', async () => {
+    const library = lib();
+    const sync = new ZoteroSynchronizer(source(library));
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+    const local = new BibTeXParser().parse(withBibAbstract(first.bibtex, 'AAA', 'Résumé de la période'.normalize('NFC')));
+
+    library.contents.ARTICLE[0].data.abstractNote = 'Résumé de la période'.normalize('NFD');
+    const second = applied(await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' }));
+
+    expect(second.report.modified).toEqual([]);
+    expect(second.changed).toBe(false);
+  });
+
+  // ClioDeck écrit chaque valeur sur une ligne (`bibAudit`) : une ligne du résumé qui commencerait
+  // par « @nom ( » serait comptée comme une entrée, et toute synchronisation suivante refusée.
+  it('un résumé à plusieurs paragraphes s’écrit sur une ligne, et le .bib produit se relit en entier', async () => {
+    const library = lib();
+    library.contents.ARTICLE[0].data.abstractNote =
+      'Premier paragraphe.\n@WW1_live (2014) est un compte.\r\n\r\n@archives{x, deuxième\u2028@musee (2020) troisième.';
+    const sync = new ZoteroSynchronizer(source(library));
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+
+    const line = first.bibtex.split(/\r\n|\r|\n|\u2028|\u2029/).find((l) => l.trimStart().startsWith('abstract ='));
+    // La virgule finale dépend de la place du champ dans l'entrée.
+    expect(line?.replace(/,$/, '')).toBe(
+      '  abstract = {Premier paragraphe. @WW1\\_live (2014) est un compte. @archives\\{x, deuxième @musee (2020) troisième.}'
+    );
+    expect(auditParsedBib(first.bibtex, reread(first)).unreadKeys).toEqual([]);
   });
 });

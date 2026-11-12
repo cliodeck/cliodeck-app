@@ -173,14 +173,13 @@ export class ZoteroDiffEngine {
 
     // Le résumé, hors de ZOTERO_OWNED_FIELDS (cf. `toCitation`) : comparé
     // seulement quand Zotero en a un. Un résumé que seul le `.bib` connaît
-    // n'est jamais un retrait. Absent du `.bib`, il est nouveau quoi qu'en
-    // dise `normalizeString`, qui réduit à rien un texte sans lettre ASCII ni
-    // blanc (un résumé en chinois ne serait jamais écrit).
+    // n'est jamais un retrait. Absent du `.bib`, il est nouveau quelle que
+    // soit la comparaison (un résumé fait de seuls signes s'y réduit à rien).
     const remoteAbstract = remote.customFields?.abstract;
     const localAbstract = local.customFields?.abstract;
     if (
       remoteAbstract &&
-      (!localAbstract || this.normalizeString(localAbstract) !== this.normalizeString(remoteAbstract))
+      (!localAbstract || this.normalizeAbstract(localAbstract) !== this.normalizeAbstract(remoteAbstract))
     ) {
       modifiedFields.push('abstract');
     }
@@ -220,6 +219,29 @@ export class ZoteroDiffEngine {
       .trim()
       .replace(/\s+/g, ' ')
       .replace(/[^\w\s]/g, ''); // Remove punctuation
+  }
+
+  /**
+   * Comparaison du résumé (J3), et de lui seul. `normalizeString` ne garde
+   * que les lettres ASCII : un résumé chinois s'y réduit à rien, un résumé
+   * russe ou grec à ses blancs, et « é » → « è » n'y change rien. Changé
+   * dans Zotero, le résumé passait pour identique et n'était jamais écrit.
+   *
+   * Ici, les lettres, les signes diacritiques et les chiffres de toutes les
+   * écritures restent ; la ponctuation, les symboles et la casse comptent
+   * pour rien, et les blancs pour un seul. C'est ce qui sépare le texte de
+   * Zotero de sa relecture dans le `.bib` (`---` relu « — », sauts de ligne
+   * relus en espace, échappements d'un `.bib` de Better BibTeX) : sans cela,
+   * la notice serait « modifiée » à chaque synchronisation. NFC d'abord : un
+   * « é » composé et un « é » décomposé sont la même lettre.
+   */
+  private normalizeAbstract(str: string): string {
+    return str
+      .normalize('NFC')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{M}\p{N}\s]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   /**
