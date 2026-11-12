@@ -8,7 +8,9 @@
  * fichier de l'index.
  *
  * `EnhancedVectorStore.search`, avec HNSW désactivé (`rag.useHNSWIndex: false`), levait « Search
- * indexes are not available » à chaque question : il fait maintenant la recherche linéaire.
+ * indexes are not available » à chaque question : il fait maintenant la recherche linéaire. Elle
+ * écarte les extraits d'une autre dimension que la question, et lève s'il n'en reste aucun, au lieu
+ * de les rendre notés 0.
  *
  * Ici le vrai hnswlib, et une vraie base pour le second cas.
  */
@@ -18,6 +20,7 @@ import os from 'os';
 import path from 'path';
 import { sqliteAvailable } from '../../../__tests__/helpers/native-guards.js';
 import type { DocumentChunk, PDFDocument } from '../../../types/pdf-document.js';
+import { SecondaryRetriever } from '../../rag/retrievers/secondary-retriever.js';
 import { EnhancedVectorStore } from '../EnhancedVectorStore.js';
 import { HNSWVectorStore } from '../HNSWVectorStore.js';
 import { VectorStore } from '../VectorStore.js';
@@ -202,6 +205,62 @@ describe.skipIf(!sqliteAvailable)('EnhancedVectorStore : HNSW désactivé, la re
       const hits = await store.search('sans rapport', query, 10, ['d5']);
       expect(hits.map((hit) => hit.chunk.id)).toEqual(exactNearestIn('d5', 10));
       await rebuilding;
+    } finally {
+      store.close();
+    }
+  });
+
+  it('question d’une autre dimension que la base : lève comme HNSW, sans rendre d’extraits notés 0', async () => {
+    seedDatabase();
+    const store = new EnhancedVectorStore(project);
+    await store.initialize();
+    store.setUseHNSW(false);
+    // Le modèle d'embeddings a changé (32 → 64 dimensions), les PDF ne sont pas réindexés.
+    const wideQuery = Float32Array.from({ length: DIMENSION * 2 }, (_, j) => query[j % DIMENSION]);
+    try {
+      await expect(store.search('sans rapport', wideQuery, 10)).rejects.toThrow(
+        `Query embedding dimension mismatch: expected ${DIMENSION}, got ${DIMENSION * 2}`
+      );
+      await expect(store.search('sans rapport', wideQuery, 10, ['d5'])).rejects.toThrow(
+        'Query embedding dimension mismatch'
+      );
+
+      // Par le chemin du chat : le corpus est en panne (E2), pas trois extraits arbitraires
+      // gardés par le repli `CROSS_LANGUAGE_FALLBACK`.
+      const retriever = new SecondaryRetriever({
+        vectorStore: store,
+        getQueryEmbedding: async () => wideQuery,
+        expandQuery: (text) => [text],
+      });
+      await expect(retriever.search('sans rapport', { topK: 10, threshold: 0.12 })).rejects.toThrow(
+        'Query embedding dimension mismatch'
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  it('base à deux dimensions (réindexation en cours) : seuls les extraits de la dimension de la question répondent', async () => {
+    seedDatabase();
+    const base = new VectorStore(project);
+    base.saveDocument(documentOf('n0'));
+    const wide = (i: number): Float32Array =>
+      Float32Array.from({ length: DIMENSION * 2 }, (_, j) => query[j % DIMENSION] + 0.01 * i);
+    for (let i = 0; i < 5; i += 1) base.saveChunk({ ...chunkOf(0, i), id: `n0-c${i}`, documentId: 'n0' }, wide(i));
+    base.close();
+
+    const store = new EnhancedVectorStore(project);
+    store.setUseHNSW(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const hits = await store.search('sans rapport', wide(0), 10);
+      expect(hits.map((hit) => hit.chunk.documentId)).toEqual(Array(5).fill('n0'));
+      expect(hits.every((hit) => hit.similarity > 0)).toBe(true);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('2000 chunks skipped'));
+      // Les extraits pas encore réembarqués répondent toujours à une question de leur dimension.
+      expect((await store.search('sans rapport', query, 10, ['d5'])).map((hit) => hit.chunk.id)).toEqual(
+        exactNearestIn('d5', 10)
+      );
     } finally {
       store.close();
     }
