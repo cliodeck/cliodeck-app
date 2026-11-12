@@ -35,7 +35,8 @@ interface SubgraphData {
 /**
  * Les documents cités dans la session, triés et sans doublon, en JSON. Une chaîne : le sélecteur ne
  * rend le composant, et l'effet ne rappelle le main, que quand cet ensemble change — jamais à chaque
- * jeton, qui remplace pourtant le tableau des messages (S16-1-9).
+ * jeton, qui remplace pourtant le tableau des messages (S16-1-9). Le parent, `AssistantChat`, se rend
+ * lui à chaque jeton : d'où le `React.memo` du composant, sans props.
  */
 function citedDocIdsKey(messages: BrainstormMessage[]): string {
   const docIds = new Set<string>();
@@ -49,7 +50,7 @@ function citedDocIdsKey(messages: BrainstormMessage[]): string {
   return JSON.stringify(Array.from(docIds).sort());
 }
 
-export const ContextGraph: React.FC = () => {
+export const ContextGraph = React.memo(function ContextGraph() {
   const { t } = useTranslation();
   const docIdsKey = useChatStore((s) => citedDocIdsKey(s.messages));
   const [graph, setGraph] = useState<SubgraphData | null>(null);
@@ -184,4 +185,4 @@ export const ContextGraph: React.FC = () => {
       </div>
     </details>
   );
-};
+});
