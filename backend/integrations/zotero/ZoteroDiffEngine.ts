@@ -171,6 +171,19 @@ export class ZoteroDiffEngine {
       }
     }
 
+    // Le résumé, hors de ZOTERO_OWNED_FIELDS (cf. `toCitation`) : comparé
+    // seulement quand Zotero en a un. Un résumé que seul le `.bib` connaît
+    // n'est jamais un retrait. Absent du `.bib` (ou vide), celui de Zotero
+    // est nouveau.
+    const remoteAbstract = remote.customFields?.abstract;
+    const localAbstract = local.customFields?.abstract;
+    if (
+      remoteAbstract &&
+      (!localAbstract || this.normalizeAbstract(localAbstract) !== this.normalizeAbstract(remoteAbstract))
+    ) {
+      modifiedFields.push('abstract');
+    }
+
     // Compare attachments if requested
     // Pièces jointes non lues côté Zotero (`undefined`) : rien à comparer.
     if (options.compareAttachments && remote.zoteroAttachments !== undefined) {
@@ -206,6 +219,38 @@ export class ZoteroDiffEngine {
       .trim()
       .replace(/\s+/g, ' ')
       .replace(/[^\w\s]/g, ''); // Remove punctuation
+  }
+
+  /**
+   * Comparaison du résumé (J3), et de lui seul. `normalizeString` ne garde
+   * que les lettres ASCII : un résumé chinois s'y réduit à rien, un résumé
+   * russe ou grec à ses blancs, et « é » → « è » n'y change rien. Changé
+   * dans Zotero, le résumé passait pour identique et n'était jamais écrit.
+   *
+   * Ici, le texte compte tel quel, casse, ponctuation et symboles compris :
+   * « 35 % » corrigé en « 3,5 % » dans Zotero est un autre résumé. N'est
+   * effacé que ce qui sépare le texte de Zotero de sa relecture dans le
+   * `.bib`, et rien d'autre (sinon la notice serait « modifiée » à chaque
+   * synchronisation) :
+   * - la composition des lettres (NFC) : un « é » composé et un « é »
+   *   décomposé sont la même lettre ;
+   * - les quatre suites que le parseur remplace dans tout champ libre
+   *   (`---` → « — », `--` → « – », ``…'' → guillemets droits), dans son
+   *   ordre ;
+   * - les blancs, comptés pour une espace : sauts de ligne réduits par
+   *   `toCitation` et par le parseur, espace insécable que Better BibTeX
+   *   écrit `~` et que le parseur relit en espace simple.
+   * Le parseur ne change jamais la casse.
+   */
+  private normalizeAbstract(str: string): string {
+    return str
+      .normalize('NFC')
+      .replaceAll('---', '—')
+      .replaceAll('--', '–')
+      .replaceAll('``', '"')
+      .replaceAll("''", '"')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   /**

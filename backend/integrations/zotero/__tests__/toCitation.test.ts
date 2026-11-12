@@ -242,3 +242,36 @@ describe('URL à accolades', () => {
     expect(c.customFields?.url).toBe('https://journalofdigitalhistory.org/en/article/$%7Bimport.meta.env.VITE_BASEURL%7D');
   });
 });
+
+describe('résumé', () => {
+  it('reprend `abstractNote` sous `abstract`, là où la fiche et la recherche du panneau le lisent', () => {
+    const c = zoteroItemToCitation(
+      item('journalArticle', { title: 'Digital Doping for Historians', abstractNote: 'Un article sur l’IA et l’histoire.' }),
+      'Kansteiner_2022'
+    );
+    expect(c.customFields?.abstract).toBe('Un article sur l’IA et l’histoire.');
+    // Jamais `notes`, que l'exporteur écrit en `note` et que biblatex imprime (L05-7).
+    expect(c.notes).toBeUndefined();
+  });
+
+  it('garde le texte tel que Zotero le donne, sans nettoyage LaTeX', () => {
+    const raw = 'Sur {les} archives : 50 % & \\emph{plus}, « $x^2$ » --- <i>fin</i>.';
+    const c = zoteroItemToCitation(item('journalArticle', { title: 'T', abstractNote: raw }), 'K');
+    expect(c.customFields?.abstract).toBe(raw);
+  });
+
+  it('réduit sauts de ligne et tabulations à une espace, comme la relecture du .bib, et garde les espaces insécables', () => {
+    // Une ligne du résumé qui commencerait par « @nom ( » serait comptée comme une entrée par
+    // l'audit du `.bib` (`bibAudit`), et la synchronisation suivante refusée.
+    const raw = 'Premier paragraphe.\n\n@WW1_live (2014) est un compte.\r\n\tSuite\u2028fin\u2029,\u00a0: bis';
+    const c = zoteroItemToCitation(item('journalArticle', { title: 'T', abstractNote: raw }), 'K');
+    expect(c.customFields?.abstract).toBe('Premier paragraphe. @WW1_live (2014) est un compte. Suite fin ,\u00a0: bis');
+  });
+
+  it('n’écrit rien quand Zotero n’a pas de résumé', () => {
+    for (const abstractNote of [undefined, '', '   ']) {
+      const c = zoteroItemToCitation(item('journalArticle', { title: 'T', abstractNote }), 'K');
+      expect(c.customFields?.abstract).toBeUndefined();
+    }
+  });
+});

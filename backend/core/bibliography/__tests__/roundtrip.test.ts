@@ -203,8 +203,8 @@ describe('aller-retour : valeurs difficiles', () => {
     expect(written).not.toContain('note = {Long résumé}');
   });
 
-  // Les deux chemins qui réécrivent le `.bib` du projet : la synchronisation (Zotero ne donne pas
-  // de résumé, `toCitation` ne lit pas `abstractNote`) et la fusion d'un import.
+  // Les deux chemins qui réécrivent le `.bib` du projet : la synchronisation (ici, la notice n'a
+  // pas de résumé dans Zotero : celui du `.bib` reste, J3) et la fusion d'un import.
   it('synchronisé puis réécrit, ou fusionné puis réécrit : résumé et note restent à leur place', async () => {
     const bib = '@book{A_2000, title={T}, zoterokey={AAA}, note={Réimpr.}, Abstract={Long résumé}}';
     const remote = createCitation({ id: 'A_2000', type: 'book', author: '', year: '', title: 'T corrigé', zoteroKey: 'AAA' });
