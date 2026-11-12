@@ -234,6 +234,31 @@ export class ChunkQualityScorer {
   }
 
   /**
+   * L'extrait à garder quand tous sont écartés : celui qui a le plus de mots,
+   * à égalité le meilleur score global, puis le premier. Ne dépend que des
+   * textes et de leur ordre : deux passes sur le même texte gardent le même
+   * extrait.
+   *
+   * Pas le score d'abord : la part de mots distincts baisse d'elle-même avec la
+   * longueur, et une feuille d'appel de 750 mots gardait les 6 derniers, déjà
+   * contenus dans l'extrait précédent (mesuré).
+   */
+  bestChunk<T extends { content: string }>(chunks: readonly T[]): T | undefined {
+    let best: { chunk: T; score: ChunkQualityScore } | undefined;
+    for (const chunk of chunks) {
+      const score = this.scoreChunk(chunk.content);
+      if (
+        !best ||
+        score.wordCount > best.score.wordCount ||
+        (score.wordCount === best.score.wordCount && score.overallScore > best.score.overallScore)
+      ) {
+        best = { chunk, score };
+      }
+    }
+    return best?.chunk;
+  }
+
+  /**
    * Filter an array of chunks by quality
    */
   filterByQuality<T extends { content: string }>(

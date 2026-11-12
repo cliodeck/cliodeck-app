@@ -1212,7 +1212,18 @@ class TropyService {
       if (qualityResult.stats.filteredChunks > 0) {
         console.log(`🎯 [TROPY] Quality filtering for "${source.title}": ${qualityResult.stats.passedChunks}/${qualityResult.stats.totalChunks} passed`);
       }
-      optimizedChunks = qualityResult.passed;
+      // Une source transcrite a au moins un extrait : quand tous sont écartés
+      // (télégramme, courte note, feuille d'appel), le meilleur reste. Sans
+      // lui, le panneau la disait transcrite, mais ni l'assistant ni
+      // `search_tropy` ne la trouvaient jamais (S08-2-0). La synchro suivante
+      // reprend d'elle-même une source restée sans extrait.
+      // Les seuils restent ceux des PDF (20 mots, et une phrase sous 50
+      // mots) : ici, un extrait de moins de 50 mots est toute une source
+      // courte, gardée ainsi, ou la fin d'une source, déjà contenue dans
+      // l'extrait précédent (`DocumentChunker`), qu'il ne sert à rien
+      // d'indexer deux fois.
+      const best = qualityResult.passed.length === 0 ? this.qualityScorer.bestChunk(optimizedChunks) : undefined;
+      optimizedChunks = best ? [best] : qualityResult.passed;
     }
 
     // Deduplication - remove duplicate chunks (works on DocumentChunk type)

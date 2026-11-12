@@ -596,3 +596,120 @@ describe.skipIf(!sqliteAvailable)('écriture pendant la reconnaissance : l’OCR
     expect(result.ocrPerformed).toBe(0);
   });
 });
+
+// MARK: - Filtre de qualité
+
+/**
+ * Le filtre de qualité des PDF s'appliquait tel quel aux archives : une phrase
+ * (une ponctuation finale suivie d'un blanc) et 20 mots exigés de chaque
+ * extrait. Un télégramme (« … STOP »), une liste nominative, une feuille
+ * d'appel ou une courte note sans point n'en avaient aucun : tous leurs
+ * extraits étaient jetés. La source gardait sa transcription, le panneau la
+ * disait transcrite, mais l'assistant et `search_tropy` ne la trouvaient
+ * jamais (S08-2-0). Une source transcrite a désormais au moins un extrait.
+ */
+describe.skipIf(!sqliteAvailable)('filtre de qualité : une source transcrite a au moins un extrait (S08-2-0)', () => {
+  const TELEGRAM =
+    'PREFET MARNE A INTERIEUR PARIS URGENT STOP COLONNES ENNEMIES SIGNALEES AUX ABORDS DE REIMS STOP ' +
+    'POPULATION QUITTE LA VILLE PAR ROUTE EPERNAY STOP DEMANDE INSTRUCTIONS STOP';
+  /** Une légende d'archiviste : seize mots, pas de point. */
+  const NOTE_16 = 'Carte postale envoyée du front par le sergent Martin à sa femme restée seule à Épernay';
+  const HOSTAGES =
+    'Liste des otages désignés par la Kommandantur Lefebvre Henri boulanger rue de Vesle ' +
+    'Dumontier Paul instituteur place Drouet Gosset Marcel cafetier faubourg Cérès Huguin Louis vigneron';
+  /**
+   * Une feuille d'appel : 250 lignes « N k présent », 750 mots trop répétitifs
+   * pour le filtre. Son découpage finit par un extrait de quelques mots, déjà
+   * contenus dans le précédent.
+   */
+  const ROLL_CALL = Array.from({ length: 250 }, (_, i) => `N ${i + 1} présent`).join(' ');
+
+  async function linkArchives(): Promise<void> {
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: [
+        { id: 20, title: 'Télégramme du préfet', notes: [{ text: TELEGRAM }] },
+        { id: 21, title: 'Carte du sergent', notes: [{ text: NOTE_16 }] },
+        { id: 22, title: 'Otages', notes: [{ text: HOSTAGES }] },
+        { id: 23, title: 'Appel', notes: [{ text: ROLL_CALL }] },
+      ],
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+  }
+
+  const sourceTitled = (title: string) => {
+    const source = tropyService.getAllSources().find((s) => s.title === title);
+    if (!source) throw new Error(`source absente : ${title}`);
+    return source;
+  };
+
+  it('télégramme, courte note sans point, liste nominative, feuille d’appel : chacun a au moins un extrait', async () => {
+    await linkArchives();
+    const result = await tropyService.sync(syncOptions);
+    expect(result.success).toBe(true);
+    expect(result.issues).toEqual([]);
+
+    expect(chunksOf(sourceTitled('Télégramme du préfet').id).join(' ')).toContain('DEMANDE INSTRUCTIONS STOP');
+    expect(chunksOf(sourceTitled('Carte du sergent').id).join(' ')).toContain('restée seule à Épernay');
+    expect(chunksOf(sourceTitled('Otages').id).join(' ')).toContain('Dumontier Paul instituteur');
+    // Tous ses extraits sont écartés : le meilleur reste, un seul, et c'est un
+    // extrait plein, pas la fin de quelques mots.
+    const rollCall = chunksOf(sourceTitled('Appel').id);
+    expect(rollCall).toHaveLength(1);
+    expect(rollCall[0].split(/\s+/).length).toBeGreaterThanOrEqual(250);
+  });
+
+  it('un nom de la liste nominative, cherché : la recherche lexicale la place en tête', async () => {
+    await linkArchives();
+    await tropyService.sync(syncOptions);
+    const hostages = sourceTitled('Otages');
+
+    // Le magasin relu sur disque. La question dense est le texte du télégramme :
+    // seul le lexical (BM25, et le bonus du mot exact) peut mettre la liste en tête.
+    const reopened = new PrimarySourcesVectorStore(projectDir);
+    try {
+      const results = reopened.search(new Float32Array(hashedVector(TELEGRAM)), 5, 'Dumontier');
+      expect(results[0]?.chunk.sourceId).toBe(hostages.id);
+    } finally {
+      vi.spyOn(reopened, 'saveHNSWIndex').mockImplementation(() => undefined);
+      reopened.close();
+    }
+  });
+
+  it('une source transcrite restée sans extrait : la synchro suivante l’indexe, sans OCR, sans toucher sa transcription', async () => {
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const photo = path.join(tropyDir, 'telegramme.jpg');
+    fs.writeFileSync(photo, 'jpeg factice');
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: [{ id: 30, title: 'Télégramme du préfet', photos: [{ id: 31, path: photo }] }],
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+    const ocr = vi
+      .spyOn(TropyOCRPipeline.prototype, 'performBatchOCR')
+      .mockResolvedValue({ text: TELEGRAM, confidence: 82, language: 'fra', pageCount: 1 });
+
+    // Une source OCRisée sans extrait en base : l'état que laissait l'ancien
+    // filtre (ici, Ollama arrêté pendant la synchro qui a fait l'OCR).
+    await setProvider('down');
+    await tropyService.sync({ performOCR: true, ocrLanguage: 'fra' });
+    const [source] = tropyService.getAllSources();
+    const transcribed = sourceRow(source.id);
+    expect(transcribed).toMatchObject({ transcription: TELEGRAM, transcription_source: 'tesseract' });
+    expect(chunksOf(source.id)).toEqual([]);
+    expect(ocr).toHaveBeenCalledTimes(1);
+
+    await setProvider('ok');
+    const result = await tropyService.sync({ performOCR: true, ocrLanguage: 'fra' });
+
+    expect(result.issues).toEqual([]);
+    expect(chunksOf(source.id).join(' ')).toContain('DEMANDE INSTRUCTIONS STOP');
+    expect(ocr).toHaveBeenCalledTimes(1);
+    expect(sourceRow(source.id)).toEqual(transcribed);
+  });
+});

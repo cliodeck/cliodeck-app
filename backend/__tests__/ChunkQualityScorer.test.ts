@@ -92,3 +92,38 @@ describe('ChunkQualityScorer — listes et inventaires sans ponctuation (S03-1-2
     }
   });
 });
+
+describe('ChunkQualityScorer — le meilleur extrait quand tous sont écartés', () => {
+  const scorer = new ChunkQualityScorer();
+  /** Une feuille d'appel : « N k présent », de `from` à `to`. */
+  const tally = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => `N ${from + i} présent`).join(' ');
+
+  it('garde le plus long, même quand une courte fin a un meilleur score', () => {
+    // La fin d'une feuille d'appel, déjà dans l'extrait d'avant : moins de
+    // répétitions, donc un meilleur score, et presque rien à retrouver.
+    const body = { content: tally(1, 100) };
+    const tail = { content: tally(99, 100) };
+    expect(scorer.scoreChunk(tail.content).overallScore).toBeGreaterThan(scorer.scoreChunk(body.content).overallScore);
+
+    expect(scorer.bestChunk([body, tail])).toBe(body);
+    expect(scorer.bestChunk([tail, body])).toBe(body);
+  });
+
+  it('à longueur égale, le meilleur score ; à longueur et score égaux, le premier', () => {
+    const prose = { content: `${Array.from({ length: 29 }, (_, i) => word(i)).join(' ')}.` };
+    const repetitive = { content: tally(1, 10).split(' ').slice(0, 29).join(' ') };
+    expect(scorer.scoreChunk(prose.content).wordCount).toBe(scorer.scoreChunk(repetitive.content).wordCount);
+    expect(scorer.scoreChunk(prose.content).overallScore).toBeGreaterThan(scorer.scoreChunk(repetitive.content).overallScore);
+    expect(scorer.bestChunk([repetitive, prose])).toBe(prose);
+
+    const first = { content: 'alpha bravo delta gamma' };
+    const second = { content: 'alpha bravo delta gamma' };
+    expect(scorer.bestChunk([first, second])).toBe(first);
+    expect(scorer.bestChunk([second, first])).toBe(second);
+  });
+
+  it('aucun extrait : rien', () => {
+    expect(scorer.bestChunk([])).toBeUndefined();
+  });
+});
