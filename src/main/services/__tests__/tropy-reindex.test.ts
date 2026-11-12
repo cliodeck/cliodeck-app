@@ -24,6 +24,7 @@ import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-gu
 import { makeTpy } from '../../../../backend/integrations/tropy/__tests__/helpers/make-tpy';
 import { TropyOCRPipeline } from '../../../../backend/integrations/tropy/TropyOCRPipeline';
 import { PrimarySourcesVectorStore } from '../../../../backend/core/vector-store/PrimarySourcesVectorStore';
+import { stripChunkHeader } from '../../../../backend/core/chunking/chunk-text';
 
 const handlers = vi.hoisted(() => new Map<string, (event: unknown, ...args: unknown[]) => unknown>());
 vi.mock('electron', () => ({
@@ -655,11 +656,82 @@ describe.skipIf(!sqliteAvailable)('filtre de qualité : une source transcrite a 
     expect(chunksOf(sourceTitled('Télégramme du préfet').id).join(' ')).toContain('DEMANDE INSTRUCTIONS STOP');
     expect(chunksOf(sourceTitled('Carte du sergent').id).join(' ')).toContain('restée seule à Épernay');
     expect(chunksOf(sourceTitled('Otages').id).join(' ')).toContain('Dumontier Paul instituteur');
-    // Tous ses extraits sont écartés : le meilleur reste, un seul, et c'est un
-    // extrait plein, pas la fin de quelques mots.
+    // Tous ses extraits sont écartés, pour leur part de mots distincts : le
+    // meilleur reste, et c'est un extrait plein, pas la fin de quelques mots.
+    // Les lignes des autres extraits restent hors de l'index : le critère des
+    // mots distincts est une question posée à l'auteur, pas une règle voulue.
     const rollCall = chunksOf(sourceTitled('Appel').id);
-    expect(rollCall).toHaveLength(1);
-    expect(rollCall[0].split(/\s+/).length).toBeGreaterThanOrEqual(250);
+    expect(rollCall.length).toBeGreaterThanOrEqual(1);
+    expect(Math.max(...rollCall.map((chunk) => chunk.split(/\s+/).length))).toBeGreaterThanOrEqual(250);
+  });
+
+  /** Des noms tous distincts, d'une majuscule. */
+  const name = (n: number) => {
+    const w = word(n);
+    return w[0].toUpperCase() + w.slice(1);
+  };
+
+  it('une liste nominative à tirets (« Nom Prénom – métier – ») : tous ses noms sont dans l’index', async () => {
+    // Le découpage compte les tirets comme des mots, pas le filtre : la fin de
+    // la liste, qui dépasse l'extrait précédent, comptait moins de 50 mots
+    // pour le filtre, sans phrase, et les derniers noms sortaient de l'index.
+    const sizes = [60, 62, 64];
+    const lists = sizes.map((size, s) =>
+      Array.from({ length: size }, (_, i) => {
+        const n = 3000 + 300 * s + 3 * i;
+        return { surname: name(n), entry: `${name(n)} ${name(n + 1)} – ${word(n + 2)} –` };
+      })
+    );
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: lists.map((list, s) => ({
+        id: 40 + s,
+        title: `Liste ${s}`,
+        notes: [{ text: list.map((e) => e.entry).join(' ') }],
+      })),
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+
+    expect((await tropyService.sync(syncOptions)).success).toBe(true);
+
+    lists.forEach((list, s) => {
+      const indexed = new Set(chunksOf(sourceTitled(`Liste ${s}`).id).join(' ').split(/\s+/));
+      expect(list.filter((e) => !indexed.has(e.surname)).map((e) => e.surname)).toEqual([]);
+    });
+  });
+
+  it('une longue liste sans ponctuation, sur plusieurs extraits : tous ses noms sont dans l’index, et aucun extrait n’en répète un autre', async () => {
+    // 260 lignes « Nom Prénom métier » : 780 mots, et 3 de titre. Le découpage
+    // donne trois extraits, puis une fin de 33 mots tout entière dans le
+    // troisième, qui ne sert à rien.
+    const entries = Array.from({ length: 260 }, (_, i) => ({ surname: name(4000 + 3 * i), n: 4000 + 3 * i }));
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: [
+        {
+          id: 50,
+          title: 'Liste longue',
+          notes: [{ text: entries.map((e) => `${e.surname} ${name(e.n + 1)} ${word(e.n + 2)}`).join(' ') }],
+        },
+      ],
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+
+    expect((await tropyService.sync(syncOptions)).success).toBe(true);
+
+    const chunks = chunksOf(sourceTitled('Liste longue').id).map(stripChunkHeader);
+    expect(chunks.length).toBeGreaterThan(1);
+    const indexed = new Set(chunks.join(' ').split(/\s+/));
+    expect(entries.filter((e) => !indexed.has(e.surname)).map((e) => e.surname)).toEqual([]);
+    chunks.forEach((chunk, i) => {
+      expect(chunks.some((other, j) => j !== i && other.includes(chunk))).toBe(false);
+    });
   });
 
   it('un nom de la liste nominative, cherché : la recherche lexicale la place en tête', async () => {
