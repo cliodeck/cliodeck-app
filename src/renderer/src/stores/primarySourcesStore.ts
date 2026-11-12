@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { TropySyncIssue } from '@backend/integrations/tropy/TropySync';
 import { transcriptionSourceOfFormat } from '@backend/integrations/tropy/transcription-provenance';
 import { projectLifecycle } from '../lifecycle/projectLifecycle';
+import { useTropyReembedStore } from './tropyReembedStore';
 
 // MARK: - Types
 
@@ -342,7 +343,14 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
     try {
       const result = await window.electron.tropy.sync(options);
       // Le bilan d'une passe lancée pour un autre projet ne s'affiche pas ici.
-      if (startedAt === generation) set({ syncIssues: result.issues ?? [] });
+      if (startedAt === generation) {
+        set({ syncIssues: result.issues ?? [] });
+        // Le message de ce refus renvoie au bouton « Réindexer » du bandeau : fermé par « Plus
+        // tard », il revient (L06-9).
+        if (result.issues?.some((issue: TropySyncIssue) => issue.code === 'embedding-space-changed')) {
+          void useTropyReembedStore.getState().reveal();
+        }
+      }
 
       if (result.success) {
         set((state) => ({ transcriptionRevision: state.transcriptionRevision + 1 }));
@@ -600,6 +608,8 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
           result.reindexCode === 'no-embedding-provider' || result.reindexCode === 'embedding-space-changed'
             ? result.reindexCode
             : 'embedding-failed';
+        // Même renvoi au bouton « Réindexer » du bandeau que la synchro (L06-9).
+        if (notIndexed === 'embedding-space-changed') void useTropyReembedStore.getState().reveal();
         return { success: true, notIndexed };
       }
       return { success: true };

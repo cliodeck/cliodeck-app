@@ -338,6 +338,15 @@ describe.skipIf(!sqliteAvailable)('tropyService.search : une vraie panne lève',
     expect(results[0].chunk.content).toContain('grève générale du port de Nantes');
   });
 
+  it('une question ne lit pas la dimension majoritaire des extraits : 130 ms par question sur 40 650 extraits, contre 0,1 ms pour savoir qu’il y en a un (L06-9)', async () => {
+    await linkAndIndex();
+    const { PrimarySourcesVectorStore } = await import('../../../../backend/core/vector-store/PrimarySourcesVectorStore.js');
+    const majority = vi.spyOn(PrimarySourcesVectorStore.prototype, 'embeddingDimensions');
+    const results = await tropyService.search(question());
+    expect(results.length).toBeGreaterThan(0);
+    expect(majority).not.toHaveBeenCalled();
+  });
+
   it('archives indexées, Ollama arrêté : la recherche lève', async () => {
     await linkAndIndex();
     provider.mode = 'down';

@@ -1476,7 +1476,7 @@
       "title": "Sources primaires à réindexer pour le nouveau modèle de recherche sémantique",
       "message": "Le modèle de recherche sémantique (embeddings) a changé dans les Paramètres : {{sources}} source(s) primaire(s) ont encore des extraits calculés par l'ancien, en vecteurs de {{expected}} dimensions ; le modèle actuel en produit {{actual}}. La recherche par le sens ne peut pas les comparer à vos questions. « Réindexer » recalcule leurs {{chunks}} extrait(s) actuels avec le nouveau modèle ; chaque source est redécoupée, et ce nombre peut changer. Les transcriptions sont gardées, et l'OCR n'est pas refait.",
       "action": "Réindexer",
-      "later": "Plus tard : ce message reviendra à la prochaine ouverture du projet",
+      "later": "Plus tard : ce message reviendra à la prochaine ouverture du projet, ou dès qu'une synchronisation ou une transcription ne pourra pas être indexée pour ce changement de modèle",
       "confirmTitle": "Réindexer les sources primaires",
       "confirm": "Réindexer {{sources}} source(s) primaire(s) avec le nouveau modèle de recherche sémantique ? Leurs {{chunks}} extrait(s) actuels seront recalculés, source par source, en arrière-plan : avec Ollama, cela peut prendre longtemps sur un grand corpus. Les transcriptions sont gardées, et l'OCR n'est pas refait. Si vous fermez le projet ou quittez ClioDeck avant la fin, la réindexation s'arrête, et elle vous sera proposée de nouveau à la prochaine ouverture du projet pour les sources restantes.",
       "noProvider": "La réindexation n'a pas pu démarrer : aucun modèle de recherche sémantique n'est disponible (vérifiez les Paramètres).",

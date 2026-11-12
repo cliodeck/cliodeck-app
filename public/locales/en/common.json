@@ -1476,7 +1476,7 @@
       "title": "Primary sources to reindex for the new semantic search model",
       "message": "The semantic search model (embeddings) was changed in Settings: {{sources}} primary source(s) still have extracts computed by the previous one, as vectors of {{expected}} dimensions; the current model produces {{actual}}. Semantic search cannot compare them with your questions. “Reindex” recomputes their {{chunks}} current extract(s) with the new model; each source is split again, and this number may change. Transcriptions are kept, and OCR is not redone.",
       "action": "Reindex",
-      "later": "Later: this message will come back the next time the project opens",
+      "later": "Later: this message will come back the next time the project opens, or as soon as a sync or a transcription cannot be indexed because of this model change",
       "confirmTitle": "Reindex the primary sources",
       "confirm": "Reindex {{sources}} primary source(s) with the new semantic search model? Their {{chunks}} current extract(s) will be recomputed, source by source, in the background: with Ollama, this can take a long time on a large corpus. Transcriptions are kept, and OCR is not redone. If you close the project or quit ClioDeck before the end, reindexing stops, and it will be offered again for the remaining sources the next time the project opens.",
       "noProvider": "Reindexing could not start: no semantic search model is available (check Settings).",

@@ -124,8 +124,9 @@ const { projectManager } = await import('../../../../../main/services/project-ma
 setupTropyHandlers();
 
 const INITIAL_STORE = usePrimarySourcesStore.getState();
-// Attendre le résultat, pas un délai : cette borne n'est qu'un garde-fou pour une CI lente.
+// Attendre le résultat, pas un délai : ces bornes ne sont que des garde-fous pour une CI lente.
 vi.setConfig({ testTimeout: 30_000 });
+const GUARD = { timeout: 10_000 };
 
 const SYLLABLES = ['ba', 'cor', 'di', 'fu', 'gal', 'le', 'mi', 'nor', 'pa', 'ru', 'sel', 'to', 'van', 'ze', 'qui', 'ran', 'tel', 'mor'];
 function word(n: number): string {
@@ -142,6 +143,17 @@ function noteOf(offset: number): string {
 
 let root: string;
 let projectDir: string;
+
+const ITEMS = [
+  { id: 10, title: 'Arrêté du maire', notes: [{ text: noteOf(0) }] },
+  { id: 20, title: 'Lettre à Yves', notes: [{ text: noteOf(1000) }] },
+  { id: 30, title: 'Rapport du commissaire', notes: [{ text: noteOf(2000) }] },
+];
+
+/** Le projet Tropy lié, avec ses trois sources, plus celles qu'on y ajoute. */
+function writeTpy(added: typeof ITEMS = []): string {
+  return makeTpy(path.join(root, 'tropy'), { projectId: 'tropy-greves', name: 'Grèves nantaises', items: [...ITEMS, ...added] });
+}
 
 const project = (dir: string) => ({
   id: path.basename(dir),
@@ -205,7 +217,6 @@ const notice = () => screen.queryByText(TITLE);
 beforeEach(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-l069-panneau-'));
   projectDir = path.join(root, 'projet');
-  const tropyDir = path.join(root, 'tropy');
   fs.mkdirSync(projectDir);
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -216,15 +227,7 @@ beforeEach(async () => {
   h.invoked.length = 0;
 
   // Un projet synchronisé avec l'ancien modèle : trois sources, leurs extraits en 8 dimensions.
-  const tpy = makeTpy(tropyDir, {
-    projectId: 'tropy-greves',
-    name: 'Grèves nantaises',
-    items: [
-      { id: 10, title: 'Arrêté du maire', notes: [{ text: noteOf(0) }] },
-      { id: 20, title: 'Lettre à Yves', notes: [{ text: noteOf(1000) }] },
-      { id: 30, title: 'Rapport du commissaire', notes: [{ text: noteOf(2000) }] },
-    ],
-  });
+  const tpy = writeTpy();
   await tropyService.init(projectDir);
   expect((await tropyService.openProject(tpy)).success).toBe(true);
   expect((await tropyService.sync({ performOCR: false, ocrLanguage: 'fra' })).issues).toEqual([]);
@@ -323,6 +326,44 @@ describe.skipIf(!sqliteAvailable)('Sources primaires : après un changement de m
     await openProject(projectDir);
     expect(await screen.findByText(TITLE)).toBeTruthy();
     expect(h.texts).toBe(0);
+  });
+
+  it('« Plus tard », puis une synchro qui ne peut pas indexer une pièce ajoutée : le bandeau revient, puisque le message de la synchro renvoie à « Réindexer »', async () => {
+    render(<PrimarySourcesPanel />);
+    await openProject(projectDir);
+    await screen.findByText(TITLE);
+    fireEvent.click(screen.getByRole('button', { name: /Plus tard/ }));
+    expect(notice()).toBeNull();
+
+    // Une pièce ajoutée dans Tropy, synchronisée avec le nouveau modèle : rien n'est écrit dans l'index.
+    writeTpy([{ id: 40, title: 'Affiche de la Bourse du travail', notes: [{ text: noteOf(3000) }] }]);
+    let issues: unknown;
+    await act(async () => {
+      issues = (await usePrimarySourcesStore.getState().syncTPY({ performOCR: false, ocrLanguage: 'fra' })).issues;
+    });
+    expect(issues).toEqual([{ code: 'embedding-space-changed', sources: 1, expected: 8, actual: 16 }]);
+
+    expect(await screen.findByText(TITLE, {}, GUARD)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Réindexer/ })).toBeTruthy();
+    expect(chunksInBase().dimensions).toEqual([8]);
+  });
+
+  it('« Plus tard », puis une transcription qui ne peut pas être indexée : le bandeau revient, puisque son message renvoie à « Réindexer »', async () => {
+    render(<PrimarySourcesPanel />);
+    await openProject(projectDir);
+    await screen.findByText(TITLE);
+    fireEvent.click(screen.getByRole('button', { name: /Plus tard/ }));
+    expect(notice()).toBeNull();
+
+    const [source] = tropyService.getAllSources();
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await usePrimarySourcesStore.getState().updateTranscription(source.id, noteOf(5000), 'manual');
+    });
+    expect(outcome).toEqual({ success: true, notIndexed: 'embedding-space-changed' });
+
+    expect(await screen.findByText(TITLE, {}, GUARD)).toBeTruthy();
+    expect(chunksInBase().dimensions).toEqual([8]);
   });
 
   it('un autre projet que l’ouvert : ni proposition lue, ni réindexation lancée (project-changed)', async () => {

@@ -2860,6 +2860,19 @@ export class PrimarySourcesVectorStore {
   }
 
   /**
+   * Au moins un extrait embarqué. Pour la recherche, qui le demande à chaque question : la
+   * dimension majoritaire (`getEmbeddingDimension`) parcourt tous les extraits, environ 130 ms de
+   * blocage du processus principal sur 40 650, contre une première ligne trouvée ici.
+   */
+  hasEmbeddedChunks(): boolean {
+    return (
+      this.db
+        .prepare('SELECT 1 FROM tropy_chunks WHERE embedding IS NOT NULL AND length(embedding) > 0 LIMIT 1')
+        .get() !== undefined
+    );
+  }
+
+  /**
    * Ferme la connexion à la base de données
    */
   close(): void {

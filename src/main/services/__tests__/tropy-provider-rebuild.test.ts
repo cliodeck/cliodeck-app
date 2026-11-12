@@ -41,7 +41,7 @@ vi.mock('../../../../backend/core/vector-store/PrimarySourcesVectorStore.js', ()
   PrimarySourcesVectorStore: class {
     getTropyProject = () => null;
     // Des archives déjà indexées : sans extrait, la recherche n'embarque pas la question (E2).
-    getEmbeddingDimension = () => 768;
+    hasEmbeddedChunks = () => true;
     getIndexStats = () => ({ hnswSize: 0, bm25Size: 0, hnswDimension: 0 });
     search = () => [];
     getSource = (id: string) => ({

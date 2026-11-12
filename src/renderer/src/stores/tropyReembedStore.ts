@@ -15,7 +15,10 @@ import { useProjectStore } from './projectStore';
 interface TropyReembedState {
   /** Ce que le main propose de réindexer pour le projet ouvert, `null` sans rien à proposer. */
   proposal: TropyReembedProposal | null;
-  /** L'historien a fermé le bandeau : il revient à la prochaine ouverture du projet. */
+  /**
+   * L'historien a fermé le bandeau : il revient à la prochaine ouverture du projet, ou dès qu'une
+   * synchro ou une transcription n'a pas pu être indexée pour ce changement de modèle (`reveal`).
+   */
   dismissed: boolean;
   /** Relit la proposition du main pour le projet à l'écran. */
   refresh: () => Promise<void>;
@@ -26,6 +29,12 @@ interface TropyReembedState {
    */
   reembed: () => Promise<'started' | 'no-embedding-provider' | 'not-started'>;
   dismiss: () => void;
+  /**
+   * Rouvre le bandeau fermé par « Plus tard » et relit la proposition : une synchro ou une
+   * transcription n'a pas pu être indexée pour ce changement de modèle, et son message renvoie au
+   * bouton « Réindexer » du bandeau. Fermé, le bouton cité serait introuvable.
+   */
+  reveal: () => Promise<void>;
 }
 
 export const useTropyReembedStore = create<TropyReembedState>((set, get) => ({
@@ -66,6 +75,11 @@ export const useTropyReembedStore = create<TropyReembedState>((set, get) => ({
   },
 
   dismiss: () => set({ dismissed: true }),
+
+  reveal: async () => {
+    set({ dismissed: false });
+    await get().refresh();
+  },
 }));
 
 projectLifecycle.onReset('tropyReembed', () => useTropyReembedStore.setState({ proposal: null, dismissed: false }));

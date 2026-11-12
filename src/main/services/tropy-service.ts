@@ -950,7 +950,7 @@ class TropyService {
     // encore : rien à trouver, donc rien à embarquer. Lu avant d'exiger un
     // fournisseur, sinon un Ollama arrêté ferait passer pour en panne des
     // archives que le projet n'a pas.
-    if (this.vectorStore.getEmbeddingDimension() === null) {
+    if (!this.vectorStore.hasEmbeddedChunks()) {
       console.log('📜 [TROPY-SERVICE] No embedded chunk, nothing to search');
       return [];
     }
@@ -1451,7 +1451,15 @@ class TropyService {
     await Promise.all([...this.reindexRuns.keys()]);
   }
 
-  /** La dimension du fournisseur d'embeddings, s'il y en a un et qu'il la connaît. */
+  /**
+   * La dimension du fournisseur d'embeddings, s'il y en a un et qu'il la connaît. C'est celle qu'il
+   * déclare : Ollama, OpenAI et Mistral refusent tout vecteur d'une autre taille, et Gemini comme le
+   * modèle embarqué n'ont qu'un modèle, de dimension connue. Un vecteur écrit a donc toujours cette
+   * dimension (`tropy-declared-dimension.test.ts`). Un modèle Ollama hors de la table de l'adaptateur
+   * (bge-m3) est déclaré en 768 et ne rend rien (S05-1-14, L07-12) ; quand L07-12 lui fera adopter
+   * la dimension de sa première réponse, la proposition (Q29) et le filtre de la passe d'ouverture
+   * (J7) devront lire celle-là, et ne rien conclure d'une dimension seulement supposée.
+   */
   private embeddingDimension(): number | undefined {
     const dimension = this.embedding?.dimension;
     return dimension && dimension > 0 ? dimension : undefined;

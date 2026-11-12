@@ -1476,7 +1476,7 @@
       "title": "Primärquellen für das neue Modell der semantischen Suche neu zu indexieren",
       "message": "Das Modell der semantischen Suche (Embeddings) wurde in den Einstellungen geändert: {{sources}} Primärquelle(n) haben noch Auszüge, die mit dem vorherigen berechnet wurden, als Vektoren mit {{expected}} Dimensionen; das aktuelle Modell erzeugt {{actual}}. Die semantische Suche kann sie nicht mit Ihren Fragen vergleichen. „Neu indexieren“ berechnet ihre {{chunks}} aktuellen Auszüge mit dem neuen Modell neu; jede Quelle wird neu zerlegt, und diese Zahl kann sich ändern. Die Transkriptionen bleiben erhalten, und die OCR wird nicht wiederholt.",
       "action": "Neu indexieren",
-      "later": "Später: Diese Meldung erscheint beim nächsten Öffnen des Projekts wieder",
+      "later": "Später: Diese Meldung erscheint beim nächsten Öffnen des Projekts wieder, oder sobald eine Synchronisierung oder eine Transkription wegen dieses Modellwechsels nicht indexiert werden kann",
       "confirmTitle": "Primärquellen neu indexieren",
       "confirm": "{{sources}} Primärquelle(n) mit dem neuen Modell der semantischen Suche neu indexieren? Ihre {{chunks}} aktuellen Auszüge werden Quelle für Quelle im Hintergrund neu berechnet: Mit Ollama kann das bei einem großen Korpus lange dauern. Die Transkriptionen bleiben erhalten, und die OCR wird nicht wiederholt. Wenn Sie das Projekt schließen oder ClioDeck vor dem Ende beenden, hält die Neuindexierung an und wird Ihnen beim nächsten Öffnen des Projekts für die restlichen Quellen erneut angeboten.",
       "noProvider": "Die Neuindexierung konnte nicht starten: Es ist kein Modell für die semantische Suche verfügbar (prüfen Sie die Einstellungen).",

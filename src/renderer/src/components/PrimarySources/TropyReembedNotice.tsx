@@ -10,7 +10,8 @@ import { useDialogStore } from '../../stores/dialogStore';
  * les comparer aux questions, et l'assistant le dit (« Archives : échec »). « Réindexer » les
  * recalcule avec le nouveau, après confirmation, par la passe de la réindexation complète (H7) ;
  * transcriptions gardées, OCR non refait. Fermé, le bandeau revient à la prochaine ouverture du
- * projet, tant que des sources restent à réindexer.
+ * projet, tant que des sources restent à réindexer, ou dès qu'une synchro ou une transcription n'a
+ * pas pu être indexée pour ce changement de modèle : leur message renvoie à « Réindexer ».
  *
  * Le nombre d'extraits dit est celui d'avant la passe : chaque source est redécoupée, et le compte
  * peut changer.
