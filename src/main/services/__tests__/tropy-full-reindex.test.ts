@@ -952,6 +952,146 @@ describe.skipIf(!sqliteAvailable)('modèle d’embeddings changé de dimension (
     expect(proposalSignals(since)).toBeGreaterThan(0);
   });
 
+  /** L'index des sources primaires tel qu'il est sur disque, graphe et métadonnées. */
+  function indexOnDisk(): { index: Buffer; meta: string } {
+    const file = path.join(projectDir, '.cliodeck', 'primary-hnsw.index');
+    return { index: fs.readFileSync(file), meta: fs.readFileSync(`${file}.meta.json`, 'utf-8') };
+  }
+
+  it('le nouveau modèle ne répond pas (choisi dans les Paramètres, pas encore installé) : la passe s’arrête sans toucher à l’index de l’ancien, et revenu à l’ancien modèle, la recherche par le sens sert toutes les archives sans reconstruction', async () => {
+    await baseAt1024ThenModelAt768(false);
+    const all = [ARRETE, LETTRE_X, RAPPORT].flatMap((title) => chunks(sourceId(title)));
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+    const before = indexOnDisk();
+    // Tout texte échoue, comme Ollama devant un modèle absent (404, « try pulling it first »).
+    await setProvider('fail-on', '');
+    const since = sent.length;
+
+    expect(await tropyService.requestReembed()).toEqual({ started: true });
+    await vi.waitFor(() => expect(reindexEvents(since).at(-1)).toMatchObject({ phase: 'stopped' }), WAIT);
+    await tropyService.whenFullReindexSettled();
+
+    expect(reindexEvents(since).at(-1)).toEqual({
+      phase: 'stopped',
+      cause: 'model-change',
+      reason: 'embedding-failed',
+      total: 3,
+      remaining: 3,
+    });
+    // L'index de l'ancien modèle n'a pas été remplacé par un index vide, ni sur disque ni en mémoire.
+    expect(indexOnDisk()).toEqual(before);
+    expect(dimensionsInBase()).toEqual([1024]);
+    expect(tropyService.getReembedProposal()).toEqual({ sources: 3, chunks: all.length, expected: 1024, actual: 768 });
+
+    // L'historien revient à l'ancien modèle.
+    provider.dimension = 1024;
+    await setProvider('ok');
+    const slices = vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildIndexesInSlices');
+    const sinceBack = sent.length;
+    await tropyService.rebuildProviders({ embeddingChanged: true });
+    await tropyService.whenFullReindexSettled();
+
+    expect(tropyService.getReembedProposal()).toBeNull();
+    for (const c of all) expect(denseIds(c.content)).toContain(c.id);
+    expect(slices).not.toHaveBeenCalled();
+    expect(reindexEvents(sinceBack)).toEqual([]);
+    expect(provider.texts).toEqual([]);
+  });
+
+  it('revenu au modèle d’avant après une réindexation arrêtée : l’index repasse à sa dimension sans rien réembarquer, en le disant, et une pièce ajoutée ensuite dans Tropy s’indexe sans refus', async () => {
+    await baseAt1024ThenModelAt768(false);
+    const [arrete, lettre, rapport] = [ARRETE, LETTRE_X, RAPPORT].map(sourceId);
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+    // La passe confirmée refait l'arrêté, puis le fournisseur tombe à la lettre.
+    await setProvider('fail-on', LETTRE_X);
+    expect(await tropyService.requestReembed()).toEqual({ started: true });
+    await vi.waitFor(() => expect(reindexEvents().at(-1)).toMatchObject({ phase: 'stopped' }), WAIT);
+    await tropyService.whenFullReindexSettled();
+    expect(dimensionsInBase()).toEqual([768, 1024]);
+    const stillAt1024 = [...chunks(lettre), ...chunks(rapport)];
+
+    // L'historien revient au modèle d'avant, celui de la plupart des archives.
+    provider.dimension = 1024;
+    await setProvider('ok');
+    const blocking = vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildAllIndexes');
+    const since = sent.length;
+    await tropyService.rebuildProviders({ embeddingChanged: true });
+    await tropyService.whenFullReindexSettled();
+
+    expect(provider.texts).toEqual([]);
+    expect(reindexEvents(since)).toEqual([
+      { phase: 'rebuilding-index', cause: 'model-change', missing: stillAt1024.length },
+      { phase: 'index-rebuilt', cause: 'model-change' },
+    ]);
+    for (const c of stillAt1024) expect(denseIds(c.content)).toContain(c.id);
+    expect(blocking).not.toHaveBeenCalled();
+    expect(tropyService.getReembedProposal()).toEqual({
+      sources: 1,
+      chunks: chunks(arrete).length,
+      expected: 768,
+      actual: 1024,
+    });
+
+    // Une pièce ajoutée dans Tropy, puis synchronisée.
+    makeTpy(tropyDir, {
+      projectId: 'projet-tropy-greves',
+      name: 'Grèves nantaises',
+      items: [
+        ...items(),
+        {
+          id: 40,
+          title: 'Télégramme du préfet',
+          notes: [
+            {
+              text: 'Télégramme du préfet au ministre de l’Intérieur annonçant l’arrivée de deux escadrons de dragons à Nantes le 23 mars 1907, et demandant des instructions sur la protection des quais.',
+            },
+          ],
+        },
+      ],
+    });
+    const result = await tropyService.sync({ performOCR: false, ocrLanguage: 'fra' });
+
+    expect(result.issues).toEqual([]);
+    const telegramme = chunks(sourceId('Télégramme du préfet'));
+    expect(telegramme.length).toBeGreaterThan(0);
+    for (const c of telegramme) expect(denseIds(c.content)).toContain(c.id);
+  });
+
+  it('le modèle changé de nouveau pendant la passe confirmée : elle s’arrête, sans réembarquer les archives avec le modèle revenu, et l’index repasse à la dimension de celui-ci', async () => {
+    await baseAt1024ThenModelAt768(false);
+    const all = [ARRETE, LETTRE_X, RAPPORT].flatMap((title) => chunks(sourceId(title)));
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+    // L'historien revient au modèle d'avant pendant que l'index passe au nouveau, avant le premier
+    // extrait écrit. L'index n'a alors aucun extrait : un vecteur de l'ancien modèle y était
+    // accepté (`adoptEmbeddingDimension`), et la passe refaisait tout le corpus avec lui.
+    const rebuildInSlices = PrimarySourcesVectorStore.prototype.rebuildIndexesInSlices;
+    vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildIndexesInSlices').mockImplementationOnce(async function (
+      this: InstanceType<typeof PrimarySourcesVectorStore>,
+      ...args: Parameters<typeof rebuildInSlices>
+    ) {
+      provider.dimension = 1024;
+      await tropyService.rebuildProviders({ embeddingChanged: true });
+      return rebuildInSlices.apply(this, args);
+    });
+    await setProvider('ok');
+
+    expect(await tropyService.requestReembed()).toEqual({ started: true });
+    await tropyService.whenFullReindexSettled();
+    // Le contrôle de l'index lancé par le changement de modèle, pendant cette attente.
+    await tropyService.whenFullReindexSettled();
+
+    // Seul le premier extrait de l'arrêté est parti, pour s'assurer que le modèle répondait.
+    expect(embeddedSequence(provider.texts)).toEqual(['arrete']);
+    expect(provider.texts).toHaveLength(1);
+    expect(reindexEvents().filter((e) => e.phase === 'done')).toEqual([]);
+    expect(dimensionsInBase()).toEqual([1024]);
+    expect(tropyService.getReembedProposal()).toBeNull();
+    for (const c of all) expect(denseIds(c.content)).toContain(c.id);
+  });
+
   it('aucun fournisseur : rien n’est proposé, et le geste ne lance rien', async () => {
     await baseAt1024ThenModelAt768();
     await setProvider('absent');

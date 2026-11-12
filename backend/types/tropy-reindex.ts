@@ -39,11 +39,12 @@ export type TropyReindexStatus =
    * Plus aucune source à refaire, mais l'index de recherche relu du disque n'a pas `missing`
    * extraits de la base : l'app a été quittée sans l'enregistrer, par exemple pendant la
    * reconstruction finale d'une passe. Il se reconstruit par tranches ; d'ici là, la recherche par
-   * le sens ne trouve pas ces extraits.
+   * le sens ne trouve pas ces extraits. `cause: 'model-change'` : l'index n'a pas été perdu, il
+   * passe à la dimension du modèle d'embeddings que les Paramètres viennent de choisir.
    */
-  | { phase: 'rebuilding-index'; missing: number }
+  | { phase: 'rebuilding-index'; cause?: 'model-change'; missing: number }
   /** L'index de recherche reconstruit. Le renderer le dit un moment, puis l'efface. */
-  | { phase: 'index-rebuilt' };
+  | { phase: 'index-rebuilt'; cause?: 'model-change' };
 
 /**
  * La réindexation que le panneau des sources primaires propose après un changement de modèle

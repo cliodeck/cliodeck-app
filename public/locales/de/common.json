@@ -1486,7 +1486,9 @@
       "finishing": "Neuindexierung der Primärquellen für das neue Modell der semantischen Suche: {{total}} / {{total}} Quelle(n) neu erstellt. Letzter Schritt: Der Suchindex wird neu aufgebaut; der Assistent nutzt bereits die neuen Auszüge.",
       "stoppedNoProvider": "Neuindexierung der Primärquellen für das neue Modell unterbrochen: Es ist kein Modell für die semantische Suche verfügbar (prüfen Sie die Einstellungen). {{remaining}} Quelle(n) sind noch neu zu indexieren; der Assistent findet sie nur über ihre Wörter. Die Neuindexierung wird Ihnen erneut angeboten, sobald ein Modell verfügbar ist.",
       "stoppedFailed": "Neuindexierung der Primärquellen für das neue Modell unterbrochen: Das Modell der semantischen Suche hat nicht geantwortet (prüfen Sie in den Einstellungen, ob es verfügbar ist). {{remaining}} Quelle(n) sind noch neu zu indexieren; der Assistent findet sie nur über ihre Wörter. Die Neuindexierung wird Ihnen unten erneut angeboten, ebenso beim nächsten Öffnen des Projekts.",
-      "done": "Neuindexierung der Primärquellen für das neue Modell der semantischen Suche abgeschlossen: {{total}} Quelle(n) neu erstellt."
+      "done": "Neuindexierung der Primärquellen für das neue Modell der semantischen Suche abgeschlossen: {{total}} Quelle(n) neu erstellt.",
+      "rebuildingIndex": "Das Modell der semantischen Suche wurde in den Einstellungen geändert: Der Suchindex der Primärquellen wird für dieses Modell neu aufgebaut, {{missing}} Auszüge sind wieder aufzunehmen. Bis dahin findet die semantische Suche sie nicht; der Assistent findet sie nur über ihre Wörter.",
+      "indexRebuilt": "Suchindex der Primärquellen für das aktuelle Modell der semantischen Suche neu aufgebaut: Die semantische Suche findet die mit diesem Modell berechneten Auszüge wieder."
     }
   },
   "modes": {

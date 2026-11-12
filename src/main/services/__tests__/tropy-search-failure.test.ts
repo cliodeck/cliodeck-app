@@ -347,6 +347,23 @@ describe.skipIf(!sqliteAvailable)('tropyService.search : une vraie panne lève',
     expect(majority).not.toHaveBeenCalled();
   });
 
+  it('archives indexées par un autre modèle : ni la question ni la proposition de réindexer ne lisent la dimension majoritaire, à chaque question tant que la réindexation n’a pas eu lieu (L06-9)', async () => {
+    await linkAndIndex();
+    provider.mode = 'other-model';
+    const { PrimarySourcesVectorStore } = await import('../../../../backend/core/vector-store/PrimarySourcesVectorStore.js');
+    const majority = vi.spyOn(PrimarySourcesVectorStore.prototype, 'embeddingDimensions');
+
+    for (let i = 0; i < 2; i++) {
+      await expect(tropyService.search(question())).rejects.toMatchObject({
+        kind: 'dimension',
+        expected: DIMENSION,
+        actual: OTHER_DIMENSION,
+      });
+    }
+    expect(tropyService.getReembedProposal()).toMatchObject({ sources: 1, expected: DIMENSION, actual: OTHER_DIMENSION });
+    expect(majority).not.toHaveBeenCalled();
+  });
+
   it('archives indexées, Ollama arrêté : la recherche lève', async () => {
     await linkAndIndex();
     provider.mode = 'down';

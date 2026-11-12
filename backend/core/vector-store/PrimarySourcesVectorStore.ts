@@ -1266,6 +1266,27 @@ export class PrimarySourcesVectorStore {
   }
 
   /**
+   * Une dimension d'extraits embarqués autre que `dimension`, `null` sans aucun : la première
+   * trouvée, sans parcourir toute la base (L06-9). La recherche la demande à chaque question tant
+   * que la réindexation proposée n'a pas eu lieu, ce qui peut durer après « Plus tard », et la
+   * proposition à chaque ouverture du projet : la dimension majoritaire (`embeddingDimensions`)
+   * parcourt et groupe tous les extraits, environ 136 ms de blocage du processus principal sur
+   * 40 650 (mesuré). Une base qui en mêle plus de deux (deux changements de modèle sans
+   * réindexation) rend l'une d'elles, pas forcément la plus représentée.
+   */
+  otherEmbeddingDimension(dimension: number): number | null {
+    const bytes = this.db
+      .prepare(
+        `SELECT length(embedding) FROM tropy_chunks
+         WHERE embedding IS NOT NULL AND length(embedding) > 0 AND length(embedding) != ?
+         LIMIT 1`
+      )
+      .pluck()
+      .get(dimension * 4) as number | undefined;
+    return bytes === undefined ? null : bytes / 4;
+  }
+
+  /**
    * Refuse, avant toute écriture, des vecteurs d'une autre dimension que le corpus (L06-9) : le
    * modèle d'embeddings a changé depuis leur calcul. Écrits, ils réinitialisaient l'index en
    * mémoire, et tous les vecteurs de l'ancienne dimension sortaient de la recherche (S02-1-11).
@@ -1689,10 +1710,11 @@ export class PrimarySourcesVectorStore {
     // été embarqué avec un autre modèle (S02-1-11). La même erreur typée que les PDF (L04-7), avant
     // hnswlib, qui levait son erreur brute, ou rien du tout quand l'index était vide : la recherche
     // rendait alors les seuls résultats lexicaux, sans rien dire. Le corpus est en panne, pas vide ;
-    // sa réindexation est proposée dans le panneau des sources primaires (Q29).
+    // sa réindexation est proposée dans le panneau des sources primaires (Q29). Une première ligne
+    // lue, jamais la dimension majoritaire : chaque question passe ici tant que l'écart demeure.
     if (dbChunkCount === 0) {
-      const corpus = this.embeddingDimensions()[0]?.dimension;
-      if (corpus !== undefined && corpus !== dimension) {
+      const corpus = this.otherEmbeddingDimension(dimension);
+      if (corpus !== null) {
         throw new EmbeddingSpaceMismatchError(
           { kind: 'dimension', expected: corpus, actual: dimension },
           `Query embedding dimension mismatch: expected ${corpus}, got ${dimension}`

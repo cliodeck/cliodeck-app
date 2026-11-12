@@ -1486,7 +1486,9 @@
       "finishing": "Réindexation des sources primaires pour le nouveau modèle de recherche sémantique : {{total}} / {{total}} source(s) refaite(s). Dernière étape, l'index de recherche se reconstruit ; l'assistant consulte déjà les nouveaux extraits.",
       "stoppedNoProvider": "Réindexation des sources primaires pour le nouveau modèle interrompue : aucun modèle de recherche sémantique n'est disponible (vérifiez les Paramètres). {{remaining}} source(s) restent à réindexer ; l'assistant ne les retrouve que par leurs mots. La réindexation vous sera proposée de nouveau dès qu'un modèle sera disponible.",
       "stoppedFailed": "Réindexation des sources primaires pour le nouveau modèle interrompue : le modèle de recherche sémantique n'a pas répondu (vérifiez dans les Paramètres qu'il est disponible). {{remaining}} source(s) restent à réindexer ; l'assistant ne les retrouve que par leurs mots. La réindexation vous est proposée de nouveau ci-dessous, et le sera à la prochaine ouverture du projet.",
-      "done": "Réindexation des sources primaires pour le nouveau modèle de recherche sémantique terminée : {{total}} source(s) refaite(s)."
+      "done": "Réindexation des sources primaires pour le nouveau modèle de recherche sémantique terminée : {{total}} source(s) refaite(s).",
+      "rebuildingIndex": "Le modèle de recherche sémantique a changé dans les Paramètres : l'index de recherche des sources primaires se reconstruit pour lui, {{missing}} extrait(s) à y remettre. D'ici là, la recherche sémantique ne les trouve pas ; l'assistant ne les retrouve que par leurs mots.",
+      "indexRebuilt": "Index de recherche des sources primaires reconstruit pour le modèle de recherche sémantique actuel : la recherche sémantique retrouve les extraits calculés par ce modèle."
     }
   },
   "modes": {

@@ -1486,7 +1486,9 @@
       "finishing": "Reindexing primary sources for the new semantic search model: {{total}} / {{total}} source(s) redone. Last step, the search index is being rebuilt; the assistant already uses the new extracts.",
       "stoppedNoProvider": "Reindexing primary sources for the new model interrupted: no semantic search model is available (check Settings). {{remaining}} source(s) remain to reindex; the assistant only finds them by their words. Reindexing will be offered again as soon as a model is available.",
       "stoppedFailed": "Reindexing primary sources for the new model interrupted: the semantic search model did not respond (check in Settings that it is available). {{remaining}} source(s) remain to reindex; the assistant only finds them by their words. Reindexing is offered again below, and will be the next time the project opens.",
-      "done": "Reindexing primary sources for the new semantic search model finished: {{total}} source(s) redone."
+      "done": "Reindexing primary sources for the new semantic search model finished: {{total}} source(s) redone.",
+      "rebuildingIndex": "The semantic search model was changed in Settings: the primary sources search index is being rebuilt for it, {{missing}} extract(s) to put back into it. Until then, semantic search does not find them; the assistant only finds them by their words.",
+      "indexRebuilt": "Primary sources search index rebuilt for the current semantic search model: semantic search finds the extracts computed by this model again."
     }
   },
   "modes": {

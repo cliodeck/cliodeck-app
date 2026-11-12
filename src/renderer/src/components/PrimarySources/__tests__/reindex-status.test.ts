@@ -132,4 +132,29 @@ describe('réindexation pour un nouveau modèle : ses propres messages (Q29)', (
       expect(texts[4]).not.toBe(describeReindexStatus(t, { phase: 'done', total: 3 }, lng));
     }
   });
+
+  it('l’index qui passe à la dimension du modèle choisi : ni « pas été enregistré à la dernière fermeture », ni « tous les extraits », qu’il ne retrouve pas tant que d’autres sont à réindexer', async () => {
+    const t = await translator('fr');
+    const rebuilding = describeReindexStatus(t, { phase: 'rebuilding-index', cause, missing: 40648 }, 'fr') ?? '';
+    expect(rebuilding).toContain('a changé dans les Paramètres');
+    expect(rebuilding).toContain(`${(40648).toLocaleString('fr')} extrait(s)`);
+    expect(rebuilding).toContain('que par leurs mots');
+    expect(rebuilding).not.toContain('dernière fermeture');
+    const rebuilt = describeReindexStatus(t, { phase: 'index-rebuilt', cause }, 'fr') ?? '';
+    expect(rebuilt).toContain('reconstruit');
+    expect(rebuilt).not.toContain('tous les extraits');
+
+    for (const lng of ['fr', 'en', 'de'] as const) {
+      const tl = await translator(lng);
+      for (const status of [
+        { phase: 'rebuilding-index', cause, missing: 12 },
+        { phase: 'index-rebuilt', cause },
+      ] as const) {
+        const text = describeReindexStatus(tl, status, lng);
+        expect(text).toBeTruthy();
+        expect(text).not.toMatch(/primarySources\.|\{\{/);
+        expect(text).not.toBe(describeReindexStatus(tl, { ...status, cause: undefined }, lng));
+      }
+    }
+  });
 });

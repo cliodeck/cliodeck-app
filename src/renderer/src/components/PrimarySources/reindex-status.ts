@@ -11,7 +11,9 @@ import type { TropyReindexStatus } from '@backend/types/tropy-reindex';
  * 'model-change'`, Q29) a ses propres textes : elle n'a lieu qu'une fois
  * confirmée, l'assistant ne retrouve d'ici sa fin les sources pas encore
  * refaites que par leurs mots, et, interrompue, elle ne reprend pas seule à la
- * prochaine ouverture : elle y est proposée de nouveau.
+ * prochaine ouverture : elle y est proposée de nouveau. La reconstruction de
+ * l'index qu'un changement de modèle impose aussi : il n'a pas été perdu, il
+ * passe à la dimension du modèle choisi.
  */
 export function describeReindexStatus(
   t: TFunction,
@@ -55,9 +57,13 @@ export function describeReindexStatus(
         ? t('primarySources.reembed.done', { total: n(status.total) })
         : t('primarySources.reindexAll.done', { total: n(status.total) });
     case 'rebuilding-index':
-      return t('primarySources.reindexAll.rebuildingIndex', { missing: n(status.missing) });
+      return status.cause === 'model-change'
+        ? t('primarySources.reembed.rebuildingIndex', { missing: n(status.missing) })
+        : t('primarySources.reindexAll.rebuildingIndex', { missing: n(status.missing) });
     case 'index-rebuilt':
-      return t('primarySources.reindexAll.indexRebuilt');
+      return status.cause === 'model-change'
+        ? t('primarySources.reembed.indexRebuilt')
+        : t('primarySources.reindexAll.indexRebuilt');
   }
 }
 

@@ -88,6 +88,14 @@ type IndexOutcome = { status: 'written'; chunks: number } | { status: 'supersede
 const FULL_REINDEX_RETRY_DELAY_MS = 2_000;
 
 /**
+ * Pourquoi une passe sur les extraits est lancée hors de l'ouverture du projet (H7) :
+ * `model-change`, la réindexation que l'historien a confirmée après un changement de modèle
+ * d'embeddings (Q29) ; `provider-change`, le seul contrôle de l'index, à la dimension du fournisseur
+ * que les Paramètres viennent de changer, sans rien réembarquer.
+ */
+type FullReindexCause = 'model-change' | 'provider-change';
+
+/**
  * Les modèles de langue de Tesseract, téléchargés une fois par langue. Sous
  * userData : le dossier courant, où tesseract.js les rangeait sans consigne,
  * est `/` pour l'app lancée du Finder, non inscriptible (S08-1-29).
@@ -330,8 +338,15 @@ class TropyService {
       if (this.vectorStore) this.announceReembedProposal(this.vectorStore);
       return;
     }
-    // Un autre modèle d'embeddings : les archives à réindexer ne sont plus les mêmes (Q29).
-    if (embeddingChanged && this.vectorStore) this.announceReembedProposal(this.vectorStore);
+    // Un autre modèle d'embeddings : les archives à réindexer ne sont plus les mêmes (Q29), et l'index
+    // est contrôlé à la dimension du nouveau, comme à l'ouverture. Sinon, il restait à celle de
+    // l'ancien jusqu'à la réouverture du projet : revenu au modèle d'avant après une réindexation
+    // interrompue, l'historien voyait la synchro refuser ses nouvelles pièces au nom d'une dimension
+    // que la plupart des archives n'avaient plus. Rien n'est réembarqué (`provider-change`).
+    if (embeddingChanged && this.vectorStore) {
+      this.announceReembedProposal(this.vectorStore);
+      this.startFullReindex('provider-change');
+    }
     await Promise.all(previous.map((r) => r?.dispose().catch(() => undefined)));
   }
 
@@ -1466,12 +1481,12 @@ class TropyService {
   }
 
   /**
-   * Lance une passe sur le magasin ouvert : celle d'ouverture (H7), ou celle que l'historien a
-   * confirmée après un changement de modèle (`model-change`, Q29). Une passe à la fois par
-   * magasin : la seconde attend la fin de la première. Finie, la proposition a pu changer : le
-   * panneau la relit.
+   * Lance une passe sur le magasin ouvert : celle d'ouverture (H7), celle que l'historien a
+   * confirmée après un changement de modèle (`model-change`, Q29), ou le contrôle de l'index après
+   * un changement de fournisseur (`provider-change`). Une passe à la fois par magasin : la seconde
+   * attend la fin de la première. Finie, la proposition a pu changer : le panneau la relit.
    */
-  private startFullReindex(cause?: 'model-change'): void {
+  private startFullReindex(cause?: FullReindexCause): void {
     const store = this.vectorStore;
     const projectPath = this.projectPath;
     if (!store || !projectPath) return;
@@ -1502,8 +1517,11 @@ class TropyService {
     const actual = this.embeddingDimension();
     if (!store || !actual || this.reembedPending === store) return null;
     const sources = store.listOtherDimensionSources(actual);
-    const expected = store.embeddingDimensions().find((entry) => entry.dimension !== actual)?.dimension;
-    if (sources.length === 0 || expected === undefined) return null;
+    if (sources.length === 0) return null;
+    // Une première ligne lue, pas la dimension majoritaire : la proposition est relue au moins deux
+    // fois à chaque ouverture du projet, et la répartition parcourt tous les extraits.
+    const expected = store.otherEmbeddingDimension(actual);
+    if (expected === null) return null;
     return {
       sources: sources.length,
       chunks: sources.reduce((sum, source) => sum + source.chunks, 0),
@@ -1598,12 +1616,19 @@ class TropyService {
    * réembarquées à l'ouverture, qui enverrait tout le corpus au fournisseur
    * sans geste de l'historien. Elles lui sont proposées
    * (`getReembedProposal`), et, confirmée (`cause: 'model-change'`, Q29), la
-   * passe les refait par ce même chemin. Elle commence alors par faire passer
-   * l'index à la dimension du fournisseur, par tranches : les points de
-   * l'ancienne ne servent plus aucune question, et les extraits refaits y
-   * entrent au fil de la passe. Interrompue, elle ne reprend pas seule à la
-   * prochaine ouverture : les sources restantes sont toujours à l'autre
-   * dimension, et elle est proposée de nouveau.
+   * passe les refait par ce même chemin. Elle fait alors passer l'index à la
+   * dimension du fournisseur, par tranches, une fois qu'il a répondu
+   * (`probeProvider`) : les points de l'ancienne ne servent plus aucune
+   * question, et les extraits refaits y entrent au fil de la passe.
+   * Interrompue, elle ne reprend pas seule à la prochaine ouverture : les
+   * sources restantes sont toujours à l'autre dimension, et elle est proposée
+   * de nouveau. Le modèle changé de nouveau dans les Paramètres pendant la
+   * passe l'arrête : ce qui reste n'est plus à refaire pour lui.
+   *
+   * Après un changement de fournisseur dans les Paramètres
+   * (`cause: 'provider-change'`), seul le contrôle de l'index a lieu, à la
+   * dimension du nouveau, sans rien réembarquer ; sa reconstruction est dite à
+   * l'écran comme celle de l'ouverture, avec sa propre raison.
    *
    * Au journal d'usage IA, un lot d'embeddings par source, inscrit dès qu'elle
    * est finie, et lié au projet de la passe : une passe interrompue laisse la
@@ -1613,10 +1638,12 @@ class TropyService {
   private async reindexOutdatedChunks(
     store: PrimarySourcesVectorStore,
     projectPath: string,
-    cause?: 'model-change'
+    cause?: FullReindexCause
   ): Promise<void> {
     const reembed = cause === 'model-change';
-    const tag = reembed ? { cause } : {};
+    // Après un changement de fournisseur : le contrôle de l'index seul, aucune source refaite.
+    const indexOnly = cause === 'provider-change';
+    const tag = reembed ? { cause: 'model-change' as const } : {};
     try {
       // La dimension du fournisseur, celle des questions du chat ; sans fournisseur, celle de l'index.
       const providerDimension = this.embeddingDimension();
@@ -1625,7 +1652,7 @@ class TropyService {
         reembed ? store.listOtherDimensionSources(dimension) : store.listOutdatedChunkSources(dimension);
       const stillToDo = (id: string): boolean =>
         reembed ? store.hasOtherDimensionChunks(id, dimension) : store.hasOutdatedChunks(id, dimension);
-      const outdated = remainingSources();
+      const outdated = indexOnly ? [] : remainingSources();
       const total = outdated.length;
       const chunks = outdated.reduce((sum, source) => sum + source.chunks, 0);
       const running = (done: number, waitingForSync: boolean): TropyReindexStatus => ({
@@ -1636,16 +1663,26 @@ class TropyService {
         chunks,
         waitingForSync,
       });
+      // Le modèle changé dans les Paramètres depuis le début de la passe : ses sources ne sont plus
+      // à refaire pour lui, ni à la même dimension. Le contrôle que ce changement lance prend la
+      // suite (`rebuildProviders`), et la réindexation est proposée de nouveau s'il le faut.
+      const providerChanged = (): boolean => this.embeddingDimension() !== providerDimension;
 
       // Contrôlé avant la première attente : la reconstruction en cours retient
       // la recherche du chat d'en lancer une autre. À la dimension du
       // fournisseur d'embeddings, celle des questions du chat : après un
       // changement de modèle, l'index relu peut être de l'ancienne alors que
       // des extraits sont déjà refaits à la nouvelle (app quittée en pleine
-      // passe). La passe confirmée y fait passer l'index dans tous les cas.
+      // passe). La passe confirmée doit y faire passer l'index ; sans aucun
+      // extrait à cette dimension (`index.dimension`, celle de l'index relu),
+      // elle ne le fait qu'au premier extrait qu'elle écrit, une fois que le
+      // fournisseur a répondu (`probeProvider`). Fait ici, l'index vide
+      // s'écrivait sur disque à la place de celui de l'ancien modèle, même
+      // quand le nouveau ne répondait pas.
       const index = store.checkHnswIndex(providerDimension);
-      const target = reembed && total > 0 ? dimension : index.dimension;
-      if (index.needsRebuild || target !== store.getIndexStats().hnswDimension) {
+      let switchPending = reembed && total > 0 && index.dimension !== dimension;
+      const target = index.dimension;
+      if (!switchPending && (index.needsRebuild || target !== store.getIndexStats().hnswDimension)) {
         console.log(
           `🔨 [TROPY-SERVICE] Index des sources primaires en retard sur la base (${index.missing} extrait(s) absent(s), ${index.stale} point(s) inutile(s)) : reconstruction par tranches, dimension ${target}`
         );
@@ -1655,17 +1692,20 @@ class TropyService {
         // fin, une centaine de secondes sur 40 000 extraits. Dit à l'écran,
         // comme sa fin. Des points inutiles seuls ne changent rien à la
         // recherche : leur compactage se tait.
+        // Après un changement de fournisseur, la raison est autre : l'index n'a
+        // pas été perdu, il passe à la dimension du modèle choisi.
         const announced = total === 0 && index.missing > 0;
+        const why = indexOnly ? { cause: 'model-change' as const } : {};
         if (total > 0) {
           this.reportReindex(store, running(0, false));
         } else if (announced) {
-          this.reportReindex(store, { phase: 'rebuilding-index', missing: index.missing });
+          this.reportReindex(store, { phase: 'rebuilding-index', ...why, missing: index.missing });
         }
         const rebuild = store.rebuildIndexesInSlices(undefined, target);
         this.reindexStep = rebuild;
         if (!(await rebuild) || this.vectorStore !== store) return;
         if (announced) {
-          this.reportReindex(store, { phase: 'index-rebuilt' });
+          this.reportReindex(store, { phase: 'index-rebuilt', ...why });
           // Dit une fois, comme la fin d'une passe.
           this.reindexStatus = { phase: 'idle' };
         }
@@ -1710,11 +1750,28 @@ class TropyService {
             // recherche par le sens, transcription ou non.
             store.markChunksCurrent(id);
           } else {
-            const step = runWithJournalContext({ workspaceRoot: projectPath }, () =>
-              runBatch('tropy', () => this.indexSourceChunks(source))
-            );
-            this.reindexStep = step;
             try {
+              if (switchPending) {
+                // Le fournisseur a répondu, à sa dimension, avant que l'index n'y passe.
+                await this.probeProvider(projectPath, source, dimension);
+                if (this.vectorStore !== store) return;
+                if (!providerChanged()) {
+                  console.log(`🔨 [TROPY-SERVICE] Index des sources primaires porté à la dimension du nouveau modèle, ${dimension}, par tranches`);
+                  const rebuild = store.rebuildIndexesInSlices(undefined, dimension);
+                  this.reindexStep = rebuild;
+                  if (!(await rebuild) || this.vectorStore !== store) return;
+                  switchPending = false;
+                }
+              }
+              if (providerChanged()) {
+                console.warn('⚠️ [TROPY-SERVICE] Réindexation arrêtée : le modèle d\'embeddings a changé dans les Paramètres');
+                this.reportReindex(store, { phase: 'idle' });
+                return;
+              }
+              const step = runWithJournalContext({ workspaceRoot: projectPath }, () =>
+                runBatch('tropy', () => this.indexSourceChunks(source))
+              );
+              this.reindexStep = step;
               if ((await step).status === 'written') written += 1;
             } catch (error) {
               // Son magasin fermé pendant l'embarquement : ce n'est pas une panne.
@@ -1779,6 +1836,28 @@ class TropyService {
       if (this.vectorStore !== store) return;
       console.warn('⚠️ [TROPY-SERVICE] Réindexation complète interrompue:', error);
       this.reportReindex(store, { phase: 'idle' });
+    }
+  }
+
+  /**
+   * Avant que la passe confirmée (Q29) ne fasse passer l'index à `dimension`, celle du fournisseur :
+   * il doit avoir répondu, à cette dimension. Sans aucun extrait à celle-ci, le nouvel index est
+   * vide, et il s'écrit sur disque à la place de celui de l'ancien modèle. Un modèle choisi dans les
+   * Paramètres mais pas encore installé (`ollama pull`) arrêtait la passe à la première source,
+   * l'index de l'ancien déjà perdu : revenu à l'ancien modèle, l'historien n'avait plus que la
+   * recherche par les mots, sans message, jusqu'à ce qu'une question lance une reconstruction.
+   *
+   * Le premier extrait de `source`, la première source à refaire : ce que la passe lui envoie
+   * ensuite, rien d'autre. Un lot d'un extrait au journal d'usage IA. Lève l'erreur du fournisseur,
+   * ou `EmbeddingSpaceMismatchError` pour un vecteur d'une autre dimension.
+   */
+  private async probeProvider(projectPath: string, source: IndexableSource, dimension: number): Promise<void> {
+    const text = this.prepareSourceChunks(source, this.indexableText(source))[0]?.content ?? this.indexableText(source);
+    const vector = await runWithJournalContext({ workspaceRoot: projectPath }, () =>
+      runBatch('tropy', () => this.embedOne(text))
+    );
+    if (vector.length !== dimension) {
+      throw new EmbeddingSpaceMismatchError({ kind: 'dimension', expected: dimension, actual: vector.length });
     }
   }
 
