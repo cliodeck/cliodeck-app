@@ -225,6 +225,75 @@
   word-break: break-word;
 }
 
+/* Index des PDF à reconstruire (J8) : une proposition, pas une panne. */
+.pdf-index-rebuild-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  margin: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background-color: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.pdf-index-rebuild-notice > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-warning);
+}
+
+.pdf-index-rebuild-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.pdf-index-rebuild-notice-text p {
+  margin: 0 0 var(--spacing-xs);
+  line-height: 1.4;
+}
+
+.pdf-index-rebuild-notice-title {
+  font-weight: 600;
+}
+
+.pdf-index-rebuild-notice-actions {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.pdf-index-rebuild-notice-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.pdf-index-rebuild-notice-button:hover {
+  background-color: color-mix(in srgb, var(--color-accent) 10%, var(--bg-panel));
+}
+
+.pdf-index-rebuild-notice-close {
+  flex-shrink: 0;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.pdf-index-rebuild-notice-close:hover {
+  color: var(--text-primary);
+}
+
 /* Zotero Import */
 .zotero-import {
   padding: var(--spacing-sm);

@@ -8,6 +8,7 @@ import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
 import { useUsageJournalStore } from '../../stores/usageJournalStore';
 import { useTropyReindexStatus } from '../../stores/tropyReindexStore';
 import { describeReindexStatus, reindexStatusLabel } from '../PrimarySources/reindex-status';
+import { usePdfIndexRebuildDue } from '../../stores/pdfIndexStore';
 import './StatusBar.css';
 
 interface MCPClientSummary {
@@ -51,6 +52,10 @@ export const StatusBar: React.FC = () => {
   // Réindexation complète des sources primaires (H7) : des heures possibles,
   // à voir même le panneau Sources primaires fermé.
   const reindex = useTropyReindexStatus();
+
+  // Index des PDF à reconstruire (J8) : proposé à la réouverture, dans le panneau
+  // Bibliographie, que l'écran ne montre pas forcément.
+  const pdfIndex = usePdfIndexRebuildDue();
 
   // Usage journal: substantial sessions of the day not yet covered by a
   // decision. Shared store with the Cmd/Ctrl+J modal, so annotating there
@@ -233,6 +238,18 @@ export const StatusBar: React.FC = () => {
             )}
             {reindexStatusLabel(t, reindex)}
           </span>
+        )}
+
+        {/* Index des PDF à reconstruire : ouvre le panneau Bibliographie, où le bandeau le propose */}
+        {pdfIndex.due && (
+          <button
+            type="button"
+            className="status-bar__item status-bar__item--warning status-bar__button"
+            title={t('pdfIndexRebuild.statusTooltip')}
+            onClick={() => window.dispatchEvent(new CustomEvent('switch-panel', { detail: 'bibliography' }))}
+          >
+            {t('pdfIndexRebuild.status')}
+          </button>
         )}
 
         {/* MCP clients */}

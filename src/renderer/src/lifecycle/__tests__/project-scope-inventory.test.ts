@@ -79,6 +79,10 @@ const INVENTORY: Record<string, Scope> = {
     why: 'réindexation des sources primaires : son hook l’efface au changement de projet puis relit l’état du main, qui peut l’avoir publiée pendant l’ouverture',
     resetBy: { file: 'tropyReindexStore.ts', call: 'store.clear()' },
   },
+  'pdfIndexStore.ts': {
+    scope: 'project',
+    why: 'index des PDF à reconstruire, lu dans le brain.db du projet, et son bandeau fermé : il revient à la réouverture (J8)',
+  },
   'ideaStore.ts': {
     scope: 'project',
     why: 'idées du projet, sélection, état de son fichier ; un chargement en vol devient caduc (S16-1-18)',

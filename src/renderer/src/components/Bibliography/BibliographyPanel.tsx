@@ -28,6 +28,7 @@ import {
   usePDFModificationDetection,
   type ModifiedPDF,
 } from './PDFModificationNotification';
+import { PdfIndexRebuildNotice } from './PdfIndexRebuildNotice';
 import './BibliographyPanel.css';
 
 /** Clés montrées dans le bandeau avant « … et N autre(s) ». */
@@ -621,6 +622,8 @@ export const BibliographyPanel: React.FC = () => {
       )}
 
       {bibliographyProblem && <BibliographyProblemBanner problem={bibliographyProblem} />}
+
+      <PdfIndexRebuildNotice />
 
       {/* Zotero Import */}
       <ZoteroImport />

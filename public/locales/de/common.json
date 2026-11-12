@@ -2614,6 +2614,14 @@
     "message": "„{{title}}“ wurde indexiert, aber es ließ sich kaum Text daraus extrahieren: Wahrscheinlich ist es ein Scan oder ein Bild ohne OCR. Suche und Assistent werden darin nichts finden.",
     "details": "{{fileName}} — {{pageCount}} Seite(n), durchschnittlich {{charsPerPage}} Zeichen pro Seite. Lassen Sie eine Texterkennung (OCR) darüber laufen (zum Beispiel ocrmypdf oder Adobe Acrobat) und indexieren Sie es erneut."
   },
+  "pdfIndexRebuild": {
+    "title": "Suchindex der PDFs neu aufzubauen",
+    "message": "Das Projekt wurde geschlossen, bevor dieser Index nach dem Entfernen oder Neuindexieren von PDFs neu erstellt wurde: Er enthält Auszüge, die es nicht mehr gibt, oder ihm fehlen welche, und die semantische Suche liefert dem Assistenten weniger Auszüge. „Neu aufbauen“ erstellt ihn aus den bereits berechneten Vektoren neu, ohne etwas an den Embedding-Anbieter zu senden.",
+    "rebuild": "Neu aufbauen",
+    "later": "Später: Diese Meldung erscheint beim nächsten Öffnen des Projekts wieder",
+    "status": "PDF-Index neu aufzubauen",
+    "statusTooltip": "Den Bereich Bibliographie öffnen, der den Neuaufbau des PDF-Suchindex anbietet"
+  },
   "sandboxDisabled": {
     "title": "ClioDeck läuft ohne die Chromium-Sandbox",
     "messageAppImage": "Auf diesem System kann das AppImage sie nicht aktivieren und wurde ohne sie gestartet. Alles funktioniert, aber ein Schutz fehlt. Installieren Sie statt des AppImage das .deb-Paket, um ihn zurückzubekommen.",

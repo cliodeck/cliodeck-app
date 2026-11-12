@@ -10,7 +10,7 @@
  * alors qu'il en éditait un autre.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup, act } from '@testing-library/react';
+import { render, screen, cleanup, act, fireEvent, waitFor } from '@testing-library/react';
 
 // Le simulacre commun rend la clé seule : l'infobulle d'un fichier hors du projet doit
 // porter son chemin, que seule l'interpolation y met.
@@ -27,6 +27,7 @@ import { StatusBar } from '../StatusBar';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useProjectStore } from '../../../stores/projectStore';
 import { REINDEX_DONE_NOTICE_MS, useTropyReindexStore } from '../../../stores/tropyReindexStore';
+import { projectLifecycle } from '../../../lifecycle/projectLifecycle';
 
 async function mountWith(state: { filePath: string | null; isDirty: boolean }): Promise<void> {
   useEditorStore.setState({ ...state, lastSavedAt: null });
@@ -226,5 +227,49 @@ describe('StatusBar : la réindexation complète des sources primaires se voit, 
     await mountWith({ filePath: null, isDirty: false });
 
     expect(reindexLabel()).toBeNull();
+  });
+});
+
+describe('StatusBar : l’index des PDF à reconstruire se voit, panneau Bibliographie fermé (J8)', () => {
+  const electron = () => (window as unknown as { electron: { pdf?: unknown } }).electron;
+  let getIndexState: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    getIndexState = vi.fn(async () => ({ success: true, rebuildDue: true }));
+    electron().pdf = { getIndexState, rebuildIndex: vi.fn(async () => ({ success: true, started: true })) };
+    act(() => projectLifecycle.enter('/p'));
+  });
+
+  afterEach(() => {
+    act(() => projectLifecycle.enter(null));
+    delete electron().pdf;
+  });
+
+  it('proposée à la réouverture : un avertissement, qui ouvre le panneau Bibliographie', async () => {
+    const switches: unknown[] = [];
+    const onSwitch = (event: Event) => switches.push((event as CustomEvent).detail);
+    window.addEventListener('switch-panel', onSwitch);
+    try {
+      await mountWith({ filePath: null, isDirty: false });
+
+      const item = await screen.findByRole('button', { name: 'pdfIndexRebuild.status' });
+      expect(item).toHaveAttribute('title', 'pdfIndexRebuild.statusTooltip');
+      expect(item).toHaveClass('status-bar__item--warning');
+      expect(getIndexState).toHaveBeenCalledWith('/p');
+
+      fireEvent.click(item);
+      expect(switches).toEqual(['bibliography']);
+    } finally {
+      window.removeEventListener('switch-panel', onSwitch);
+    }
+  });
+
+  it('témoin : un index sain, rien d’affiché', async () => {
+    getIndexState.mockResolvedValue({ success: true, rebuildDue: false });
+    await mountWith({ filePath: null, isDirty: false });
+
+    await waitFor(() => expect(getIndexState).toHaveBeenCalled());
+    await act(async () => undefined);
+    expect(screen.queryByText('pdfIndexRebuild.status')).toBeNull();
   });
 });

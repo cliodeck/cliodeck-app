@@ -2614,6 +2614,14 @@
     "message": "« {{title}} » a été indexé, mais presque aucun texte n'a pu en être extrait : c'est probablement un scan ou une image sans OCR. La recherche et l'assistant n'y trouveront rien.",
     "details": "{{fileName}} — {{pageCount}} page(s), {{charsPerPage}} caractères par page en moyenne. Passez-le par un logiciel d'OCR (par exemple ocrmypdf ou Adobe Acrobat), puis réindexez-le."
   },
+  "pdfIndexRebuild": {
+    "title": "Index de recherche des PDF à reconstruire",
+    "message": "Le projet s'est fermé avant que cet index ne soit refait, après le retrait ou la réindexation de PDF : il garde des extraits qui n'existent plus, ou il lui en manque, et la recherche sémantique rend moins d'extraits à l'assistant. « Reconstruire » le refait à partir des vecteurs déjà calculés, sans rien envoyer au fournisseur d'embeddings.",
+    "rebuild": "Reconstruire",
+    "later": "Plus tard : ce message reviendra à la prochaine ouverture du projet",
+    "status": "Index des PDF à reconstruire",
+    "statusTooltip": "Ouvrir le panneau Bibliographie, qui propose de reconstruire l'index de recherche des PDF"
+  },
   "sandboxDisabled": {
     "title": "ClioDeck tourne sans le bac à sable de Chromium",
     "messageAppImage": "Sur ce système, l'AppImage ne peut pas l'activer et s'est lancée sans lui. Tout fonctionne, mais une protection manque. Pour la retrouver, installez le paquet .deb à la place de l'AppImage.",
