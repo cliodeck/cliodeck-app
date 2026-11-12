@@ -53,6 +53,7 @@ import {
 } from './chat-engine.js';
 import { modeService } from './mode-service.js';
 import { ContextCompressor } from '../../../backend/core/rag/ContextCompressor.js';
+import { stripChunkHeader } from '../../../backend/core/chunking/chunk-text.js';
 import { historyService } from './history-service.js';
 import type { HistoryManager } from '../../../backend/core/history/HistoryManager.js';
 import { runWithJournalContext } from '../../../backend/core/usage-journal/context.js';
@@ -1647,7 +1648,6 @@ export function formatContextAsSystemPrompt(
   // suivi du seul texte de l'utilisateur, que le modèle prendrait pour elles.
   if (hits.length === 0) return `${text.noSources} ${text.ownPassagesNotSources}`;
   const SNIPPET_CHARS = 1500;
-  const DOC_HEADER_RE = /^\[Doc:[^\]]*\]\s*/;
 
   const lines: string[] = [
     ...text.sources,
@@ -1674,8 +1674,7 @@ export function formatContextAsSystemPrompt(
         ? (h.chunk as { pageNumber?: number }).pageNumber
         : undefined;
 
-    const rawSnippet = h.chunk.content
-      .replace(DOC_HEADER_RE, '')
+    const rawSnippet = stripChunkHeader(h.chunk.content)
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, SNIPPET_CHARS);

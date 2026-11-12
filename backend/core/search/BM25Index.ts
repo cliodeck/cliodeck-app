@@ -1,7 +1,22 @@
 import natural from 'natural';
 import type { DocumentChunk } from '../../types/pdf-document';
+import { tokenize } from '../text/normalize';
 
 const { TfIdf } = natural;
+
+/**
+ * Le découpage de l'index et celui de la requête : le même, sinon un mot n'est jamais retrouvé.
+ * `natural` reçoit un tableau de jetons, jamais une chaîne : avec une chaîne, il la redécoupait
+ * avec son propre tokeniseur, qui coupe un mot sur chaque lettre accentuée (« Liège » → « li »,
+ * « ge »), et n'appliquait sa liste de mots vides anglais qu'aux extraits.
+ */
+const tokensOf = (text: string): string[] => tokenize(text, { fold: 'diacritics', stopwords: true });
+
+/** Clé que `natural` ajoute à chaque document : ce n'est pas un terme. */
+const NATURAL_KEY = '__key';
+
+const hasTerm = (doc: object, term: string): boolean =>
+  Object.prototype.hasOwnProperty.call(doc, term);
 
 /**
  * BM25 Index for keyword-based search
@@ -19,8 +34,10 @@ const { TfIdf } = natural;
  * - Queries with rare/specific words
  */
 export class BM25Index {
-  private tfidf: any;
+  private tfidf: InstanceType<typeof TfIdf>;
   private chunkMap: Map<number, DocumentChunk>;
+  /** Nombre de jetons de chaque document, par rang dans `tfidf.documents`. */
+  private docLengths: number[] = [];
   private k1: number = 1.5; // Term frequency saturation parameter
   private b: number = 0.75; // Length normalization parameter
 
@@ -39,7 +56,9 @@ export class BM25Index {
    */
   addChunk(chunk: DocumentChunk): void {
     const docIndex = this.tfidf.documents.length;
-    this.tfidf.addDocument(this.preprocessText(chunk.content));
+    const tokens = tokensOf(chunk.content);
+    this.tfidf.addDocument(tokens);
+    this.docLengths[docIndex] = tokens.length;
     this.chunkMap.set(docIndex, chunk);
     this.isDirty = true; // Mark cache as dirty
   }
@@ -65,8 +84,8 @@ export class BM25Index {
    * Search for chunks matching query
    */
   search(query: string, k: number = 10, documentIds?: string[]): BM25Result[] {
-    const processedQuery = this.preprocessText(query);
-    const queryTerms = processedQuery.split(/\s+/).filter((t) => t.length > 0);
+    // Un terme répété dans la question ne compte qu'une fois.
+    const queryTerms = Array.from(new Set(tokensOf(query)));
 
     if (queryTerms.length === 0) {
       return [];
@@ -88,16 +107,15 @@ export class BM25Index {
 
       let score = 0;
       const doc = this.tfidf.documents[docIndex];
-      const docLength = Object.keys(doc).length;
+      const docLength = this.docLengths[docIndex];
 
       for (const term of queryTerms) {
-        // Use lowercase for lookup
-        const termLower = term.toLowerCase();
-        const tf = doc[termLower] || 0;
+        // Un terme absent ne doit pas lire une propriété héritée (« constructor » rendait une
+        // fonction, et le score NaN faisait disparaître l'extrait).
+        if (!hasTerm(doc, term)) continue;
+        const tf = doc[term];
 
-        if (tf === 0) continue;
-
-        const idf = this.idfCache.get(termLower) || 0;
+        const idf = this.idfCache.get(term) || 0;
 
         // BM25 formula
         const numerator = tf * (this.k1 + 1);
@@ -139,16 +157,15 @@ export class BM25Index {
     const termDocFreq = new Map<string, number>();
     let totalLength = 0;
 
-    for (const doc of this.tfidf.documents) {
-      const docLength = Object.keys(doc).length;
-      totalLength += docLength;
+    this.tfidf.documents.forEach((doc, docIndex) => {
+      totalLength += this.docLengths[docIndex];
 
       // Track which terms appear in this document
       for (const term in doc) {
-        const termLower = term.toLowerCase();
-        termDocFreq.set(termLower, (termDocFreq.get(termLower) || 0) + 1);
+        if (term === NATURAL_KEY) continue;
+        termDocFreq.set(term, (termDocFreq.get(term) || 0) + 1);
       }
-    }
+    });
 
     // Calculate average document length
     this.avgDocLength = totalLength / N;
@@ -177,25 +194,11 @@ export class BM25Index {
   }
 
   /**
-   * Preprocess text for indexing/search
-   */
-  private preprocessText(text: string): string {
-    return (
-      text
-        .toLowerCase()
-        // Remove special characters but keep accented chars for French
-        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-        // Normalize whitespace
-        .replace(/\s+/g, ' ')
-        .trim()
-    );
-  }
-
-  /**
    * Clear the index
    */
   clear(): void {
     this.tfidf = new TfIdf();
+    this.docLengths = [];
     this.chunkMap.clear();
     this.idfCache.clear();
     this.avgDocLength = 0;
@@ -221,7 +224,7 @@ export class BM25Index {
 
     for (const doc of this.tfidf.documents) {
       for (const term in doc) {
-        vocabSet.add(term);
+        if (term !== NATURAL_KEY) vocabSet.add(term);
       }
     }
 

@@ -233,6 +233,91 @@ Ce que le relevé montre de la recherche lexicale de l'app, avant L07-3 :
   recherche de l'app. Ni l'un ni l'autre ne trouve un mot tapé sans son
   accent (« Liege », « Zurich »).
 
+### Relevé après L07-3 (2026-11-12)
+
+Mêmes commandes, même jeu, après L07-3 : `BM25Index` découpe l'index et la
+requête par le même `tokenize` (`backend/core/text/normalize.ts` : mots
+Unicode entiers, accents repliés, mots vides français, anglais et allemands
+retirés des deux côtés, sauf un mot en capitales), et le bonus « mot-clé
+exact » de `HybridSearch` ne vaut plus que pour un mot entier, cherché dans
+le texte de l'extrait sans son préfixe « [Doc: titre | Section: …] ».
+
+| retriever     | relevé         | recall@1 | recall@10 | hitRate@1 | hitRate@10 | MRR   |
+|---------------|----------------|----------|-----------|-----------|------------|-------|
+| `bm25`        | avant et après | 0,769    | 0,846     | 0,846     | 0,846      | 0,846 |
+| `pdf-lexical` | avant L07-3    | 0,346    | 0,423     | 0,385     | 0,462      | 0,393 |
+| `pdf-lexical` | après L07-3    | 0,885    | 1         | 1         | 1          | 1     |
+
+Le `bm25` du banc ne bouge pas : il a son propre tokeniseur. Par question,
+pour `pdf-lexical` (rang du premier pertinent · pertinents rendus dans le
+top 10) :
+
+| question                | cas                             | avant   | après   |
+|-------------------------|---------------------------------|---------|---------|
+| `fr-liege`              | accent                          | — · 0/2 | 1 · 2/2 |
+| `fr-liege-sans-accent`  | accent tapé sans accent         | — · 0/2 | 1 · 2/2 |
+| `fr-etat`               | accent parmi des mots vides     | 9 · 1/1 | 1 · 1/1 |
+| `fr-revolution`         | accents                         | — · 0/1 | 1 · 1/1 |
+| `fr-cia`                | sigle, sous-chaînes, mots vides | 1 · 1/2 | 1 · 2/2 |
+| `fr-grenelle`           | témoin                          | 1 · 1/1 | 1 · 1/1 |
+| `fr-verdun`             | témoin                          | 1 · 1/1 | 1 · 1/1 |
+| `de-zurich`             | accent                          | — · 0/1 | 1 · 1/1 |
+| `de-zurich-ohne-umlaut` | accent tapé sans accent         | — · 0/1 | 1 · 1/1 |
+| `de-oesterreich`        | accent                          | — · 0/1 | 1 · 1/1 |
+| `de-grossbritannien`    | ß                               | — · 0/1 | 1 · 1/1 |
+| `de-gewerkschaften`     | témoin                          | 1 · 1/1 | 1 · 1/1 |
+| `de-mauer`              | témoin                          | 1 · 1/1 | 1 · 1/1 |
+
+- **Les mots accentués sont trouvés**, au rang 1, et aussi tapés sans accent
+  (« Liege », « Zurich ») : l'index et la requête replient les accents de la
+  même façon. « Großbritannien » est un seul mot (« ß » n'est plus un
+  séparateur ; il n'est pas replié en « ss », un « Grossbritannien » suisse
+  ne le trouverait pas).
+- **`fr-etat` passe du rang 9 au rang 1** : « réforme » et « État » sont
+  trouvés, et « de » n'est plus un terme de recherche.
+- **`fr-cia` rend ses deux pertinents** (`guatemala-1`, puis `guatemala-2`) et
+  rien d'autre : les neuf extraits qui contenaient « cia » en sous-chaîne ne
+  sont plus candidats (les mots vides ne cherchent plus rien) ni favorisés
+  (le bonus veut le mot entier « CIA »).
+- Les quatre témoins ne bougent pas. **Aucune question ne recule.**
+- `recall@1` reste sous 1 pour une seule raison : trois questions ont deux
+  pertinents, et un top 1 n'en contient qu'un.
+
+Après la revue de L07-3, les listes de mots vides ont changé : elles
+contiennent les mots-outils des questions (« comment », « pendant »,
+« during », « während »), qui sinon valaient un bonus « mot-clé exact », et
+un mot vide s'y reconnaît accents compris (« maïs » n'est plus pris pour
+« mais », ni « Ware » pour « wäre »). Le relevé, refait avec les mêmes
+commandes, est identique question par question, pour `bm25` comme pour
+`pdf-lexical` : aucune question du jeu ne contient ces mots. Ce que la
+correction change est couvert par les tests de `HybridSearch`
+(« Comment la CIA est-elle intervenue ? », et cinq variantes en français,
+en anglais et en allemand).
+
+La deuxième revue a changé les listes encore deux fois :
+
+- **Elle en a retiré les mots-outils qui sont aussi des noms ou des termes**
+  dans une autre des trois langues. Ce sont « seine », « oder », « weil »,
+  « allen », « sind », « das », « ob », « wen », « mir », « sein »,
+  « durant », « celle » et « notre » : la Seine, l'Oder, Patrick Weil, Allen
+  Dulles, Will Durant, Celle, Notre-Dame, le mir russe. BM25 les retrouve,
+  comme avant L07-3. Le bonus « mot-clé exact » ne prend ceux qui sont des
+  noms propres qu'écrits comme un nom : avec une capitale, hors début de
+  phrase, dans la question comme dans l'extrait (« la Seine », pas « seine
+  Agenten » ni « Durant la guerre froide… »). Une question d'un seul mot
+  n'est pas une phrase : « Seine » vaut la Seine.
+- **Elle y a ajouté les interrogatifs et les mots-outils fréquents** que la
+  première passe avait laissés dehors (« combien », « plusieurs », « malgré »,
+  « regarding », « however », « wieviel », « wegen »…), et les consignes
+  d'une question au chat (« explique », « disent », « explain »,
+  « erkläre »).
+
+Le relevé, refait avec les mêmes commandes, est encore identique question
+par question : aucune question du jeu ne contient ces mots. Les tests de
+`BM25Index` et de `HybridSearch` couvrent ces changements. Une liste ne ferme
+pas la classe des mots-outils : un mot oublié revaut un bonus, et « sources »
+(« Que disent mes sources… ») en vaut un, puisque c'est un mot d'historien.
+
 ## Recent related work (2026-05-07)
 
 Testing with a real corpus (221 Tropy items, EEC Committee of Governors
