@@ -482,6 +482,20 @@ export class PDFIndexer {
       if (chunksWithEmbeddings.length === 0) {
         document.metadata.noChunks = true;
       }
+
+      // La dimension des vecteurs, contrôlée avant d'écrire quoi que ce soit (L04-7) : un corpus vide
+      // l'adopte, un corpus d'une autre dimension refuse ce PDF (`EmbeddingSpaceMismatchError`). Le
+      // modèle d'embeddings a changé depuis la première indexation : HNSW sautait ces vecteurs en
+      // silence, et le PDF passait pour indexé sans être trouvable par le sens.
+      const dimension = chunksWithEmbeddings[0]?.embedding.length;
+      if (dimension !== undefined) {
+        if (isEnhancedStore) {
+          await (this.vectorStore as EnhancedVectorStore).adoptEmbeddingDimension(dimension);
+        } else {
+          (this.vectorStore as VectorStore).checkEmbeddingDimension(dimension);
+        }
+      }
+
       this.vectorStore.transaction(() => {
         this.vectorStore.saveDocument(document);
 

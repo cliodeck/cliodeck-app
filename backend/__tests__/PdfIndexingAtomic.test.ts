@@ -45,7 +45,7 @@ const extract = async () => ({
 
 type Embed = (content: string) => Promise<Float32Array>;
 
-/** 768 : la dimension par défaut de l'index HNSW d'un projet neuf, qui refuse toute autre taille. */
+/** 768, celle de nomic-embed-text. Un projet neuf adopte la dimension du premier vecteur (L04-7). */
 const embed: Embed = async (content) => {
   const v = new Float32Array(768);
   for (let i = 0; i < content.length; i++) v[i % 768] += content.charCodeAt(i) / 1000;

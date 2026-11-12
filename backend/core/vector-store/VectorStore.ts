@@ -3,6 +3,7 @@ import path from 'path';
 import { existsSync, mkdirSync, chmodSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { fileIdentity, groupByFile, mayBeSameFile } from './file-identity';
+import { EmbeddingSpaceMismatchError } from './embedding-space';
 import type {
   PDFDocument,
   DocumentChunk,
@@ -635,30 +636,51 @@ export class VectorStore {
    */
   getEmbeddingDimension(): number | null {
     try {
-      const stmt = this.db.prepare('SELECT embedding FROM pdf_chunks WHERE embedding IS NOT NULL LIMIT 1');
-      const row = stmt.get() as { embedding: Buffer } | undefined;
-
-      console.log('🔍 Checking embedding dimension...', {
-        hasRow: !!row,
-        hasEmbedding: row ? !!row.embedding : false,
-        embeddingType: row ? typeof row.embedding : 'N/A',
-        embeddingByteLength: row?.embedding ? row.embedding.byteLength : 0
-      });
-
-      if (!row || !row.embedding) {
+      const dimension = this.embeddingDimensions()[0]?.dimension ?? null;
+      if (dimension === null) {
         console.log('⚠️  No embeddings found in database');
         return null;
       }
-
-      // Embedding is stored as Buffer, convert to Float32Array to get dimension
-      const embedding = new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4);
-      const dimension = embedding.length;
       console.log(`✅ Embedding dimension detected: ${dimension}`);
       return dimension;
     } catch (error) {
       console.error('❌ Error detecting embedding dimension:', error);
       return null;
     }
+  }
+
+  /**
+   * Les dimensions des extraits embarqués, de la plus représentée à la moins représentée (L04-7). Une
+   * base où deux modèles ont écrit (modèle changé, PDF pas tous réindexés) prend la dimension du plus
+   * grand nombre : le `LIMIT 1` sans ordre d'avant prenait celle d'une ligne quelconque. À égalité,
+   * la plus grande, pour que deux ouvertures choisissent la même. Lit la longueur des vecteurs, pas
+   * leur contenu. Lève si la base ne se lit pas.
+   */
+  embeddingDimensions(): Array<{ dimension: number; chunks: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT length(embedding) AS bytes, COUNT(*) AS chunks FROM pdf_chunks
+         WHERE embedding IS NOT NULL AND length(embedding) > 0
+         GROUP BY bytes ORDER BY chunks DESC, bytes DESC`
+      )
+      .all() as Array<{ bytes: number; chunks: number }>;
+    // Float32 : quatre octets par composante.
+    return rows.map((row) => ({ dimension: row.bytes / 4, chunks: row.chunks }));
+  }
+
+  /**
+   * Refuse, avant toute écriture, des vecteurs d'une autre dimension que ceux du corpus : le modèle
+   * d'embeddings a changé depuis la première indexation (L04-7). Écrits, ils sortaient de la recherche
+   * par le sens sans un mot, ou en faisaient sortir le reste du corpus. Un corpus sans extrait
+   * embarqué accepte toute dimension. Lève `EmbeddingSpaceMismatchError` ; rend la dimension du
+   * corpus, null s'il est vide.
+   */
+  checkEmbeddingDimension(dimension: number): number | null {
+    const corpus = this.embeddingDimensions()[0]?.dimension ?? null;
+    if (corpus !== null && corpus !== dimension) {
+      throw new EmbeddingSpaceMismatchError({ kind: 'dimension', expected: corpus, actual: dimension });
+    }
+    return corpus;
   }
 
   // MARK: - Search Operations
@@ -689,8 +711,10 @@ export class VectorStore {
       (chunkWithEmbedding) => chunkWithEmbedding.embedding.length === queryEmbedding.length
     );
     if (comparable.length === 0 && allChunks.length > 0) {
-      throw new Error(
-        `Query embedding dimension mismatch: expected ${allChunks[0].embedding.length}, got ${queryEmbedding.length}`
+      const expected = allChunks[0].embedding.length;
+      throw new EmbeddingSpaceMismatchError(
+        { kind: 'dimension', expected, actual: queryEmbedding.length },
+        `Query embedding dimension mismatch: expected ${expected}, got ${queryEmbedding.length}`
       );
     }
     if (comparable.length < allChunks.length) {
