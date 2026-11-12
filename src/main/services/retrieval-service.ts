@@ -106,6 +106,15 @@ interface SearchCapture {
   readonly generation: number;
   /** Lève `ProjectChangedError` si le magasin a été rendu depuis l'entrée de la recherche. */
   assertCurrent(): void;
+  /**
+   * Par texte embarqué, ce qu'a trouvé la première consultation du cache dans cette recherche : `true`
+   * si l'embedding y était déjà avant elle (S04-2-5). `fanOutCorpora` interroge les corpus l'un après
+   * l'autre : le premier qui embarque la question la range dans le cache, et les suivants du même tour
+   * (vault, manuscrit, notes de lecture) l'y trouvent. Seule la première consultation dit donc l'état
+   * d'avant le tour ; sans cette règle, une question posée pour la première fois avec plusieurs corpus
+   * dans la portée afficherait « (cache) ».
+   */
+  readonly cacheLookups: Map<string, boolean>;
 }
 
 /**
@@ -753,6 +762,7 @@ class RetrievalService {
       assertCurrent: () => {
         if (this.storeGeneration !== generation) throw new ProjectChangedError();
       },
+      cacheLookups: new Map(),
     };
   }
 
@@ -764,6 +774,7 @@ class RetrievalService {
     const provider = await this.resolveEmbedding();
     const providerId = RetrievalService.providerKey(provider);
     let embedding = queryEmbeddingCache.get(query, providerId);
+    if (!captured.cacheLookups.has(query)) captured.cacheLookups.set(query, embedding !== undefined);
     if (!embedding) {
       embedding = await RetrievalService.embedQuery(provider, query);
       queryEmbeddingCache.set(query, embedding, providerId);
@@ -780,8 +791,13 @@ class RetrievalService {
    */
   async searchWithStats(q: RetrievalQuery): Promise<RetrievalSearchWithStatsResult> {
     const t0 = Date.now();
-    const { hits, manuscriptHits, readingNoteHits, outcomes, securityEvents } = await this.search(q);
+    const captured = this.captureStore(this.ensureReady());
+    const { hits, manuscriptHits, readingNoteHits, outcomes, securityEvents } =
+      await this.trackSearch(q, captured);
     const searchMs = Date.now() - t0;
+    // « (cache) » au panneau d'explication : l'embedding de la question elle-même était déjà là. Sans
+    // consultation (sources primaires seules : Tropy embarque de son côté), rien ne vient du cache.
+    const cacheHit = captured.cacheLookups.get(q.query) === true;
 
     const documentMap = new Map<
       string,
@@ -836,7 +852,7 @@ class RetrievalService {
           query: q.query,
           totalResults: hits.length,
           searchDurationMs: searchMs,
-          cacheHit: false,
+          cacheHit,
           sourceType,
           documents: Array.from(documentMap.values()).slice(0, 10),
           corpora,
@@ -868,7 +884,10 @@ class RetrievalService {
   }
 
   async search(q: RetrievalQuery): Promise<RetrievalSearchResult> {
-    const captured = this.captureStore(this.ensureReady());
+    return this.trackSearch(q, this.captureStore(this.ensureReady()));
+  }
+
+  private trackSearch(q: RetrievalQuery, captured: SearchCapture): Promise<RetrievalSearchResult> {
     // Suivie jusqu'à sa fin : une fermeture du magasin l'attend (`drainSearches`).
     const run = this.runSearch(q, captured);
     this.inFlightSearches.set(run, captured.generation);
