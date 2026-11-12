@@ -2655,5 +2655,10 @@
     "title": "Ollama needs macOS 14",
     "message": "You are running macOS {{version}}: Ollama cannot be installed on it. For local AI, the embedded models remain, more modest: in Settings, Expert mode, download a generation model and the embedding model. Otherwise, choose a cloud provider.",
     "details": "Without an embedding model, your sources can be neither indexed nor searched. The engine behind the embedded models is built for macOS 14: it answered on macOS 12 in one test, but nothing is guaranteed below. This message will not come back once closed."
+  },
+  "messages": {
+    "errors": {
+      "noResponse": "ClioDeck received no answer to this request."
+    }
   }
 }
