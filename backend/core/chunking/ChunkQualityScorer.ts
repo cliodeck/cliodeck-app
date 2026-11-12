@@ -5,7 +5,8 @@
  * - Shannon entropy: Measures lexical diversity (higher = more information)
  * - Unique word ratio: Proportion of unique words (higher = less repetition)
  * - Average word length: Detects OCR garbage (too short or too long)
- * - Sentence count: Indicates coherence (very few = fragment)
+ * - Sentence count: Indicates coherence (very few = fragment), only required
+ *   of a fragment (`SENTENCE_REQUIRED_BELOW_WORDS`)
  */
 
 export interface ChunkQualityScore {
@@ -34,6 +35,14 @@ const DEFAULT_QUALITY_CONFIG: QualityFilterConfig = {
   maxAvgWordLength: 20,
   minAvgWordLength: 2,
 };
+
+/**
+ * Une phrase n'est exigée que d'un extrait de moins de 50 mots : un fragment.
+ * Au-delà, un extrait sans ponctuation est une liste, un inventaire, un
+ * tableau ou un registre, que le découpage recoupe exprès en tranches de mots
+ * (#157) : l'exiger de lui les jetait en entier, sans aucun signe (S03-1-27).
+ */
+const SENTENCE_REQUIRED_BELOW_WORDS = 50;
 
 export class ChunkQualityScorer {
   private config: QualityFilterConfig;
@@ -82,37 +91,13 @@ export class ChunkQualityScorer {
     score: ChunkQualityScore,
     config?: Partial<QualityFilterConfig>
   ): boolean {
-    const thresholds = { ...this.config, ...config };
-
-    // Check each criterion
-    if (score.entropy < thresholds.minEntropy) {
-      return false;
-    }
-
-    if (score.uniqueWordRatio < thresholds.minUniqueWordRatio) {
-      return false;
-    }
-
-    if (score.sentenceCount < thresholds.minSentenceCount) {
-      return false;
-    }
-
-    if (score.wordCount < thresholds.minWordCount) {
-      return false;
-    }
-
-    if (
-      score.avgWordLength > thresholds.maxAvgWordLength ||
-      score.avgWordLength < thresholds.minAvgWordLength
-    ) {
-      return false;
-    }
-
-    return true;
+    // Une seule règle : la décision et la raison donnée ne peuvent diverger.
+    return this.getRejectionReason(score, config) === null;
   }
 
   /**
-   * Get rejection reason for debugging
+   * La raison du rejet, ou `null` si l'extrait est retenu : c'est elle qui
+   * décide (`meetsQualityThreshold`).
    */
   getRejectionReason(
     score: ChunkQualityScore,
@@ -128,13 +113,8 @@ export class ChunkQualityScorer {
       return `low unique word ratio (${score.uniqueWordRatio.toFixed(2)} < ${thresholds.minUniqueWordRatio})`;
     }
 
-    if (score.sentenceCount < thresholds.minSentenceCount) {
-      return `too few sentences (${score.sentenceCount} < ${thresholds.minSentenceCount})`;
-    }
-
-    if (score.wordCount < thresholds.minWordCount) {
-      return `too few words (${score.wordCount} < ${thresholds.minWordCount})`;
-    }
+    const sizeReason = this.sizeRejection(score, thresholds);
+    if (sizeReason) return sizeReason;
 
     if (score.avgWordLength > thresholds.maxAvgWordLength) {
       return `avg word too long (${score.avgWordLength.toFixed(1)} > ${thresholds.maxAvgWordLength})`;
@@ -147,7 +127,33 @@ export class ChunkQualityScorer {
     return null;
   }
 
+  /**
+   * Vrai si le filtre écarterait cet extrait pour sa seule taille, aux seuils
+   * de ce filtre : trop peu de mots, ou un fragment sans phrase. Quelle que soit
+   * sa qualité, il ne passera pas : `AdaptiveChunker` lui donne alors en
+   * recouvrement les mots du bloc sans ponctuation qu'il touche.
+   */
+  isFragment(content: string): boolean {
+    return this.sizeRejection(this.scoreChunk(content), this.config) !== null;
+  }
+
   // MARK: - Private Methods
+
+  /** La raison d'écarter un extrait pour sa seule taille, ou `null`. */
+  private sizeRejection(score: ChunkQualityScore, thresholds: QualityFilterConfig): string | null {
+    if (
+      score.wordCount < SENTENCE_REQUIRED_BELOW_WORDS &&
+      score.sentenceCount < thresholds.minSentenceCount
+    ) {
+      return `too few sentences (${score.sentenceCount} < ${thresholds.minSentenceCount})`;
+    }
+
+    if (score.wordCount < thresholds.minWordCount) {
+      return `too few words (${score.wordCount} < ${thresholds.minWordCount})`;
+    }
+
+    return null;
+  }
 
   /**
    * Tokenize text into words
@@ -243,6 +249,31 @@ export class ChunkQualityScorer {
       weights.lengthScore * lengthScore +
       weights.sentenceScore * sentenceScore
     );
+  }
+
+  /**
+   * L'extrait à garder quand tous sont écartés : celui qui a le plus de mots,
+   * à égalité le meilleur score global, puis le premier. Ne dépend que des
+   * textes et de leur ordre : deux passes sur le même texte gardent le même
+   * extrait.
+   *
+   * Pas le score d'abord : la part de mots distincts baisse d'elle-même avec la
+   * longueur, et une feuille d'appel de 750 mots gardait les 6 derniers, déjà
+   * contenus dans l'extrait précédent (mesuré).
+   */
+  bestChunk<T extends { content: string }>(chunks: readonly T[]): T | undefined {
+    let best: { chunk: T; score: ChunkQualityScore } | undefined;
+    for (const chunk of chunks) {
+      const score = this.scoreChunk(chunk.content);
+      if (
+        !best ||
+        score.wordCount > best.score.wordCount ||
+        (score.wordCount === best.score.wordCount && score.overallScore > best.score.overallScore)
+      ) {
+        best = { chunk, score };
+      }
+    }
+    return best?.chunk;
   }
 
   /**

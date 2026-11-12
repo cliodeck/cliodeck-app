@@ -19,6 +19,7 @@
 import { describe, it, expect } from 'vitest';
 import { AdaptiveChunker } from '../core/chunking/AdaptiveChunker.js';
 import { CHUNKING_CONFIGS } from '../core/chunking/DocumentChunker.js';
+import { ChunkQualityScorer } from '../core/chunking/ChunkQualityScorer.js';
 import type { DocumentChunk, DocumentPage } from '../types/pdf-document.js';
 
 const MAX = CHUNKING_CONFIGS.cpuOptimized.maxChunkSize;
@@ -41,6 +42,15 @@ const ids = (text: string) => [...text.matchAll(/\bs(\d+)\b/g)].map((m) => Numbe
 const body = (chunk: DocumentChunk) => chunk.content.replace(/^\[Doc: [^\]]*\]\n\n/, '');
 const chunkPdf = (pages: DocumentPage[]) =>
   new AdaptiveChunker(CHUNKING_CONFIGS.cpuOptimized).createChunks(pages, 'doc', { title: 'Titre du document' });
+
+/** Les extraits que garde le filtre de qualité, aux seuils de l'indexation des PDF. */
+const pdfFilter = (chunks: DocumentChunk[]) =>
+  new ChunkQualityScorer().filterByQuality(chunks, { minEntropy: 0.3, minUniqueWordRatio: 0.4 }, false).passed;
+
+/** Deux phrases, de 11 et de 12 mots. */
+const PREAMBLE_23 =
+  'Archives départementales de la Marne, série M, police générale, cartons 1914. ' +
+  'Inventaire sommaire des liasses du carton établi par l’archiviste adjoint en 1921.';
 
 /** Pour chaque extrait, le numéro de la première phrase qui lui est propre (hors recouvrement). */
 function firstOwnSentence(chunks: DocumentChunk[]): number[] {
@@ -73,6 +83,81 @@ describe('AdaptiveChunker — taille des extraits (#157)', () => {
 
     for (const chunk of chunks) expect(words(chunk.content).length).toBeLessThanOrEqual(MAX);
     expect(chunks.flatMap((chunk) => words(chunk.content)).join(' ')).toBe(table);
+  });
+
+  // Un bloc sans ponctuation (S03-1-27) laissait des extraits de quelques mots,
+  // que le filtre de qualité jetait : le court énoncé qui le précède, la
+  // courte formule qui le suit, la fin de son découpage en tranches. Trop
+  // courts pour le filtre, ils reprennent en recouvrement les mots du bloc qui
+  // les touchent ; le découpage, lui, ne change pas.
+  it.each([
+    { cas: 'un court énoncé avant le bloc', heading: 'Inventaire des liasses du carton.', count: 700, closing: '' },
+    {
+      cas: 'deux courtes phrases avant le bloc',
+      heading: 'Archives départementales de la Marne, série M. Inventaire sommaire des liasses.',
+      count: 590,
+      closing: '',
+    },
+    {
+      // Le préambule de 23 mots fait seul un extrait que le filtre garde : il
+      // ne doit pas être coupé en deux, sa première phrase restant seule.
+      cas: 'deux phrases de 11 et 12 mots avant un bloc de 568 mots',
+      heading: PREAMBLE_23,
+      count: 568,
+      closing: '',
+    },
+    {
+      cas: 'une formule de douze mots après un bloc de 1 180 mots',
+      heading: '',
+      count: 1180,
+      closing: 'Fait à Reims le 3 août 1914, le préfet de la Marne.',
+    },
+    {
+      cas: 'une formule de douze mots après un bloc de 590 mots',
+      heading: '',
+      count: 590,
+      closing: 'Fait à Reims le 3 août 1914, le préfet de la Marne.',
+    },
+    { cas: 'un bloc de 1 205 mots', heading: '', count: 1205, closing: '' },
+  ])('$cas : le filtre des PDF garde tout, aucun extrait au-delà de la limite, le texte propre se suit sans trou', ({ heading, count, closing }) => {
+    const table = Array.from({ length: count }, (_, i) => `m${i}`).join(' ');
+    const text = [heading, closing ? `${table}.` : table, closing].filter(Boolean).join(' ');
+
+    const chunks = new AdaptiveChunker(CHUNKING_CONFIGS.cpuOptimized).createChunks(
+      [{ pageNumber: 1, text }],
+      'doc'
+    );
+
+    for (const chunk of chunks) expect(words(chunk.content).length).toBeLessThanOrEqual(MAX);
+    expect(pdfFilter(chunks)).toHaveLength(chunks.length);
+    if (heading) expect(chunks[0].content.startsWith(heading)).toBe(true);
+    // Le recouvrement est une copie : la position désigne le texte propre, et
+    // les textes propres, bout à bout, redonnent le texte.
+    expect(chunks.map((chunk) => text.slice(chunk.startPosition, chunk.endPosition)).join(' ')).toBe(text);
+  });
+
+  // Une feuille d'appel (« N12 k présent ») est trop répétitive pour le filtre :
+  // ses tranches sont écartées. Ce qui l'entoure ne doit pas l'être avec elles.
+  // 600 et 603 mots : la formule qui suit la feuille fait seule un extrait trop
+  // court (ou presque seule : 3 mots de la feuille avant elle).
+  it.each([
+    { cas: 'un préambule de 23 mots, qui fait seul son extrait', heading: PREAMBLE_23, closing: '' },
+    { cas: 'un énoncé de 11 mots', heading: 'Archives départementales de la Marne, série M. Inventaire sommaire des liasses.', closing: '' },
+    { cas: 'une formule de douze mots après elle', heading: '', closing: 'Fait à Reims le 3 août 1914, le préfet de la Marne.' },
+  ])('$cas autour d’une feuille d’appel trop répétitive : il reste dans l’index', ({ heading, closing }) => {
+    for (const entries of [200, 201]) {
+      const roll = Array.from({ length: entries }, (_, i) => `N${i} k présent`).join(' ');
+      const text = [heading, closing ? `${roll}.` : roll, closing].filter(Boolean).join(' ');
+
+      const chunks = new AdaptiveChunker(CHUNKING_CONFIGS.cpuOptimized).createChunks(
+        [{ pageNumber: 1, text }],
+        'doc',
+        { title: 'Feuille d’appel' }
+      );
+      const kept = new Set(pdfFilter(chunks).flatMap((chunk) => words(chunk.content)));
+
+      expect(words(heading || closing).filter((word) => !kept.has(word))).toEqual([]);
+    }
   });
 
   it('relie deux extraits consécutifs par un recouvrement', () => {

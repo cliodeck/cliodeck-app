@@ -24,6 +24,7 @@ import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-gu
 import { makeTpy } from '../../../../backend/integrations/tropy/__tests__/helpers/make-tpy';
 import { TropyOCRPipeline } from '../../../../backend/integrations/tropy/TropyOCRPipeline';
 import { PrimarySourcesVectorStore } from '../../../../backend/core/vector-store/PrimarySourcesVectorStore';
+import { stripChunkHeader } from '../../../../backend/core/chunking/chunk-text';
 
 const handlers = vi.hoisted(() => new Map<string, (event: unknown, ...args: unknown[]) => unknown>());
 vi.mock('electron', () => ({
@@ -594,5 +595,230 @@ describe.skipIf(!sqliteAvailable)('écriture pendant la reconnaissance : l’OCR
     // Une reconnaissance jetée n'est ni une panne, ni un OCR « effectué ».
     expect(result.issues).toEqual([]);
     expect(result.ocrPerformed).toBe(0);
+  });
+});
+
+// MARK: - Filtre de qualité
+
+/**
+ * Le filtre de qualité des PDF s'appliquait tel quel aux archives : une phrase
+ * (une ponctuation finale suivie d'un blanc) et 20 mots exigés de chaque
+ * extrait. Un télégramme (« … STOP »), une liste nominative, une feuille
+ * d'appel ou une courte note sans point n'en avaient aucun : tous leurs
+ * extraits étaient jetés. La source gardait sa transcription, le panneau la
+ * disait transcrite, mais l'assistant et `search_tropy` ne la trouvaient
+ * jamais (S08-2-0). Une source transcrite a désormais au moins un extrait.
+ */
+describe.skipIf(!sqliteAvailable)('filtre de qualité : une source transcrite a au moins un extrait (S08-2-0)', () => {
+  const TELEGRAM =
+    'PREFET MARNE A INTERIEUR PARIS URGENT STOP COLONNES ENNEMIES SIGNALEES AUX ABORDS DE REIMS STOP ' +
+    'POPULATION QUITTE LA VILLE PAR ROUTE EPERNAY STOP DEMANDE INSTRUCTIONS STOP';
+  /** Une légende d'archiviste : seize mots, pas de point. */
+  const NOTE_16 = 'Carte postale envoyée du front par le sergent Martin à sa femme restée seule à Épernay';
+  const HOSTAGES =
+    'Liste des otages désignés par la Kommandantur Lefebvre Henri boulanger rue de Vesle ' +
+    'Dumontier Paul instituteur place Drouet Gosset Marcel cafetier faubourg Cérès Huguin Louis vigneron';
+  /**
+   * Une feuille d'appel : 250 lignes « N k présent », 750 mots trop répétitifs
+   * pour le filtre. Son découpage finit par un extrait de quelques mots, déjà
+   * contenus dans le précédent.
+   */
+  const ROLL_CALL = Array.from({ length: 250 }, (_, i) => `N ${i + 1} présent`).join(' ');
+
+  async function linkArchives(): Promise<void> {
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: [
+        { id: 20, title: 'Télégramme du préfet', notes: [{ text: TELEGRAM }] },
+        { id: 21, title: 'Carte du sergent', notes: [{ text: NOTE_16 }] },
+        { id: 22, title: 'Otages', notes: [{ text: HOSTAGES }] },
+        { id: 23, title: 'Appel', notes: [{ text: ROLL_CALL }] },
+      ],
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+  }
+
+  const sourceTitled = (title: string) => {
+    const source = tropyService.getAllSources().find((s) => s.title === title);
+    if (!source) throw new Error(`source absente : ${title}`);
+    return source;
+  };
+
+  it('télégramme, courte note sans point, liste nominative, feuille d’appel : chacun a au moins un extrait', async () => {
+    await linkArchives();
+    const result = await tropyService.sync(syncOptions);
+    expect(result.success).toBe(true);
+    expect(result.issues).toEqual([]);
+
+    expect(chunksOf(sourceTitled('Télégramme du préfet').id).join(' ')).toContain('DEMANDE INSTRUCTIONS STOP');
+    expect(chunksOf(sourceTitled('Carte du sergent').id).join(' ')).toContain('restée seule à Épernay');
+    expect(chunksOf(sourceTitled('Otages').id).join(' ')).toContain('Dumontier Paul instituteur');
+    // Tous ses extraits sont écartés, pour leur part de mots distincts : le
+    // meilleur reste, et c'est un extrait plein, pas la fin de quelques mots.
+    // Les lignes des autres extraits restent hors de l'index : le critère des
+    // mots distincts est une question posée à l'auteur, pas une règle voulue.
+    const rollCall = chunksOf(sourceTitled('Appel').id);
+    expect(rollCall.length).toBeGreaterThanOrEqual(1);
+    expect(Math.max(...rollCall.map((chunk) => chunk.split(/\s+/).length))).toBeGreaterThanOrEqual(250);
+  });
+
+  /** Des noms tous distincts, d'une majuscule. */
+  const name = (n: number) => {
+    const w = word(n);
+    return w[0].toUpperCase() + w.slice(1);
+  };
+
+  it('une liste nominative à tirets (« Nom Prénom – métier – ») : tous ses noms sont dans l’index', async () => {
+    // Le découpage compte les tirets comme des mots, pas le filtre : la fin de
+    // la liste, qui dépasse l'extrait précédent, comptait moins de 50 mots
+    // pour le filtre, sans phrase, et les derniers noms sortaient de l'index.
+    const sizes = [60, 62, 64];
+    const lists = sizes.map((size, s) =>
+      Array.from({ length: size }, (_, i) => {
+        const n = 3000 + 300 * s + 3 * i;
+        return { surname: name(n), entry: `${name(n)} ${name(n + 1)} – ${word(n + 2)} –` };
+      })
+    );
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: lists.map((list, s) => ({
+        id: 40 + s,
+        title: `Liste ${s}`,
+        notes: [{ text: list.map((e) => e.entry).join(' ') }],
+      })),
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+
+    expect((await tropyService.sync(syncOptions)).success).toBe(true);
+
+    lists.forEach((list, s) => {
+      const indexed = new Set(chunksOf(sourceTitled(`Liste ${s}`).id).join(' ').split(/\s+/));
+      expect(list.filter((e) => !indexed.has(e.surname)).map((e) => e.surname)).toEqual([]);
+    });
+  });
+
+  it('une longue liste sans ponctuation, sur plusieurs extraits : tous ses noms sont dans l’index, et aucun extrait n’en répète un autre', async () => {
+    // 260 lignes « Nom Prénom métier » : 780 mots, et 3 de titre. Le découpage
+    // donne trois extraits, puis une fin de 33 mots tout entière dans le
+    // troisième, qui ne sert à rien.
+    const entries = Array.from({ length: 260 }, (_, i) => ({ surname: name(4000 + 3 * i), n: 4000 + 3 * i }));
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: [
+        {
+          id: 50,
+          title: 'Liste longue',
+          notes: [{ text: entries.map((e) => `${e.surname} ${name(e.n + 1)} ${word(e.n + 2)}`).join(' ') }],
+        },
+      ],
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+
+    expect((await tropyService.sync(syncOptions)).success).toBe(true);
+
+    const chunks = chunksOf(sourceTitled('Liste longue').id).map(stripChunkHeader);
+    expect(chunks.length).toBeGreaterThan(1);
+    const indexed = new Set(chunks.join(' ').split(/\s+/));
+    expect(entries.filter((e) => !indexed.has(e.surname)).map((e) => e.surname)).toEqual([]);
+    chunks.forEach((chunk, i) => {
+      expect(chunks.some((other, j) => j !== i && other.includes(chunk))).toBe(false);
+    });
+  });
+
+  it('un registre matricule après une lettre, ou seul : ses dernières entrées restent dans l’index', async () => {
+    // Un registre aux champs répétés (« … né le … 1894 à … classe 1914. ») a
+    // des extraits sous 0,4 de mots distincts. Sa fin, contenue dans l'extrait
+    // précédent, passe le filtre seule. Elle ne peut s'écarter, comme
+    // redondante, que si cet extrait est gardé : écartée avant le filtre, elle
+    // emportait les derniers matricules, que l'index avait avant (revue L06-8).
+    const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin'];
+    const TOWNS = ['Reims', 'Épernay', 'Châlons', 'Sézanne'];
+    const letter = Array.from({ length: 60 }, (_, i) => word(7000 + i) + (i % 12 === 11 ? '.' : '')).join(' ');
+    const register = (entries: number) =>
+      Array.from(
+        { length: entries },
+        (_, i) =>
+          `${name(100 + 2 * i)} ${name(101 + 2 * i)} matricule ${1200 + i} né le ${1 + (i % 28)} ${MONTHS[i % 6]} ` +
+          `1894 à ${TOWNS[i % 4]} cultivateur classe 1914.`
+      ).join(' ');
+    const cases = [
+      { title: 'Lettre et registre de 32', text: `${letter} ${register(32)}`, last: 1231 },
+      { title: 'Lettre et registre de 34', text: `${letter} ${register(34)}`, last: 1233 },
+      { title: 'Registre de 37', text: register(37), last: 1236 },
+    ];
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: cases.map((c, i) => ({ id: 60 + i, title: c.title, notes: [{ text: c.text }] })),
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+
+    expect((await tropyService.sync(syncOptions)).success).toBe(true);
+
+    const lastIndexed = (c: (typeof cases)[number]) =>
+      new Set(chunksOf(sourceTitled(c.title).id).join(' ').split(/\s+/)).has(String(c.last));
+    expect(cases.map((c) => [c.title, lastIndexed(c)])).toEqual(cases.map((c) => [c.title, true]));
+  });
+
+  it('un nom de la liste nominative, cherché : la recherche lexicale la place en tête', async () => {
+    await linkArchives();
+    await tropyService.sync(syncOptions);
+    const hostages = sourceTitled('Otages');
+
+    // Le magasin relu sur disque. La question dense est le texte du télégramme :
+    // seul le lexical (BM25, et le bonus du mot exact) peut mettre la liste en tête.
+    const reopened = new PrimarySourcesVectorStore(projectDir);
+    try {
+      const results = reopened.search(new Float32Array(hashedVector(TELEGRAM)), 5, 'Dumontier');
+      expect(results[0]?.chunk.sourceId).toBe(hostages.id);
+    } finally {
+      vi.spyOn(reopened, 'saveHNSWIndex').mockImplementation(() => undefined);
+      reopened.close();
+    }
+  });
+
+  it('une source transcrite restée sans extrait : la synchro suivante l’indexe, sans OCR, sans toucher sa transcription', async () => {
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const photo = path.join(tropyDir, 'telegramme.jpg');
+    fs.writeFileSync(photo, 'jpeg factice');
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: [{ id: 30, title: 'Télégramme du préfet', photos: [{ id: 31, path: photo }] }],
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+    const ocr = vi
+      .spyOn(TropyOCRPipeline.prototype, 'performBatchOCR')
+      .mockResolvedValue({ text: TELEGRAM, confidence: 82, language: 'fra', pageCount: 1 });
+
+    // Une source OCRisée sans extrait en base : l'état que laissait l'ancien
+    // filtre (ici, Ollama arrêté pendant la synchro qui a fait l'OCR).
+    await setProvider('down');
+    await tropyService.sync({ performOCR: true, ocrLanguage: 'fra' });
+    const [source] = tropyService.getAllSources();
+    const transcribed = sourceRow(source.id);
+    expect(transcribed).toMatchObject({ transcription: TELEGRAM, transcription_source: 'tesseract' });
+    expect(chunksOf(source.id)).toEqual([]);
+    expect(ocr).toHaveBeenCalledTimes(1);
+
+    await setProvider('ok');
+    const result = await tropyService.sync({ performOCR: true, ocrLanguage: 'fra' });
+
+    expect(result.issues).toEqual([]);
+    expect(chunksOf(source.id).join(' ')).toContain('DEMANDE INSTRUCTIONS STOP');
+    expect(ocr).toHaveBeenCalledTimes(1);
+    expect(sourceRow(source.id)).toEqual(transcribed);
   });
 });

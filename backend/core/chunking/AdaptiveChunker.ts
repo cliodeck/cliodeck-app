@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { DocumentPage, DocumentChunk } from '../../types/pdf-document';
 import { CHUNKING_CONFIGS, type ChunkingConfig } from './DocumentChunker';
+import { ChunkQualityScorer } from './ChunkQualityScorer';
 
 /**
  * Adaptive Chunker using structure-aware splitting
@@ -20,6 +21,11 @@ import { CHUNKING_CONFIGS, type ChunkingConfig } from './DocumentChunker';
  */
 export class AdaptiveChunker {
   private config: ChunkingConfig;
+  /**
+   * Le filtre de qualité à ses seuils par défaut, ceux de taille que
+   * l'indexation des PDF emploie : de quoi reconnaître un extrait trop court.
+   */
+  private qualityFilter = new ChunkQualityScorer();
 
   constructor(config: ChunkingConfig = CHUNKING_CONFIGS.cpuOptimized) {
     this.config = config;
@@ -258,6 +264,16 @@ export class AdaptiveChunker {
    *
    * Rien n'est écarté : ni la fin d'une section trop courte pour faire un
    * extrait « normal », ni la fin d'un extrait qui ne tombe pas sur un point.
+   *
+   * Un extrait trop court pour le filtre de qualité, voisin d'un bloc sans
+   * ponctuation (liste, inventaire, tableau), reprend en recouvrement les mots
+   * du bloc qui le touchent : `overlapSize` mots, ses derniers s'il le suit,
+   * ses premiers s'il le précède. Seuls, le court énoncé qui ouvre un
+   * inventaire, la formule qui le ferme ou la fin de son découpage en tranches
+   * faisaient un extrait de quelques mots, que le filtre jetait (S03-1-27). Une
+   * copie, et non une place dans les tranches du bloc : une tranche trop
+   * répétitive est écartée, et ce qu'elle contient avec elle. Le découpage ne
+   * change pas, et la page et la position restent celles du texte propre.
    */
   private chunkSection(
     section: Section,
@@ -269,25 +285,42 @@ export class AdaptiveChunker {
     const max = this.config.maxChunkSize;
     const chunks: DocumentChunk[] = [];
 
-    let body: TextRange[] = [];
+    let body: Unit[] = [];
     let bodyWords = 0;
     let overlap = '';
     let overlapWords = 0;
+    // Les derniers mots du dernier extrait, s'il finit par une tranche de bloc.
+    let blockTail = '';
 
-    const flush = () => {
+    const contentOf = (ownText: string, after = '') =>
+      this.enhanceChunkWithContext(
+        [overlap, ownText, after].filter(Boolean).join(' '),
+        documentMeta,
+        section.title
+      );
+
+    const flush = (next?: Unit) => {
       const start = body[0].start;
       const end = body[body.length - 1].end;
       const ownText = this.cleanText(source.text.slice(start, end));
       const from = source.locate(start);
 
+      // Trop court pour le filtre : les mots du bloc voisin, en recouvrement.
+      // Les bornes gardent la limite, recouvrement compris (#157).
+      let after = '';
+      if (this.qualityFilter.isFragment(contentOf(ownText))) {
+        if (blockTail) {
+          overlap = lastWords(blockTail, max - bodyWords);
+        } else if (next?.slice) {
+          const nextText = this.cleanText(source.text.slice(next.start, next.end));
+          after = firstWords(nextText, Math.min(this.config.overlapSize, max - overlapWords - bodyWords));
+        }
+      }
+
       chunks.push({
         id: randomUUID(),
         documentId,
-        content: this.enhanceChunkWithContext(
-          overlap ? `${overlap} ${ownText}` : ownText,
-          documentMeta,
-          section.title
-        ),
+        content: contentOf(ownText, after),
         // La page et la position sont celles du texte propre à l'extrait,
         // recouvrement exclu : là où un lecteur doit aller le chercher.
         pageNumber: from.pageNumber,
@@ -304,12 +337,13 @@ export class AdaptiveChunker {
       // Start next chunk with smart overlap (sentence boundaries)
       overlap = this.createSmartOverlap(ownText, this.config.overlapSize);
       overlapWords = countWords(overlap);
+      blockTail = body[body.length - 1].slice ? lastWords(ownText, this.config.overlapSize) : '';
       body = [];
       bodyWords = 0;
     };
 
     for (const unit of this.splitIntoUnits(source.text)) {
-      if (body.length > 0 && overlapWords + bodyWords + unit.words > max) flush();
+      if (body.length > 0 && overlapWords + bodyWords + unit.words > max) flush(unit);
 
       // Le recouvrement est un confort : il cède devant la limite.
       if (body.length === 0 && overlapWords + unit.words > max) {
@@ -329,12 +363,12 @@ export class AdaptiveChunker {
   /**
    * Les morceaux qu'on ne recoupe pas : un paragraphe s'il tient dans un
    * extrait, sinon ses phrases, et pour une phrase démesurée (tableau, liste
-   * sans ponctuation) des tranches de mots.
+   * sans ponctuation) des tranches de mots, marquées `slice`.
    */
-  private splitIntoUnits(text: string): TextRange[] {
+  private splitIntoUnits(text: string): Unit[] {
     const max = this.config.maxChunkSize;
     const whole: TextRange = { start: 0, end: text.length, words: 0 };
-    const units: TextRange[] = [];
+    const units: Unit[] = [];
 
     for (const paragraph of splitRange(text, whole, PARAGRAPH_BREAK)) {
       if (paragraph.words <= max) {
@@ -343,7 +377,7 @@ export class AdaptiveChunker {
       }
       for (const sentence of splitRange(text, paragraph, SENTENCE_BREAK)) {
         if (sentence.words <= max) units.push(sentence);
-        else units.push(...sliceByWords(text, sentence, max));
+        else units.push(...sliceByWords(text, sentence, max).map((slice) => ({ ...slice, slice: true })));
       }
     }
 
@@ -475,6 +509,11 @@ interface TextRange {
   words: number;
 }
 
+/** Un morceau qu'on ne recoupe pas ; `slice` : une tranche d'un bloc sans ponctuation. */
+interface Unit extends TextRange {
+  slice?: boolean;
+}
+
 type SectionType =
   | 'abstract'
   | 'introduction'
@@ -493,6 +532,16 @@ const SENTENCE_BREAK = /(?<=[.!?…][)\]"'’»]*)\s+/g;
 
 function countWords(text: string): number {
   return text.match(/\S+/g)?.length ?? 0;
+}
+
+/** Les `count` premiers mots de `text`. */
+function firstWords(text: string, count: number): string {
+  return (text.match(/\S+/g) ?? []).slice(0, count).join(' ');
+}
+
+/** Les `count` derniers mots de `text`. */
+function lastWords(text: string, count: number): string {
+  return count > 0 ? (text.match(/\S+/g) ?? []).slice(-count).join(' ') : '';
 }
 
 /** Les morceaux non vides de `range` que sépare `separator`. */

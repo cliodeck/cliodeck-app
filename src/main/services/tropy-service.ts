@@ -84,6 +84,29 @@ function ocrOptions(): { cachePath: string } {
   return { cachePath: path.join(app.getPath('userData'), 'tesseract-cache') };
 }
 
+/**
+ * Les extraits, sans ceux dont le texte est tout entier dans l'extrait gardé
+ * juste avant (positions dans le texte de la source). `DocumentChunker` avance
+ * de 250 mots et finit une source par un extrait de moins de 50 mots, contenu
+ * dans le précédent : l'indexer une seconde fois ne fait que prendre une place
+ * des résultats. La règle compare des positions, jamais des nombres de mots :
+ * le découpage compte un tiret pour un mot, pas le filtre de qualité, et une
+ * fin qui dépasse l'extrait précédent en comptait moins de 50 pour lui (L06-8).
+ * Appliquée aux extraits que le filtre garde, elle n'écarte une fin que si
+ * l'extrait qui la contient est gardé.
+ */
+function withoutContainedChunks<T extends { startPosition: number; endPosition: number }>(chunks: readonly T[]): T[] {
+  const kept: T[] = [];
+  for (const chunk of chunks) {
+    const previous = kept[kept.length - 1];
+    if (previous && chunk.startPosition >= previous.startPosition && chunk.endPosition <= previous.endPosition) {
+      continue;
+    }
+    kept.push(chunk);
+  }
+  return kept;
+}
+
 // MARK: - TropyService
 
 class TropyService {
@@ -1201,18 +1224,42 @@ class TropyService {
     const rawChunks = this.getRawChunks(fullText, source.id, { title: source.title });
     const initialChunkCount = rawChunks.length;
 
+    // Les extraits qui ne sont pas une fin contenue dans le précédent.
+    const wholeChunks = withoutContainedChunks(rawChunks);
+    let optimizedChunks = wholeChunks;
+
     // Quality filtering - remove low-quality chunks (works on DocumentChunk type)
-    let optimizedChunks = rawChunks;
-    if (this.qualityScorer && optimizedChunks.length > 0) {
-      const qualityResult = this.qualityScorer.filterByQuality(optimizedChunks, {
+    if (this.qualityScorer && rawChunks.length > 0) {
+      // Une archive n'a pas à faire des phrases ni 20 mots : un télégramme
+      // (« … STOP »), une liste nominative, un registre ou une courte note
+      // sans point perdaient tous leurs extraits (S08-2-0). Restent les
+      // filtres d'entropie, de mots distincts et de longueur des mots.
+      const qualityResult = this.qualityScorer.filterByQuality(rawChunks, {
         minEntropy: 0.3,
         minUniqueWordRatio: 0.4,
+        minSentenceCount: 0,
+        minWordCount: 3,
       }, false); // Don't log each filtered chunk
 
       if (qualityResult.stats.filteredChunks > 0) {
         console.log(`🎯 [TROPY] Quality filtering for "${source.title}": ${qualityResult.stats.passedChunks}/${qualityResult.stats.totalChunks} passed`);
       }
-      optimizedChunks = qualityResult.passed;
+      // Une fin contenue dans l'extrait précédent ne s'écarte, comme
+      // redondante, que si cet extrait est gardé. Écartée avant le filtre, elle
+      // emportait les dernières entrées d'un registre dont l'extrait qui la
+      // contient était trop répétitif pour le filtre.
+      let kept = withoutContainedChunks(qualityResult.passed);
+      // Une source transcrite a au moins un extrait plein : quand aucun ne
+      // passe (feuille d'appel trop répétitive, texte de deux mots), le
+      // meilleur reste, avec les fins gardées qu'il ne contient pas. Sans lui,
+      // le panneau la disait transcrite, mais ni l'assistant ni `search_tropy`
+      // ne la trouvaient jamais. La synchro suivante reprend d'elle-même une
+      // source restée sans extrait.
+      if (!kept.some((chunk) => wholeChunks.includes(chunk))) {
+        const best = this.qualityScorer.bestChunk(wholeChunks);
+        if (best) kept = withoutContainedChunks([best, ...kept].sort((a, b) => a.chunkIndex - b.chunkIndex));
+      }
+      optimizedChunks = kept;
     }
 
     // Deduplication - remove duplicate chunks (works on DocumentChunk type)
