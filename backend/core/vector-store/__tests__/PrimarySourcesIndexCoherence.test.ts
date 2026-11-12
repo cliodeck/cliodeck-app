@@ -356,19 +356,30 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — index écrit su
     vi.spyOn(second, 'saveHNSWIndex').mockImplementation(() => undefined);
     second.close();
 
-    // La méta relue étiquette encore les 200 extraits supprimés : leurs points ne doivent pas
-    // prendre les 50 places des candidats denses.
+    // La méta relue étiquette encore les 200 extraits supprimés : ils ne doivent plus être servis.
     const relaunched = open();
     expect(relaunched.checkHnswIndex()).toMatchObject({ missing: 0, stale: 200, needsRebuild: false });
-    // Le magasin rend `topK` extraits sans seuil : les extraits de remplissage (cosinus nul) suivent.
-    expect(relaunched.search(vector({ 0: 1 }), 10)[0]?.chunk.id).toBe('lettre');
+    // Ce que la relance garantit : les étiquettes relues ne pointent que vers des extraits en base.
+    // Leurs 200 points restent dans le graphe sans étiquette, et c'est ce qui active le filtre natif
+    // de `searchKnn` (moins d'étiquettes que de points) : servis, ils prenaient les 50 places des
+    // candidats denses.
+    const served = (relaunched as unknown as { hnswLabelMap: Map<number, string> }).hnswLabelMap;
+    expect(served.size).toBe(2201);
+    expect([...served.values()].filter((id) => id.startsWith('old-'))).toEqual([]);
+    // Pas d'assertion sur le rang de « lettre » : HNSW est approché. Insérée contre 200 voisins très
+    // proches, elle perd ses liens entrants au profit d'eux ; filtrés, ils peuvent ne plus y mener.
+    // L'issue dépend alors du tirage des niveaux du graphe, qui diffère entre la libc++ de macOS et
+    // la libstdc++ de la CI Linux : « lettre » en tête sur le Mac, « f-115 » en CI (#298). Mesuré en
+    // balayant la graine de hnswlib sur cette géométrie : « lettre » en tête pour 27 graines sur 40.
+    const ids = relaunched.search(vector({ 0: 1 }), 10).map((r) => r.chunk.id);
+    expect(ids.filter((id) => id.startsWith('old-'))).toEqual([]);
 
-    // La source réembarquée (la synchro suivante la reprend) : son nouvel extrait sort dès la relance.
+    // La source réembarquée (la synchro suivante la reprend) : son nouvel extrait est servi.
     relaunched.replaceSourceChunks('src-1', [
       { chunk: chunk('src-1', 'new', 'lecture corrigée'), embedding: vector({ 0: 1, 500: 1 }) },
     ]);
-    const ids = relaunched.search(vector({ 0: 1 }), 10).map((r) => r.chunk.id);
-    expect(ids.slice(0, 2).sort()).toEqual(['lettre', 'new']);
+    expect(served.size).toBe(2202);
+    expect([...served.values()]).toContain('new');
     relaunched.close();
 
     // `project:health` compare `currentSize` aux extraits embarqués : 2 202, sans faux écart.
