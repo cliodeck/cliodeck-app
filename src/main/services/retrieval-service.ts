@@ -108,8 +108,11 @@ interface SearchCapture {
   assertCurrent(): void;
   /**
    * Par texte embarqué, ce qu'a trouvé la première consultation du cache dans cette recherche : `true`
-   * si l'embedding y était déjà avant elle (S04-2-5). Les corpus partent en parallèle et le premier
-   * qui calcule l'embedding le range : seule la première consultation dit l'état d'avant le tour.
+   * si l'embedding y était déjà avant elle (S04-2-5). `fanOutCorpora` interroge les corpus l'un après
+   * l'autre : le premier qui embarque la question la range dans le cache, et les suivants du même tour
+   * (vault, manuscrit, notes de lecture) l'y trouvent. Seule la première consultation dit donc l'état
+   * d'avant le tour ; sans cette règle, une question posée pour la première fois avec plusieurs corpus
+   * dans la portée afficherait « (cache) ».
    */
   readonly cacheLookups: Map<string, boolean>;
 }

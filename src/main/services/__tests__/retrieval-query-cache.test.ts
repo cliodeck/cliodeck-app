@@ -151,6 +151,34 @@ describe.skipIf(!sqliteAvailable)('cache des embeddings de requête', () => {
     expect(otherModel.stats.search.cacheHit).toBe(false);
   });
 
+  // Plusieurs corpus dans la portée (le cas ordinaire en Écriture : le manuscrit est indexé par
+  // défaut). `fanOutCorpora` les interroge l'un après l'autre : la bibliographie embarque la question
+  // et la range dans le cache, puis le vault et le manuscrit l'y trouvent dans le même tour. Seule la
+  // première consultation dit l'état d'avant le tour ; sans cette règle, une question posée pour la
+  // première fois afficherait « (cache) ».
+  it('panneau d’explication : plusieurs corpus dans le même tour, la première question ne vient pas du cache', async () => {
+    const nomic = fakeEmbedding('nomic-embed-text');
+    const question = 'Les galères de Raguse zxq-plusieurs ?';
+    const query = { query: question, sourceType: 'secondary' as const, includeVault: true, includeManuscript: true };
+
+    state.current = nomic;
+    retrievalService.configure({ vectorStore: store!, workspaceRoot: project });
+    const first = await retrievalService.searchWithStats(query);
+
+    // Trois corpus ont consulté le cache, et le fournisseur n'a embarqué la question qu'une fois : les
+    // deux derniers l'ont trouvée en cache, rangée par le premier.
+    const attempted = first.outcomes.filter((o) => o.attempted).map((o) => o.source);
+    expect(attempted).toEqual(expect.arrayContaining(['secondary', 'vault', 'manuscript']));
+    const embeddedQuestion = nomic.embed.mock.calls.filter(([texts]) => (texts as string[]).includes(question));
+    expect(embeddedQuestion).toHaveLength(1);
+    expect(first.stats.search.cacheHit).toBe(false);
+
+    nomic.embed.mockClear();
+    const again = await retrievalService.searchWithStats(query);
+    expect(askedWith(nomic, 'zxq-plusieurs')).toBe(false);
+    expect(again.stats.search.cacheHit).toBe(true);
+  });
+
   it('mode « auto » : le vecteur du modèle de repli n’est pas rangé sous la clé du primaire', async () => {
     // Avant tout sondage, le repli annonce le modèle du primaire ; `embed` sonde ensuite et bascule.
     // La clé lue avant l'appel rangeait le vecteur du modèle embarqué sous celle d'Ollama, et le

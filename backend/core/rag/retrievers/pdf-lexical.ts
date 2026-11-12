@@ -12,9 +12,13 @@
  * Aucun embedding : la jambe dense est un index HNSW vide, créé en mémoire, qui ne rend rien
  * (`HNSWVectorStore.search` s'arrête sur un index vide, sans lire le vecteur de la requête). Le banc
  * reste reproductible, sans Ollama, modèle embarqué ni service en ligne ; un extrait que seul le sens
- * rapproche de la question n'y est donc jamais trouvé. Ni l'expansion FR → EN de `SecondaryRetriever`
- * ni le seuil de pertinence ne s'appliquent : la première ne touche pas au lexical, et le second ne
- * coupe aucun extrait classé par BM25 (`SPARSE_FLOOR` est au-dessus du seuil par défaut).
+ * rapproche de la question n'y est donc jamais trouvé.
+ *
+ * Le banc ne passe pas par l'expansion FR → EN de `SecondaryRetriever`. Elle touche pourtant au
+ * lexical : dès qu'une question contient un terme du dictionnaire, `SecondaryRetriever` lance une
+ * recherche BM25 de plus par variante traduite. Aucune question du jeu de contrôle n'en contient : un
+ * jeu qui en ajouterait mesurerait ici moins que l'app. Le seuil de pertinence ne s'applique pas non
+ * plus : il ne coupe aucun extrait classé par BM25 (`SPARSE_FLOOR` est au-dessus du seuil par défaut).
  */
 
 import os from 'os';

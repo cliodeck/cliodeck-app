@@ -154,8 +154,10 @@ tokeniseur : un correctif de `BM25Index` ou de `HybridSearch` ne s'y voit pas.
 **Aucun embedding** : la jambe dense est un index HNSW vide, en mémoire, qui ne
 rend rien. Ni Ollama, ni modèle embarqué, ni service en ligne ; le relevé est
 reproductible. Ce que le banc ne voit donc pas : un extrait que seul le sens
-rapproche de la question, l'expansion FR → EN de `SecondaryRetriever`, le
-seuil de pertinence (il ne coupe rien de ce que classe BM25).
+rapproche de la question, l'expansion FR → EN de `SecondaryRetriever` (elle
+ajoute une recherche BM25 par variante traduite ; aucune question du jeu ne
+contient de terme du dictionnaire), le seuil de pertinence (il ne coupe rien de
+ce que classe BM25).
 
 ### Le jeu de contrôle
 
