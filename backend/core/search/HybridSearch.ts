@@ -3,6 +3,8 @@ import { BM25Index } from './BM25Index';
 import type { SearchResult, DocumentChunk } from '../../types/pdf-document';
 import type { BM25Result } from './BM25Index';
 import { relevanceScore } from '../rag/relevance';
+import { ALL_STOPWORDS, containsWord, foldDiacritics, tokenize } from '../text/normalize';
+import { stripChunkHeader } from '../chunking/chunk-text';
 
 /**
  * Hybrid Search combining dense (HNSW) and sparse (BM25) retrieval
@@ -116,28 +118,38 @@ export class HybridSearch {
     // either lets in stopwords ("the", "what") or excludes short acronyms
     // ("KAQG", "CIA"). Both fail us — common words make the boost meaningless,
     // short acronyms are exactly the case hybrid search needs to rescue.
-    //   (1) Acronyms in the original (pre-lowercase) query: 2–6 chars, all
-    //       uppercase. These are usually proper-noun identifiers the embedding
+    //   (1) Acronyms in the original query: 2–6 chars, all uppercase, kept in
+    //       their case. These are usually proper-noun identifiers the embedding
     //       model has never seen, so BM25 is the only retriever that finds
     //       them and they desperately need the boost.
-    //   (2) Long lowercase tokens (>= 5 chars): the original behaviour, for
-    //       ordinary proper nouns and significant terms.
-    const queryKeywords = originalQuery
-      ? Array.from(new Set([
-          ...((originalQuery.match(/\b[A-Z][A-Z0-9]{1,5}\b/g) ?? []).map(t => t.toLowerCase())),
-          ...originalQuery
-            .toLowerCase()
-            .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-            .split(/\s+/)
-            .filter(t => t.length >= 5),
-        ]))
-      : [];
+    //   (2) Long tokens (>= 5 chars) outside the stopword lists, folded
+    //       (lowercase, no accents): ordinary proper nouns and significant terms.
+    //
+    // Un mot-clé ne vaut que comme mot entier (`containsWord`) : en sous-chaîne,
+    // « CIA » donnait le bonus à « sociale », et dix extraits doublés de rang
+    // 41 à 50 passaient devant les meilleurs résultats denses. Et il se cherche
+    // dans le texte de l'extrait, sans le préfixe « [Doc: titre | Section: …] »
+    // posé sur tous les extraits d'un ouvrage (`stripChunkHeader`).
+    const queryWords = originalQuery ? tokenize(originalQuery) : [];
+    const acronyms = Array.from(
+      new Set(queryWords.filter((w) => /^\p{Lu}[\p{Lu}\p{N}]{1,5}$/u.test(w)))
+    );
+    const longWords = Array.from(
+      new Set(
+        queryWords
+          .map((w) => foldDiacritics(w))
+          .filter((w) => w.length >= 5 && !ALL_STOPWORDS.has(w))
+      )
+    );
 
     // Helper to check if chunk contains exact keyword matches
     const checkExactMatch = (content: string): boolean => {
-      if (queryKeywords.length === 0) return false;
-      const contentLower = content.toLowerCase();
-      return queryKeywords.some(kw => contentLower.includes(kw));
+      if (acronyms.length === 0 && longWords.length === 0) return false;
+      const text = stripChunkHeader(content);
+      if (acronyms.some((acronym) => containsWord(text, acronym))) return true;
+      if (longWords.length === 0) return false;
+      const folded = foldDiacritics(text);
+      return longWords.some((word) => containsWord(folded, word));
     };
 
     // Add dense results

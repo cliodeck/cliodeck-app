@@ -420,6 +420,24 @@ describe('sélection de documents et manuscrit — ne pas prendre l’un pour l�
     expect(block).toContain('ne les présente JAMAIS comme le contenu d\'une source');
     expect(block).not.toContain('UNIQUEMENT');
   });
+
+  it('retire de l’extrait tout le préfixe « [Doc: …] », même quand le titre contient des crochets', () => {
+    const hit = {
+      sourceType: 'secondary',
+      chunk: {
+        id: 'c1',
+        content:
+          '[Doc: Histoire sociale de la France [1789-1914] | Section: Les grèves]\n\nLes grèves de 1906.',
+        documentId: 'd1',
+        chunkIndex: 0,
+      },
+      document: { id: 'd1', title: 'Histoire sociale de la France [1789-1914]', author: 'X' },
+      similarity: 0.9,
+    } as unknown as MultiSourceSearchResult;
+    const block = formatContextAsSystemPrompt([hit]);
+    expect(block).toContain('EXTRAIT :\nLes grèves de 1906.');
+    expect(block).not.toContain('Section');
+  });
 });
 
 describe('resolveTurnOptions — ce qui est propre à Ollama reste chez Ollama', () => {
