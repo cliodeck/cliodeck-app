@@ -81,6 +81,23 @@ describe('BM25Index', () => {
     expect(ids(corpus().search('US'))).toEqual(['us']);
   });
 
+  it('un mot qui ne diffère d’un mot vide que par l’accent reste cherchable', () => {
+    // Les mots vides se reconnaissent accents compris : « mais » en est un, « maïs » non ; « wäre »
+    // en est un, « Ware » (la marchandise) non. « hat » est aussi un nom anglais (the Hat Act).
+    const index = indexOf(
+      chunk('ware', 'Die Ware und ihr Tauschwert bei Marx.'),
+      chunk('mais', 'La culture du maïs au Mexique.'),
+      chunk('hat', 'The hat trade in eighteenth-century London.'),
+      chunk('fur', 'The fur trade on the Great Lakes.')
+    );
+    expect(ids(index.search('Ware'))).toEqual(['ware']);
+    expect(ids(index.search('maïs'))).toEqual(['mais']);
+    expect(ids(index.search('hat'))).toEqual(['hat']);
+    expect(ids(index.search('fur'))).toEqual(['fur']);
+    // Sans son tréma, « mais » est la conjonction : un mot vide.
+    expect(index.search('mais')).toEqual([]);
+  });
+
   it('« constructor » n’empoisonne pas le score des autres termes', () => {
     // `doc['constructor']` lisait la fonction héritée d'Object : score NaN, et l'extrait disparaissait.
     const index = corpus();

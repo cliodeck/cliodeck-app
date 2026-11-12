@@ -283,6 +283,17 @@ top 10) :
 - `recall@1` reste sous 1 pour une seule raison : trois questions ont deux
   pertinents, et un top 1 n'en contient qu'un.
 
+Après la revue de L07-3, les listes de mots vides ont changé : elles
+contiennent les mots-outils des questions (« comment », « pendant »,
+« during », « während »), qui sinon valaient un bonus « mot-clé exact », et
+un mot vide s'y reconnaît accents compris (« maïs » n'est plus pris pour
+« mais », ni « Ware » pour « wäre »). Le relevé, refait avec les mêmes
+commandes, est identique question par question, pour `bm25` comme pour
+`pdf-lexical` : aucune question du jeu ne contient ces mots. Ce que la
+correction change est couvert par les tests de `HybridSearch`
+(« Comment la CIA est-elle intervenue ? », et cinq variantes en français,
+en anglais et en allemand).
+
 ## Recent related work (2026-05-07)
 
 Testing with a real corpus (221 Tropy items, EEC Committee of Governors

@@ -126,6 +126,45 @@ describe('HybridSearch — bonus « mot-clé exact »', () => {
     expect(results.map((r) => r.chunk.id)).not.toContain('vide-47');
   });
 
+  // La même question que « Rôle de la CIA », posée par un mot-outil de cinq lettres ou plus
+  // (« Comment… », « Pendant… », « during », « während »). Ce mot ne doit valoir ni un bonus ni un
+  // terme BM25 : sinon tout extrait qui l'écrit est doublé, et les rangs 41 à 50 évincent encore
+  // les meilleurs résultats denses.
+  it.each([
+    [
+      'Comment la CIA est-elle intervenue ?',
+      'Comment, pendant ces années et depuis, quand les syndicats se divisent entre eux, comme après chaque crise, selon les régions.',
+    ],
+    [
+      'Pendant la guerre froide, que fait la CIA ?',
+      'Comment, pendant ces années et depuis, quand les syndicats se divisent entre eux, comme après chaque crise, selon les régions.',
+    ],
+    [
+      'Quand la CIA intervient-elle ?',
+      'Comment, pendant ces années et depuis, quand les syndicats se divisent entre eux, comme après chaque crise, selon les régions.',
+    ],
+    [
+      'Quels étaient les objectifs de la CIA après 1945 ?',
+      'Les syndicats étaient divisés, comme après chaque crise : quels accords, et pourquoi ?',
+    ],
+    [
+      'What did the CIA do during the Cold War?',
+      'Trade unions were divided between these years, while wages rose during the period.',
+    ],
+    [
+      'Warum griff die CIA während des Kalten Krieges ein?',
+      'Zwischen diesen Jahren, während die Löhne stiegen, wusste niemand warum.',
+    ],
+  ])('« %s » : le mot-outil de la question ne déplace pas les meilleurs rangs denses', async (query, distractor) => {
+    const candidates = agencyThenSocial().map((c, i) =>
+      i < 40 ? c : chunk(`autre-${i + 1}`, distractor)
+    );
+    const results = await hybridOver(candidates, candidates).search(query, new Float32Array(1), 10);
+    expect(results.map((r) => r.chunk.id)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `agence-${i + 1}`)
+    );
+  });
+
   // Garde du contrat (Path A′), pas un test du défaut : il passait déjà avant L07-3.
   it('la pertinence publiée reste celle du contrat commun, le RRF ne sert qu’au tri', async () => {
     const candidates = agencyThenSocial();

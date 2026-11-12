@@ -77,7 +77,7 @@ describe('tokenize', () => {
 
   it('garde les termes d’historien qu’une liste usuelle écarterait', () => {
     const kept = tokenize(
-      "l'État, l'Église, le Front, le Parti, l'Est, l'été 1914, les sommes, the Cold War, May 1968, the general will, a nun, the common man, die Waren, the fur trade",
+      "l'État, l'Église, le Front, le Parti, l'Est, l'été 1914, les étés, les sommes, l'Avant, la Contre-Réforme, the Cold War, May 1968, the general will, a nun, the common man, the Hat Act, die Waren, die Ware, the fur trade, le maïs",
       { fold: 'diacritics', stopwords: true }
     );
     for (const term of [
@@ -87,17 +87,49 @@ describe('tokenize', () => {
       'parti',
       'est',
       'ete',
+      'etes',
       'sommes',
+      'avant',
+      'contre',
       'war',
       'may',
       'will',
       'nun',
       'man',
+      'hat',
       'waren',
+      'ware',
       'fur',
+      'mais',
     ]) {
       expect(kept).toContain(term);
     }
+  });
+
+  it('reconnaît un mot vide accents compris, avant le repli', () => {
+    // Replié d'abord, « maïs » devenait « mais », « Ware » le « wäre » replié, « étés » « êtes ».
+    expect(
+      tokenize('mais maïs wäre Ware für fur über êtes étés', { fold: 'diacritics', stopwords: true })
+    ).toEqual(['mais', 'ware', 'fur', 'etes']);
+    // Un mot vide accentué tapé sans accent reste un mot vide quand cette graphie n'est pas un mot.
+    expect(tokenize('etre etait etaient apres', { stopwords: true })).toEqual([]);
+  });
+
+  it('écarte les mots-outils des questions, en français, en anglais et en allemand', () => {
+    expect(
+      tokenize(
+        'Comment, pourquoi, quand, pendant, depuis, entre, après, comme, selon, quels étaient',
+        { stopwords: true }
+      )
+    ).toEqual([]);
+    expect(
+      tokenize('About, after, before, between, during, there, other, while, since, through, because', {
+        stopwords: true,
+      })
+    ).toEqual([]);
+    expect(tokenize('Zwischen, während, warum, wann, nachdem, obwohl', { stopwords: true })).toEqual(
+      []
+    );
   });
 
   it('découpe le chinois et le japonais en bigrammes', () => {
@@ -149,10 +181,10 @@ describe('containsWord', () => {
 });
 
 describe('listes de mots vides', () => {
-  it('sont écrites repliées, et l’union les contient toutes', () => {
+  it('sont écrites en minuscules, accents compris, et l’union les contient toutes', () => {
     for (const lang of ['fr', 'en', 'de'] as const) {
       for (const word of STOPWORDS[lang]) {
-        expect(foldDiacritics(word)).toBe(word);
+        expect(foldCase(word)).toBe(word);
         expect(ALL_STOPWORDS.has(word)).toBe(true);
       }
     }

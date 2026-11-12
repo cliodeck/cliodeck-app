@@ -3,7 +3,7 @@ import { BM25Index } from './BM25Index';
 import type { SearchResult, DocumentChunk } from '../../types/pdf-document';
 import type { BM25Result } from './BM25Index';
 import { relevanceScore } from '../rag/relevance';
-import { ALL_STOPWORDS, containsWord, foldDiacritics, tokenize } from '../text/normalize';
+import { ALL_STOPWORDS, containsWord, foldCase, foldDiacritics, tokenize } from '../text/normalize';
 import { stripChunkHeader } from '../chunking/chunk-text';
 
 /**
@@ -124,6 +124,10 @@ export class HybridSearch {
     //       them and they desperately need the boost.
     //   (2) Long tokens (>= 5 chars) outside the stopword lists, folded
     //       (lowercase, no accents): ordinary proper nouns and significant terms.
+    //       Le mot vide se reconnaît comme dans `tokenize`, en minuscules et
+    //       avant le repli des accents. Les listes contiennent les mots-outils
+    //       des questions : « Comment la CIA… » doublait sinon chaque extrait
+    //       qui écrit « comment ».
     //
     // Un mot-clé ne vaut que comme mot entier (`containsWord`) : en sous-chaîne,
     // « CIA » donnait le bonus à « sociale », et dix extraits doublés de rang
@@ -137,8 +141,9 @@ export class HybridSearch {
     const longWords = Array.from(
       new Set(
         queryWords
+          .filter((w) => !ALL_STOPWORDS.has(foldCase(w)))
           .map((w) => foldDiacritics(w))
-          .filter((w) => w.length >= 5 && !ALL_STOPWORDS.has(w))
+          .filter((w) => w.length >= 5)
       )
     );
 
