@@ -5,6 +5,7 @@ import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useBibliographyStore } from '../../stores/bibliographyStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { usePrimarySourcesStore } from '../../stores/primarySourcesStore';
+import { usePdfIndexStore } from '../../stores/pdfIndexStore';
 import './ConfigPanel.css';
 
 interface PdfStats {
@@ -108,6 +109,9 @@ export const ActionsSection: React.FC = () => {
 
       // Reload statistics to show empty database
       await loadStats();
+      // Purgée, la base emporte l'index des PDF : la reconstruction proposée à la réouverture
+      // (bandeau Bibliographie, barre d'état) n'a plus d'objet. L'état du main fait foi (J8).
+      await usePdfIndexStore.getState().refresh();
     } catch (error) {
       console.error('Failed to purge database:', error);
       await useDialogStore.getState().showAlert(t('actions.purgeDatabase.error', { error: String(error) }));

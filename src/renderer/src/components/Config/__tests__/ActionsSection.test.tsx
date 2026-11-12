@@ -12,10 +12,12 @@
  * Vrais section et store ; le pont `window.electron` et les confirmations sont simulés.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ActionsSection } from '../ActionsSection';
 import { usePrimarySourcesStore } from '../../../stores/primarySourcesStore';
 import { useDialogStore } from '../../../stores/dialogStore';
+import { usePdfIndexStore } from '../../../stores/pdfIndexStore';
+import { projectLifecycle } from '../../../lifecycle/projectLifecycle';
 
 const INITIAL_STORE = usePrimarySourcesStore.getState();
 
@@ -95,5 +97,46 @@ describe('ActionsSection — purge des sources primaires', () => {
 
     expect(usePrimarySourcesStore.getState().projectInfo?.name).toBe('Archives Danzig');
     expect(usePrimarySourcesStore.getState().sources).toHaveLength(1);
+  });
+});
+
+/**
+ * J8 : purger la base des PDF vide l'index avec elle. La reconstruction que proposait la
+ * réouverture (bandeau Bibliographie, barre d'état) n'a plus d'objet : elle parlait d'extraits de
+ * documents retirés, dans un index qui vient d'être vidé.
+ */
+describe('ActionsSection — purge des PDF et index à reconstruire (J8)', () => {
+  let pdf: Record<string, ReturnType<typeof vi.fn>>;
+
+  beforeEach(() => {
+    pdf = {
+      getStatistics: vi.fn(async () => ({
+        success: true,
+        statistics: { totalDocuments: 2, totalChunks: 12, databasePath: '/projets/A/.cliodeck/brain.db' },
+      })),
+      purge: vi.fn(async () => ({ success: true })),
+      // Ce que le main répond après la purge : plus rien à proposer.
+      getIndexState: vi.fn(async () => ({ success: true, rebuildDue: false })),
+    };
+    (window as unknown as { electron: Record<string, unknown> }).electron.pdf = pdf;
+    act(() => projectLifecycle.enter('/projets/A'));
+    usePdfIndexStore.setState({ rebuildDue: true });
+  });
+
+  afterEach(() => {
+    act(() => projectLifecycle.enter(null));
+  });
+
+  it('purge réussie : l’état de l’index est relu, et la reconstruction n’est plus proposée', async () => {
+    render(<ActionsSection />);
+    fireEvent.click(screen.getByText('actions.title'));
+    const button = screen.getByRole('button', { name: 'actions.purgeDatabase.button' });
+    await waitFor(() => expect(button).not.toBeDisabled());
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(pdf.purge).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(usePdfIndexStore.getState().rebuildDue).toBe(false));
+    expect(pdf.getIndexState).toHaveBeenCalledWith('/projets/A');
   });
 });

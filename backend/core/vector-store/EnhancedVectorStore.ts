@@ -729,6 +729,11 @@ export class EnhancedVectorStore {
     // Purge base vector store (SQLite)
     this.vectorStore.purgeAllData();
     console.log('✅ Vector store purged');
+
+    // L'index et la base sont vides tous les deux : rien n'est périmé, et la reconstruction que
+    // proposait la réouverture (J8) n'a plus d'objet. `VectorStore.purgeAllData` a effacé la marque.
+    this.indexesStale = false;
+    this.proposeRebuild = false;
   }
 
   getAllChunksWithEmbeddings(): any[] {

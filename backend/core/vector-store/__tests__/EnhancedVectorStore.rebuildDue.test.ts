@@ -288,4 +288,22 @@ describe.skipIf(!sqliteAvailable)('J8 : l’index des PDF à reconstruire, gard�
 
     expect(markOf()).toBeNull();
   });
+
+  it('purger la base retire aussi la proposition : plus rien d’exposé ni à reconstruire', async () => {
+    const first = await reopen();
+    first.store.deleteDocument('doc2');
+    first.store.close();
+    const { store } = await reopen();
+    expect(store.getRebuildStatus().rebuildDue).toBe(true);
+
+    store.purgeAllData();
+
+    // Le bandeau parlerait d'extraits retirés dans un index qui vient d'être vidé.
+    expect(store.getRebuildStatus().rebuildDue).toBe(false);
+    expect(store.requestRebuild()).toBe(false);
+    // L'index et la base sont vides tous les deux : rien n'est périmé.
+    expect(store.needsRebuild()).toBe(false);
+    expect(markOf()).toBeNull();
+    store.close();
+  });
 });

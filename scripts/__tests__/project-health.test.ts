@@ -317,3 +317,61 @@ describe('bibEntryKeys', () => {
     expect(bibEntryKeys('@string{x = "y"}\n@preamble{"p"}\n@misc{K1,\n}\n@Book( K2 ,\n)')).toEqual(['K1', 'K2']);
   });
 });
+
+/**
+ * J8 : depuis que la réouverture *propose* la reconstruction de l'index des PDF au lieu de la
+ * lancer d'office, un index en retard sur la base peut le rester, voulu : l'historien a choisi
+ * « Plus tard ». La marque de `brain.db` (`pdf_index_state`) le dit. Le bilan ne doit plus appeler
+ * cet état une anomalie ; il le garde pour un écart que rien n'explique.
+ */
+describe('bilan de santé — index HNSW en retard et reconstruction proposée (J8)', () => {
+  /** Un PDF indexé (`c1`), et un index dont les métadonnées gardent aussi `c-parti`, retiré de la base. */
+  function staleIndex(mark: { reason: string; markedAt: string } | null): void {
+    const pdf = write('PDFs/a.pdf', '%PDF-1.4');
+    write('.cliodeck/hnsw.index.meta.json', JSON.stringify({ chunkIdMap: [[0, 'c1'], [1, 'c-parti']] }));
+    createBrain((db) => {
+      db.prepare('INSERT INTO pdf_documents VALUES (?, ?)').run('d1', pdf);
+      db.prepare('INSERT INTO pdf_chunks VALUES (?, ?, ?)').run('c1', 'd1', vec);
+      db.exec(
+        'CREATE TABLE pdf_index_state (id INTEGER PRIMARY KEY CHECK (id = 1), rebuild_due INTEGER NOT NULL DEFAULT 0, marked_at TEXT, reason TEXT)'
+      );
+      if (mark) {
+        db.prepare('INSERT INTO pdf_index_state VALUES (1, 1, ?, ?)').run(mark.markedAt, mark.reason);
+      }
+    });
+  }
+
+  const hnswFinding = (findings: Finding[]) =>
+    findings.find((f) => f.domaine === 'pdf' && f.message.startsWith('index HNSW'));
+
+  it('sans marque : l’écart reste une anomalie s’il persiste après relance', async () => {
+    staleIndex(null);
+
+    const finding = hnswFinding(await check());
+
+    expect(finding).toMatchObject({ niveau: 'ecart' });
+    expect(finding?.message).toMatch(/1 vecteur\(s\) d’extraits disparus, 0 extrait\(s\) absent\(s\)/);
+    expect(finding?.aide).toMatch(/anomalie/);
+  });
+
+  it('avec la marque : la reconstruction proposée à l’ouverture est en attente, pas une anomalie', async () => {
+    staleIndex({ reason: 'documents-removed', markedAt: '2026-11-12T09:30:00.000Z' });
+
+    const finding = hnswFinding(await check());
+
+    expect(finding).toMatchObject({ niveau: 'ecart' });
+    expect(finding?.message).toMatch(/1 vecteur\(s\) d’extraits disparus/);
+    expect(finding?.message).toMatch(/reconstruction proposée à l’ouverture, en attente depuis le 2026-11-12/);
+    expect(finding?.aide).toMatch(/Bibliographie/);
+    expect(finding?.aide).not.toMatch(/anomalie/);
+  });
+
+  it('une marque effacée (`rebuild_due = 0`) ne compte pas', async () => {
+    staleIndex(null);
+    const db = new DatabaseSync(path.join(root, '.cliodeck', 'brain.db'));
+    db.prepare('INSERT INTO pdf_index_state VALUES (1, 0, NULL, NULL)').run();
+    db.close();
+
+    expect(hnswFinding(await check())?.aide).toMatch(/anomalie/);
+  });
+});
