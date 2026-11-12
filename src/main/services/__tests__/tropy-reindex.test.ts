@@ -23,6 +23,7 @@ import * as path from 'path';
 import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 import { makeTpy } from '../../../../backend/integrations/tropy/__tests__/helpers/make-tpy';
 import { TropyOCRPipeline } from '../../../../backend/integrations/tropy/TropyOCRPipeline';
+import { PrimarySourcesVectorStore } from '../../../../backend/core/vector-store/PrimarySourcesVectorStore';
 
 const handlers = vi.hoisted(() => new Map<string, (event: unknown, ...args: unknown[]) => unknown>());
 vi.mock('electron', () => ({
@@ -397,6 +398,39 @@ describe.skipIf(!sqliteAvailable)('réindexation : jamais annoncée réussie san
 });
 
 // MARK: - Écriture pendant un embarquement
+
+/**
+ * L'index HNSW ne s'écrivait sur disque qu'en fin de synchro, en fin de
+ * reconstruction et à la fermeture du magasin. Un OCR manuel ou un import
+ * réindexe la source en mémoire seulement : si l'app tombe ensuite (plantage,
+ * arrêt forcé), la relance relit l'index d'avant, sans les nouveaux extraits,
+ * et doit tout reconstruire pour les rendre à la recherche dense (S08-1-23).
+ */
+describe.skipIf(!sqliteAvailable)('transcription réindexée : l’index sur disque porte ses extraits (S08-1-23)', () => {
+  it('OCR manuel puis l’app qui tombe : l’index relu à la relance sert les nouveaux extraits, aucun ne lui manque', async () => {
+    await linkAndSync();
+    await tropyService.sync(syncOptions);
+    const [source] = tropyService.getAllSources();
+
+    const update = handlers.get('tropy:update-transcription');
+    expect(await update?.({}, source.id, NEW_TEXT, 'tesseract', 77.5)).toEqual({ success: true });
+    const [opening] = chunksOf(source.id);
+    expect(opening).toContain('la grève du port est terminée');
+
+    // Le magasin du service n'est pas fermé : la relance relit ce qui est sur disque.
+    const relaunched = new PrimarySourcesVectorStore(projectDir);
+    try {
+      // Les points de l'ancien texte restent dans le graphe (`stale`), sans étiquette : la
+      // reconstruction qui les compacte au-delà de 10 % est celle de H7.
+      expect(relaunched.checkHnswIndex()).toMatchObject({ missing: 0 });
+      const query = new Float32Array(hashedVector(opening));
+      expect(relaunched.search(query, 1)[0]?.chunk.content).toBe(opening);
+    } finally {
+      vi.spyOn(relaunched, 'saveHNSWIndex').mockImplementation(() => undefined);
+      relaunched.close();
+    }
+  });
+});
 
 /**
  * Une passe embarque le texte d'une source tel qu'il était à son départ, à
