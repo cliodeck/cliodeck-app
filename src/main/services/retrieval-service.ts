@@ -679,6 +679,12 @@ class RetrievalService {
     }
   }
 
+  /**
+   * Le magasin du coffre, `null` sans brain.db (rien d'indexé). Un fichier qui existe mais ne
+   * s'ouvre pas (base abîmée, verrou) lève : `fanOutCorpora` dit alors le coffre en échec. Rendre
+   * `null` le faisait passer pour vide, « Vault 0 » (S04-1-3, comme E2 pour les archives). Rien
+   * n'est gardé de l'échec : la recherche suivante réessaie, un verrou passager ne dure pas.
+   */
   private getVaultStore(): ObsidianVaultStore | null {
     if (this.vaultStore) return this.vaultStore;
     if (!this.workspaceRoot) return null;
@@ -690,10 +696,11 @@ class RetrievalService {
       return this.vaultStore;
     } catch (e) {
       console.warn('[retrieval] failed to open Obsidian vault store:', e);
-      return null;
+      throw e;
     }
   }
 
+  /** Le magasin du manuscrit : comme `getVaultStore`, un fichier qui ne s'ouvre pas lève (S04-1-3). */
   private getManuscriptStore(): ManuscriptStore | null {
     if (this.manuscriptStore) return this.manuscriptStore;
     if (!this.workspaceRoot) return null;
@@ -706,7 +713,7 @@ class RetrievalService {
       return this.manuscriptStore;
     } catch (e) {
       console.warn('[retrieval] failed to open manuscript store:', e);
-      return null;
+      throw e;
     }
   }
 

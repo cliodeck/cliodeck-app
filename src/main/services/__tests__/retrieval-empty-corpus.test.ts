@@ -58,6 +58,8 @@ import { projectManager } from '../project-manager.js';
 import { retrievalService } from '../retrieval-service.js';
 import { manuscriptIndexService } from '../manuscript-index-service.js';
 import { readingNotesIndexService } from '../reading-notes-index-service.js';
+import { ObsidianVaultStore } from '../../../../backend/integrations/obsidian/ObsidianVaultStore.js';
+import { ManuscriptStore } from '../../../../backend/core/vector-store/ManuscriptStore.js';
 
 let project = '';
 let store: EnhancedVectorStore | null = null;
@@ -144,5 +146,41 @@ describe.skipIf(!sqliteAvailable)('un corpus vide n’est pas un corpus en éche
     // Tropy, absent, répond sans embarquer : la bibliographie seule tombe.
     expect(status).toBe('partial');
     expect(prompt).toContain('searches failed');
+  });
+});
+
+/**
+ * L'inverse, pour le coffre et le manuscrit (S04-1-3, étape 5 de L06-9) : leur magasin, sur un
+ * brain.db qui existe mais ne s'ouvre pas (base abîmée, verrou), rendait `null` après un
+ * avertissement à la console. Le corpus passait alors pour vide : « Vault 0 », « Manuscrit 0 ».
+ * L'ouverture qui échoue est simulée au premier accès du magasin à sa base (`initSchema`).
+ */
+describe.skipIf(!sqliteAvailable)('un magasin qui ne s’ouvre pas est en échec, pas vide (S04-1-3)', () => {
+  const malformed = (): never => {
+    throw new Error('SQLITE_CORRUPT: database disk image is malformed');
+  };
+
+  it('coffre illisible : « vault » en échec, avec la cause', async () => {
+    vi.spyOn(ObsidianVaultStore.prototype as unknown as { initSchema(): void }, 'initSchema').mockImplementation(malformed);
+    const map = await outcomeOf({ query: question(), sourceType: 'secondary', includeVault: true });
+    expect(map.vault).toMatchObject({ attempted: true, ok: false, hitCount: 0 });
+    expect(map.vault.error).toContain('database disk image is malformed');
+    expect(map.secondary).toMatchObject({ attempted: true, ok: true });
+  });
+
+  it('manuscrit illisible : « manuscript » en échec, avec la cause', async () => {
+    vi.spyOn(ManuscriptStore.prototype as unknown as { initSchema(): void }, 'initSchema').mockImplementation(malformed);
+    const map = await outcomeOf({ query: question(), sourceType: 'secondary', includeManuscript: true });
+    expect(map.manuscript).toMatchObject({ attempted: true, ok: false, hitCount: 0 });
+    expect(map.manuscript.error).toContain('database disk image is malformed');
+  });
+
+  it('témoin : sans brain.db, coffre et manuscrit restent vides, pas en échec', async () => {
+    retrievalService.configure({ vectorStore: store as EnhancedVectorStore, workspaceRoot: path.join(project, 'ailleurs') });
+    const vault = vi.spyOn(ObsidianVaultStore.prototype as unknown as { initSchema(): void }, 'initSchema');
+    const map = await outcomeOf({ query: question(), sourceType: 'secondary', includeVault: true, includeManuscript: true });
+    expect(map.vault).toMatchObject({ attempted: true, ok: true, hitCount: 0 });
+    expect(map.manuscript).toMatchObject({ attempted: true, ok: true, hitCount: 0 });
+    expect(vault).not.toHaveBeenCalled();
   });
 });
