@@ -2,10 +2,12 @@
  * L'index HNSW des sources primaires après une sortie de l'app sans fermeture du magasin, et quand
  * son graphe se remplit (H7, revue).
  *
- * Les extraits s'écrivent en base au fil de l'eau, mais l'index HNSW ne s'écrit sur disque qu'à la
- * fermeture du magasin et en fin de reconstruction. Or `before-quit` sort par `app.exit()` sans
- * fermer le magasin. Après une sortie en pleine réindexation complète, la relance relisait l'index
- * d'avant : ses étiquettes pointaient vers des extraits supprimés, et les extraits refaits n'y
+ * Les extraits s'écrivent en base au fil de l'eau, mais l'index HNSW ne s'écrivait sur disque qu'à
+ * la fermeture du magasin et en fin de reconstruction, et `before-quit` sortait par `app.exit()`
+ * sans fermer le magasin. Depuis L03-9, la sortie le ferme dans son échéance, et L06-6 écrit aussi
+ * l'index après la réindexation d'une source ; un plantage, un arrêt forcé ou une échéance dépassée
+ * laissent encore l'index d'avant. Après une sortie en pleine réindexation complète, la relance le
+ * relisait : ses étiquettes pointaient vers des extraits supprimés, et les extraits refaits n'y
  * étaient pas. Le contrôle de `search` compare deux nombres, et il y en avait autant : les sources
  * refaites échappaient à la recherche dense. Quand la sortie tombait pendant la reconstruction
  * finale, plus aucune source n'était marquée, et c'était définitif.
@@ -40,7 +42,7 @@ function open(): PrimarySourcesVectorStore {
   return store;
 }
 
-/** L'app quittée par `app.exit()` : les transactions sont en base, l'index n'est pas écrit. */
+/** L'app tombée (plantage, arrêt forcé, échéance de sortie dépassée) : les transactions sont en base, l'index n'est pas écrit. */
 function exitWithoutClosing(store: PrimarySourcesVectorStore): void {
   vi.spyOn(store, 'saveHNSWIndex').mockImplementation(() => undefined);
   store.close();

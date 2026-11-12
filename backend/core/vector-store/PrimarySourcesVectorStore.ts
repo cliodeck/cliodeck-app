@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-import { existsSync, mkdirSync, chmodSync, unlinkSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, chmodSync, unlinkSync, writeFileSync, readFileSync, renameSync } from 'fs';
 import { randomUUID } from 'crypto';
 import hnswlib from 'hnswlib-node';
 import natural from 'natural';
@@ -16,11 +16,25 @@ import type {
 } from '../../types/entity';
 import { entityNormalizer } from '../ner/EntityNormalizer';
 import { relevanceScore } from '../rag/relevance';
+import { exactMatchKeywords, hasExactMatch, tokenize } from '../text/normalize';
+import { stripChunkHeader } from '../chunking/chunk-text';
 import { sameFile } from './file-identity';
 
 const { HierarchicalNSW } = hnswlib;
 type HierarchicalNSW = InstanceType<typeof HierarchicalNSW>;
 const { TfIdf } = natural;
+
+/**
+ * Le découpage de l'index BM25 et celui de la requête, le même des deux côtés, et le même que pour
+ * les PDF (`BM25Index`, L07-3). `natural` reçoit un tableau de jetons, jamais une chaîne : avec une
+ * chaîne, il la redécoupait avec son propre tokeniseur, qui coupe un mot sur chaque lettre
+ * accentuée (« préfet » → « pr », « fet »), alors que la requête gardait « préfet ». Aucun mot
+ * accentué n'était trouvé en lexical : « Pétain », « préfet », « grève » (S02-1-1).
+ */
+const bm25Tokens = (text: string): string[] => tokenize(text, { fold: 'diacritics', stopwords: true });
+
+/** Clé que `natural` ajoute à chaque document : ce n'est pas un terme. */
+const NATURAL_KEY = '__key';
 
 // MARK: - Types
 
@@ -200,8 +214,10 @@ export class PrimarySourcesVectorStore {
   private closed = false;
 
   // BM25 Index for keyword-based search
-  private bm25Index: any;
+  private bm25Index: InstanceType<typeof TfIdf>;
   private bm25ChunkMap: Map<number, PrimarySourceChunk> = new Map();
+  /** Nombre de jetons de chaque document, par rang dans `bm25Index.documents`. */
+  private bm25DocLengths: number[] = [];
   private bm25IdfCache: Map<string, number> = new Map();
   private bm25AvgDocLength: number = 0;
   private bm25IsDirty: boolean = true;
@@ -332,7 +348,7 @@ export class PrimarySourcesVectorStore {
         this.hnswIndex.resizeIndex(this.hnswMaxElements);
       }
 
-      if (metadata) this.hnswLabelMap = new Map(metadata.labelMap || []);
+      if (metadata) this.hnswLabelMap = this.labelsStillInBase(metadata.labelMap || []);
 
       this.hnswInitialized = true;
       console.log(`✅ Primary sources: Loaded HNSW index with ${this.hnswCurrentSize} vectors`);
@@ -343,25 +359,69 @@ export class PrimarySourcesVectorStore {
   }
 
   /**
-   * Save HNSW index to disk
+   * Les étiquettes de la méta relue dont l'extrait est encore en base, embarqué à la dimension de
+   * l'index. Après un arrêt brutal entre une suppression d'extraits (`deleteChunks` : OCR manuel,
+   * synchro) et l'écriture suivante de l'index, la méta étiquette encore les extraits supprimés.
+   * Comptés comme servis, leurs points prenaient les places des candidats denses sans que le filtre
+   * de `searchHNSW` s'active, et chaque écriture les reportait : une source de 200 extraits dans un
+   * corpus de 40 000 reste sous le seuil de reconstruction de `checkHnswIndex` (10 %), et la
+   * recherche dense ne rendait plus rien autour d'elle (revue de L06-6). Leurs points restent dans
+   * le graphe, sans étiquette, comme ceux que `forgetIndexedChunks` retire en cours de session.
+   * Les seuls identifiants sont lus, comme `checkHnswIndex`.
+   */
+  private labelsStillInBase(labelMap: Array<[number, string]>): Map<number, string> {
+    const inBase = this.embeddedChunkIds(this.hnswDimension);
+    const labels = new Map<number, string>();
+    for (const [label, chunkId] of labelMap) {
+      if (inBase.has(chunkId)) labels.set(label, chunkId);
+    }
+    const dropped = labelMap.length - labels.size;
+    if (dropped > 0) {
+      console.log(`🧹 Primary sources: ${dropped} HNSW label(s) without chunk in base dropped at load`);
+    }
+    return labels;
+  }
+
+  /**
+   * Écrit l'index et sa méta sur disque, chacun dans un fichier temporaire renommé ensuite, comme
+   * `HNSWVectorStore.save` : une écriture interrompue (disque plein, plantage) laisse la version
+   * précédente entière. Écrit en place, le fichier tronqué ne se relisait pas, et la relance
+   * repartait d'un index vide, à reconstruire en entier. Synchrone : `close` l'appelle avant de
+   * fermer la base. Une vingtaine de millisecondes pour un index de 130 Mo (40 650 extraits de 768
+   * dimensions, mesuré pour L06-6).
+   *
+   * `currentSize` : les vecteurs servis (`hnswLabelMap`), que `project:health` compare aux extraits
+   * embarqués. Les points des extraits retirés, restés dans le graphe sans étiquette, n'y comptent
+   * pas ; la prochaine étiquette vient du graphe relu (`getCurrentCount`), jamais de la méta.
    */
   saveHNSWIndex(): void {
     if (!this.hnswInitialized || !this.hnswIndex) return;
 
+    const metadataPath = this.hnswIndexPath + '.meta.json';
+    const temporaryIndexPath = this.hnswIndexPath + '.tmp';
+    const temporaryMetadataPath = metadataPath + '.tmp';
     try {
-      this.hnswIndex.writeIndexSync(this.hnswIndexPath);
-
-      // Save metadata
-      const metadataPath = this.hnswIndexPath + '.meta.json';
+      this.hnswIndex.writeIndexSync(temporaryIndexPath);
       const metadata = {
         dimension: this.hnswDimension,
-        currentSize: this.hnswCurrentSize,
+        currentSize: this.hnswLabelMap.size,
         labelMap: Array.from(this.hnswLabelMap.entries()),
       };
-      writeFileSync(metadataPath, JSON.stringify(metadata));
+      writeFileSync(temporaryMetadataPath, JSON.stringify(metadata));
+      // L'index d'abord : interrompu entre les deux, l'ancienne méta laisse sans étiquette les
+      // points ajoutés depuis, et `checkHnswIndex` voit leurs extraits manquer à la relance.
+      renameSync(temporaryIndexPath, this.hnswIndexPath);
+      renameSync(temporaryMetadataPath, metadataPath);
 
-      console.log(`💾 Primary sources: Saved HNSW index (${this.hnswCurrentSize} vectors)`);
+      console.log(`💾 Primary sources: Saved HNSW index (${this.hnswLabelMap.size} vectors)`);
     } catch (error) {
+      for (const temporary of [temporaryIndexPath, temporaryMetadataPath]) {
+        try {
+          if (existsSync(temporary)) unlinkSync(temporary);
+        } catch {
+          /* best-effort */
+        }
+      }
       console.error('❌ Primary sources: Failed to save HNSW index:', error);
     }
   }
@@ -371,51 +431,47 @@ export class PrimarySourcesVectorStore {
    */
   private rebuildBM25Index(): void {
     const startTime = Date.now();
-    this.bm25Index = new TfIdf();
-    this.bm25ChunkMap.clear();
+    this.resetBM25Index();
 
     const rows = this.db.prepare('SELECT * FROM tropy_chunks').all() as any[];
-    let docIndex = 0;
-
     for (const row of rows) {
-      const chunk: PrimarySourceChunk = {
+      this.addToBM25Index({
         id: row.id,
         sourceId: row.source_id,
         content: row.content,
         chunkIndex: row.chunk_index,
         startPosition: row.start_position,
         endPosition: row.end_position,
-      };
-
-      this.bm25Index.addDocument(this.preprocessTextForBM25(chunk.content));
-      this.bm25ChunkMap.set(docIndex, chunk);
-      docIndex++;
+      });
     }
-
-    this.bm25IsDirty = true;
 
     const duration = Date.now() - startTime;
     console.log(`✅ Primary sources: BM25 index rebuilt with ${this.bm25ChunkMap.size} chunks in ${duration}ms`);
   }
 
   /**
-   * Preprocess text for BM25 indexing
+   * Un index BM25 vide, sur un `TfIdf` neuf : `natural` ne sait pas retirer un document, et ceux
+   * des extraits d'avant y resteraient.
    */
-  private preprocessTextForBM25(text: string): string {
-    return text
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+  private resetBM25Index(): void {
+    this.bm25Index = new TfIdf();
+    this.bm25ChunkMap.clear();
+    this.bm25DocLengths = [];
+    this.bm25IdfCache.clear();
+    this.bm25IsDirty = true;
   }
 
   /**
    * Update BM25 IDF cache
+   *
+   * Sur les seuls extraits servis (`bm25ChunkMap`) : les documents des extraits retirés
+   * (`forgetIndexedChunks`) restent dans `natural`, mais ne comptent ni dans le nombre de
+   * documents, ni dans la fréquence d'un terme, ni dans la longueur moyenne.
    */
   private updateBM25Cache(): void {
     this.bm25IdfCache.clear();
 
-    const N = this.bm25Index.documents.length;
+    const N = this.bm25ChunkMap.size;
     if (N === 0) {
       this.bm25AvgDocLength = 0;
       this.bm25IsDirty = false;
@@ -425,13 +481,12 @@ export class PrimarySourcesVectorStore {
     const termDocFreq = new Map<string, number>();
     let totalLength = 0;
 
-    for (const doc of this.bm25Index.documents) {
-      const docLength = Object.keys(doc).length;
-      totalLength += docLength;
+    for (const docIndex of this.bm25ChunkMap.keys()) {
+      totalLength += this.bm25DocLengths[docIndex];
 
-      for (const term in doc) {
-        const termLower = term.toLowerCase();
-        termDocFreq.set(termLower, (termDocFreq.get(termLower) || 0) + 1);
+      for (const term in this.bm25Index.documents[docIndex]) {
+        if (term === NATURAL_KEY) continue;
+        termDocFreq.set(term, (termDocFreq.get(term) || 0) + 1);
       }
     }
 
@@ -471,16 +526,17 @@ export class PrimarySourcesVectorStore {
       DROP TABLE IF EXISTS tropy_projects;
     `);
     this.createTables();
-    // HNSW + BM25 are in-memory / parallel-file artifacts; reset them too.
-    this.bm25IsDirty = true;
-    this.bm25ChunkMap.clear();
-    this.bm25IdfCache.clear();
+    // HNSW + BM25 are in-memory / parallel-file artifacts; reset them too. BM25 repart d'un
+    // `TfIdf` neuf : les documents des extraits purgés pesaient encore sur la rareté de chaque mot.
+    this.resetBM25Index();
     this.hnswLabelMap.clear();
     this.hnswCurrentSize = 0;
     this.hnswInitialized = false;
-    if (existsSync(this.hnswIndexPath)) {
+    // La méta aussi : restée seule, le bilan de santé y lisait encore les vecteurs purgés.
+    for (const file of [this.hnswIndexPath, this.hnswIndexPath + '.meta.json']) {
+      if (!existsSync(file)) continue;
       try {
-        unlinkSync(this.hnswIndexPath);
+        unlinkSync(file);
       } catch {
         /* best-effort */
       }
@@ -949,10 +1005,13 @@ export class PrimarySourcesVectorStore {
   }
 
   /**
-   * Supprime une source
+   * Supprime une source. Ses extraits partent avec elle (`ON DELETE CASCADE`) : leurs ids se lisent
+   * avant, pour les retirer aussi des index en mémoire, comme `deleteChunks`.
    */
   deleteSource(id: string): void {
+    const chunkIds = this.chunkIdsOf(id);
     this.db.prepare('DELETE FROM tropy_sources WHERE id = ?').run(id);
+    this.forgetIndexedChunks(chunkIds);
   }
 
   /**
@@ -1166,7 +1225,9 @@ export class PrimarySourcesVectorStore {
    */
   private addToBM25Index(chunk: PrimarySourceChunk): void {
     const docIndex = this.bm25Index.documents.length;
-    this.bm25Index.addDocument(this.preprocessTextForBM25(chunk.content));
+    const tokens = bm25Tokens(chunk.content);
+    this.bm25Index.addDocument(tokens);
+    this.bm25DocLengths[docIndex] = tokens.length;
     this.bm25ChunkMap.set(docIndex, chunk);
     this.bm25IsDirty = true;
   }
@@ -1231,11 +1292,7 @@ export class PrimarySourcesVectorStore {
 
     let replaced = new Set<string>();
     this.db.transaction(() => {
-      replaced = new Set(
-        (this.db.prepare('SELECT id FROM tropy_chunks WHERE source_id = ?').all(sourceId) as Array<{ id: string }>).map(
-          (row) => row.id
-        )
-      );
+      replaced = this.chunkIdsOf(sourceId);
       this.db.prepare('DELETE FROM tropy_chunks WHERE source_id = ?').run(sourceId);
       this.markChunksCurrent(sourceId);
       for (const { chunk, embedding } of items) {
@@ -1264,8 +1321,9 @@ export class PrimarySourcesVectorStore {
    * servait encore leur texte (un ancien titre, une transcription corrigée), et
    * leurs vecteurs, comptés par la recherche, y déclenchaient une
    * reconstruction complète d'un bloc, une centaine de secondes sur 40 000
-   * extraits (H7). Leurs points restent dans le graphe HNSW, que la recherche
-   * ignore, jusqu'à la prochaine reconstruction.
+   * extraits (H7). Leurs points restent dans le graphe HNSW jusqu'à la
+   * prochaine reconstruction, sans étiquette : `searchHNSW` les écarte des
+   * candidats (filtre de `searchKnn`).
    */
   private forgetIndexedChunks(chunkIds: ReadonlySet<string>): void {
     if (chunkIds.size === 0) return;
@@ -1275,19 +1333,30 @@ export class PrimarySourcesVectorStore {
     for (const [docIndex, chunk] of this.bm25ChunkMap) {
       if (chunkIds.has(chunk.id)) this.bm25ChunkMap.delete(docIndex);
     }
+    // Moins de documents servis : la rareté des mots est à recompter.
+    this.bm25IsDirty = true;
     // Une reconstruction en cours a pu les lire avant leur remplacement.
     for (const log of this.rebuildLogs) log.push({ kind: 'forget', chunkIds });
+  }
+
+  /** Les ids des extraits de la source en base. */
+  private chunkIdsOf(sourceId: string): Set<string> {
+    return new Set(
+      this.db.prepare('SELECT id FROM tropy_chunks WHERE source_id = ?').pluck().all(sourceId) as string[]
+    );
   }
 
   /**
    * L'index HNSW en mémoire sert-il les extraits de la base ? (revue de H7)
    *
    * Les extraits s'écrivent en base au fil de l'eau, mais l'index ne s'écrit sur disque qu'à la
-   * fermeture du magasin (`close`), après l'embarquement d'une synchro et en fin de
-   * reconstruction. Or `before-quit` sort par `app.exit()` sans fermer le magasin : après une
-   * sortie ou un plantage, l'index relu est celui d'avant. Ses étiquettes pointent vers des
-   * extraits supprimés, les extraits écrits depuis n'y sont pas, et ils échappent à la recherche
-   * dense. Le contrôle de `search` compare deux nombres, et ne voit rien quand il y en a autant.
+   * fermeture du magasin (`close`, que la sortie de l'app fait dans son échéance depuis L03-9),
+   * après l'embarquement d'une synchro, après la réindexation d'une source (OCR manuel, import :
+   * L06-6) et en fin de reconstruction. Un plantage, un arrêt forcé ou une échéance de sortie
+   * dépassée laissent sur disque l'index d'avant, que la relance relit. Les extraits écrits depuis
+   * n'y sont pas, et ils échappent à la recherche dense. Le contrôle de `search` compare deux
+   * nombres, et ne voit rien quand il y en a autant. Les étiquettes des extraits supprimés depuis
+   * sont retirées à la lecture (`labelsStillInBase`) : leurs points comptent ici dans `stale`.
    *
    * `missing` : les extraits embarqués (à la dimension de l'index) qui n'ont pas de point dans le
    * graphe. `stale` : les points qui ne servent aucun extrait en base (extraits remplacés ou
@@ -1439,10 +1508,18 @@ export class PrimarySourcesVectorStore {
   }
 
   /**
-   * Supprime les chunks d'une source
+   * Supprime les chunks d'une source, de la base et des index en mémoire. BM25 servait encore leur
+   * texte jusqu'à la relance : une transcription corrigée l'était sous son ancienne lecture, en
+   * tête des résultats (S08-1-22). La synchro et l'écriture d'une transcription l'appellent dans
+   * leur transaction : annulée après coup, elle laisse les extraits en base sans entrée en
+   * mémoire, hors de la recherche jusqu'à la relance, où BM25 se refait depuis la base et
+   * `checkHnswIndex` voit ce qui manque au graphe. Jamais l'inverse : un texte supprimé n'est plus
+   * servi.
    */
   deleteChunks(sourceId: string): void {
+    const chunkIds = this.chunkIdsOf(sourceId);
     this.db.prepare('DELETE FROM tropy_chunks WHERE source_id = ?').run(sourceId);
+    this.forgetIndexedChunks(chunkIds);
   }
 
   /**
@@ -1530,8 +1607,17 @@ export class PrimarySourcesVectorStore {
 
     this.hnswIndex.setEf(this.hnswEfSearch);
 
+    // Les points des extraits retirés de la base restent dans le graphe jusqu'à la prochaine
+    // reconstruction, sans étiquette (`forgetIndexedChunks`). hnswlib les écarte lui-même des
+    // candidats (filtre natif, comme L07-4 pour les PDF) : écartés ici après coup, ils en prenaient
+    // les places, et une source réécrite de 200 extraits prenait les 50, sans rien laisser au
+    // nouveau texte (L06-6). Pas `markDelete` : un point ajouté après le marquage de tout son
+    // voisinage ne se relie plus au graphe, et la recherche ne le trouve plus (mesuré). Sans point
+    // retiré, pas de filtre : la recherche garde son chemin le plus court.
+    const labels = this.hnswLabelMap;
+    const filter = labels.size < this.hnswCurrentSize ? (label: number) => labels.has(label) : undefined;
     const queryArray = Array.from(queryEmbedding);
-    const result = this.hnswIndex.searchKnn(queryArray, Math.min(k, this.hnswCurrentSize));
+    const result = this.hnswIndex.searchKnn(queryArray, Math.min(k, this.hnswCurrentSize), filter);
 
     const searchResults: PrimarySourceSearchResult[] = [];
 
@@ -1573,8 +1659,8 @@ export class PrimarySourcesVectorStore {
    * Search using BM25 index (keyword-based)
    */
   private searchBM25(query: string, k: number): Array<{ chunk: PrimarySourceChunk; score: number }> {
-    const processedQuery = this.preprocessTextForBM25(query);
-    const queryTerms = processedQuery.split(/\s+/).filter(t => t.length > 0);
+    // Le découpage des extraits (`bm25Tokens`). Un terme répété dans la question ne compte qu'une fois.
+    const queryTerms = Array.from(new Set(bm25Tokens(query)));
 
     if (queryTerms.length === 0 || this.bm25ChunkMap.size === 0) {
       return [];
@@ -1592,15 +1678,15 @@ export class PrimarySourcesVectorStore {
       const doc = this.bm25Index.documents[docIndex];
       if (!doc) return;
 
-      const docLength = Object.keys(doc).length;
+      const docLength = this.bm25DocLengths[docIndex];
 
       for (const term of queryTerms) {
-        const termLower = term.toLowerCase();
-        const tf = doc[termLower] || 0;
+        // Un terme absent ne doit pas lire une propriété héritée (« constructor » rendait une
+        // fonction, et le score NaN faisait disparaître l'extrait).
+        if (!Object.prototype.hasOwnProperty.call(doc, term)) continue;
+        const tf = doc[term];
 
-        if (tf === 0) continue;
-
-        const idf = this.bm25IdfCache.get(termLower) || 0;
+        const idf = this.bm25IdfCache.get(term) || 0;
 
         // BM25 formula
         const numerator = tf * (this.bm25K1 + 1);
@@ -1643,21 +1729,16 @@ export class PrimarySourcesVectorStore {
       hasExactMatch: boolean;
     }>();
 
-    // Extract potential keywords (words > 4 chars, likely proper nouns or significant terms)
-    const queryKeywords = originalQuery
-      ? originalQuery
-          .toLowerCase()
-          .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-          .split(/\s+/)
-          .filter(t => t.length > 4)
-      : [];
-
-    // Helper to check if chunk contains exact keyword matches
-    const checkExactMatch = (content: string): boolean => {
-      if (queryKeywords.length === 0) return false;
-      const contentLower = content.toLowerCase();
-      return queryKeywords.some(kw => contentLower.includes(kw));
-    };
+    // Les mots-clés de la question, choisis comme pour les PDF (`exactMatchKeywords`, L07-3) :
+    // sigles tels qu'écrits, mots de cinq lettres ou plus hors mots vides, repliés sans accents.
+    // Ils ne valent que comme mots entiers : en sous-chaîne, « Comment… » doublait le score d'un
+    // extrait qui écrit « commentaire ». Cherchés dans le texte de l'extrait, sans le préfixe
+    // « [Doc: titre] » que `DocumentChunker` pose sur tous les extraits d'une source, comme sur
+    // ceux d'un PDF (`stripChunkHeader`). Le premier extrait d'une source garde l'en-tête de
+    // `indexableText` (« Titre: », « Auteur: », « Archive: »…), qui fait partie de son texte.
+    const keywords = originalQuery ? exactMatchKeywords(originalQuery) : null;
+    const checkExactMatch = (content: string): boolean =>
+      keywords !== null && hasExactMatch(stripChunkHeader(content), keywords);
 
     // Add dense results
     denseResults.forEach((result, rank) => {
@@ -1756,8 +1837,7 @@ export class PrimarySourcesVectorStore {
 
     // Clear existing indexes
     this.initNewHNSWIndex();
-    this.bm25Index = new TfIdf();
-    this.bm25ChunkMap.clear();
+    this.resetBM25Index();
 
     // Get all chunks with embeddings
     const chunks = this.getAllChunksWithEmbeddings();
@@ -1794,13 +1874,9 @@ export class PrimarySourcesVectorStore {
     console.log(`🔨 Primary sources: Added ${addedCount} embeddings to HNSW index`)
 
     // Add to BM25
-    let docIndex = 0;
     for (const { chunk } of chunks) {
-      this.bm25Index.addDocument(this.preprocessTextForBM25(chunk.content));
-      this.bm25ChunkMap.set(docIndex, chunk);
-      docIndex++;
+      this.addToBM25Index(chunk);
     }
-    this.bm25IsDirty = true;
 
     // Save HNSW index
     this.saveHNSWIndex();
@@ -2660,9 +2736,7 @@ export class PrimarySourcesVectorStore {
       unlinkSync(metadataPath);
     }
     this.initNewHNSWIndex();
-    this.bm25Index = new TfIdf();
-    this.bm25ChunkMap.clear();
-    this.bm25IsDirty = true;
+    this.resetBM25Index();
     console.log('✅ Primary sources: HNSW and BM25 indexes cleared');
   }
 

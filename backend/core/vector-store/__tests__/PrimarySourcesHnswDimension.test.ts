@@ -43,7 +43,7 @@ function open(): PrimarySourcesVectorStore {
   return store;
 }
 
-/** L'app quittée par `app.exit()` : les transactions sont en base, l'index n'est pas écrit. */
+/** L'app tombée (plantage, arrêt forcé, échéance de sortie dépassée) : les transactions sont en base, l'index n'est pas écrit. */
 function exitWithoutClosing(store: PrimarySourcesVectorStore): void {
   vi.spyOn(store, 'saveHNSWIndex').mockImplementation(() => undefined);
   store.close();

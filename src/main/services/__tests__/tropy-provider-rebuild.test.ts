@@ -56,6 +56,8 @@ vi.mock('../../../../backend/core/vector-store/PrimarySourcesVectorStore.js', ()
     replaceSourceChunks = (sourceId: string, items: Array<{ embedding: Float32Array }>) => {
       for (const { embedding } of items) saved.push({ sourceId, dimension: embedding.length });
     };
+    // Une source réindexée écrit l'index sur disque (L06-6).
+    saveHNSWIndex = () => undefined;
     close = () => undefined;
   },
 }));

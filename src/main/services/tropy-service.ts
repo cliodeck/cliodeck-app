@@ -1301,11 +1301,13 @@ class TropyService {
    */
   async reindexSource(sourceId: string): Promise<{ success: boolean; error?: string; code?: ReindexFailure }> {
     try {
-      if (!this.vectorStore) {
+      // Le magasin du départ, que `indexSourceChunks` capture aussi.
+      const store = this.vectorStore;
+      if (!store) {
         return { success: false, error: 'Service not initialized' };
       }
 
-      const source = this.vectorStore.getSource(sourceId);
+      const source = store.getSource(sourceId);
       if (!source) {
         return { success: false, error: `Source not found: ${sourceId}`, code: 'source-not-found' };
       }
@@ -1320,6 +1322,12 @@ class TropyService {
         console.log(`🔁 [TROPY] Source ${sourceId} modifiée pendant sa réindexation : rien d'écrit, le texte plus récent l'emporte`);
         return { success: true };
       }
+      // L'index sur disque tout de suite : il ne s'écrivait qu'à la fermeture
+      // du magasin, et une app plantée ou arrêtée de force avant relisait
+      // celui d'avant, sans ces extraits, à reconstruire en entier à la relance
+      // (S08-1-23). Une vingtaine de millisecondes pour 40 650 extraits
+      // (mesuré). Projet changé entre-temps : sa fermeture l'a écrit.
+      if (this.vectorStore === store) store.saveHNSWIndex();
       console.log(`🔁 [TROPY] Source ${sourceId} réindexée : ${outcome.chunks} chunk(s)`);
       return { success: true };
     } catch (error: unknown) {
@@ -1401,10 +1409,11 @@ class TropyService {
    *
    * Chaque passe commence par contrôler l'index HNSW relu du disque, même sans
    * source à refaire (`checkHnswIndex`). Il ne s'écrit qu'à la fermeture du
-   * magasin et en fin de reconstruction, et l'app quittée (`app.exit()`) ou
-   * plantée en pleine passe laissait celui d'avant : les sources refaites
-   * échappaient à la recherche dense, toutes et pour de bon si la sortie
-   * tombait pendant la reconstruction finale. En retard, il est reconstruit par
+   * magasin, après une synchro ou la réindexation d'une source, et en fin de
+   * reconstruction, et l'app plantée ou arrêtée de force en pleine passe
+   * laissait celui d'avant : les sources refaites échappaient à la recherche
+   * dense, toutes et pour de bon si l'arrêt tombait pendant la reconstruction
+   * finale. En retard, il est reconstruit par
    * tranches avant la suite, à la dimension du fournisseur d'embeddings : après
    * un changement de modèle, la base mêle deux dimensions jusqu'à la fin de la
    * passe. Plus aucune source à refaire, cette reconstruction est dite à
