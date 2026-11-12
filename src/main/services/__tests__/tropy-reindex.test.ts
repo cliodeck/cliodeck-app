@@ -734,6 +734,43 @@ describe.skipIf(!sqliteAvailable)('filtre de qualité : une source transcrite a 
     });
   });
 
+  it('un registre matricule après une lettre, ou seul : ses dernières entrées restent dans l’index', async () => {
+    // Un registre aux champs répétés (« … né le … 1894 à … classe 1914. ») a
+    // des extraits sous 0,4 de mots distincts. Sa fin, contenue dans l'extrait
+    // précédent, passe le filtre seule. Elle ne peut s'écarter, comme
+    // redondante, que si cet extrait est gardé : écartée avant le filtre, elle
+    // emportait les derniers matricules, que l'index avait avant (revue L06-8).
+    const MONTHS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin'];
+    const TOWNS = ['Reims', 'Épernay', 'Châlons', 'Sézanne'];
+    const letter = Array.from({ length: 60 }, (_, i) => word(7000 + i) + (i % 12 === 11 ? '.' : '')).join(' ');
+    const register = (entries: number) =>
+      Array.from(
+        { length: entries },
+        (_, i) =>
+          `${name(100 + 2 * i)} ${name(101 + 2 * i)} matricule ${1200 + i} né le ${1 + (i % 28)} ${MONTHS[i % 6]} ` +
+          `1894 à ${TOWNS[i % 4]} cultivateur classe 1914.`
+      ).join(' ');
+    const cases = [
+      { title: 'Lettre et registre de 32', text: `${letter} ${register(32)}`, last: 1231 },
+      { title: 'Lettre et registre de 34', text: `${letter} ${register(34)}`, last: 1233 },
+      { title: 'Registre de 37', text: register(37), last: 1236 },
+    ];
+    const tropyDir = path.join(root, 'tropy');
+    fs.mkdirSync(tropyDir);
+    const tpy = makeTpy(tropyDir, {
+      projectId: 'projet-tropy-A',
+      name: 'Reims 1914',
+      items: cases.map((c, i) => ({ id: 60 + i, title: c.title, notes: [{ text: c.text }] })),
+    });
+    expect((await tropyService.openProject(tpy)).success).toBe(true);
+
+    expect((await tropyService.sync(syncOptions)).success).toBe(true);
+
+    const lastIndexed = (c: (typeof cases)[number]) =>
+      new Set(chunksOf(sourceTitled(c.title).id).join(' ').split(/\s+/)).has(String(c.last));
+    expect(cases.map((c) => [c.title, lastIndexed(c)])).toEqual(cases.map((c) => [c.title, true]));
+  });
+
   it('un nom de la liste nominative, cherché : la recherche lexicale la place en tête', async () => {
     await linkArchives();
     await tropyService.sync(syncOptions);
