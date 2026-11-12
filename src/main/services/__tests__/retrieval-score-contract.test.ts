@@ -231,7 +231,7 @@ describe('tropyService.search — seuil sur l’échelle du cosinus', () => {
   const withStoreResults = (results: ReturnType<typeof primaryHit>[]) => {
     tropy.vectorStore = {
       // Des extraits embarqués : sans eux, la recherche rend [] sans rien chercher (E2).
-      getEmbeddingDimension: () => 2,
+      hasEmbeddedChunks: () => true,
       getIndexStats: () => ({ hnswSize: 1, bm25Size: 1, hnswDimension: 2 }),
       search: () => results,
     };

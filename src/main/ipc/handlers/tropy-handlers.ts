@@ -3,6 +3,8 @@
  */
 import { ipcMain } from 'electron';
 import { tropyService } from '../../services/tropy-service.js';
+import { projectManager } from '../../services/project-manager.js';
+import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 import { successResponse, errorResponse } from '../utils/error-handler.js';
 import {
   validate,
@@ -83,6 +85,36 @@ export function setupTropyHandlers() {
    */
   ipcMain.handle('tropy:get-reindex-status', () => {
     return { success: true, status: tropyService.getReindexStatus() };
+  });
+
+  /** `projectPath` est-il le projet ouvert ? L'état d'un projet quitté ne s'affiche pas dans le suivant. */
+  const isCurrentProject = (projectPath: string): boolean => {
+    const currentProject = projectManager.getCurrentProjectPath();
+    return !!currentProject && sameFile(currentProject, projectPath);
+  };
+
+  /**
+   * La réindexation des sources primaires proposée après un changement de modèle d'embeddings
+   * (Q29) : `proposal` nul quand rien n'est à proposer. Refusé (`project-changed`) pour un autre
+   * projet que celui qui est ouvert.
+   */
+  ipcMain.handle('tropy:get-reembed-proposal', (_event, rawProjectPath: unknown) => {
+    const projectPath = validate(StringPathSchema, rawProjectPath);
+    if (!isCurrentProject(projectPath)) return errorResponse('project-changed');
+    return successResponse({ proposal: tropyService.getReembedProposal() });
+  });
+
+  /**
+   * « Réindexer », confirmé dans le panneau : la passe part en arrière-plan, et sa progression
+   * arrive par `tropy:reindex-progress`. `started` est faux, avec sa raison, quand rien ne part.
+   */
+  ipcMain.handle('tropy:reembed', (_event, rawProjectPath: unknown) => {
+    const projectPath = validate(StringPathSchema, rawProjectPath);
+    if (!isCurrentProject(projectPath)) {
+      console.warn('⚠️ tropy:reembed refusé : le projet a changé', { projectPath });
+      return errorResponse('project-changed');
+    }
+    return successResponse({ ...tropyService.requestReembed() });
   });
 
   /**

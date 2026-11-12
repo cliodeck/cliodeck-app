@@ -31,6 +31,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { WebContents } from 'electron';
+import Database from 'better-sqlite3';
 import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 import { makeTpy } from '../../../../backend/integrations/tropy/__tests__/helpers/make-tpy';
 import type { PDFDocument } from '../../../../backend/types/pdf-document';
@@ -93,7 +94,9 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
           id: 'local-test',
           name: 'local-test',
           model: 'hashed-bag-of-words',
-          dimension: DIMENSION,
+          get dimension() {
+            return provider.mode === 'other-model' ? OTHER_DIMENSION : DIMENSION;
+          },
           getStatus: () => ({ state: 'ready' }),
           healthCheck: async () => ({ state: 'ready' }),
           embed: async (texts: string[]) => {
@@ -119,6 +122,7 @@ const { manuscriptIndexService } = await import('../manuscript-index-service.js'
 const { readingNotesIndexService } = await import('../reading-notes-index-service.js');
 const { EnhancedVectorStore } = await import('../../../../backend/core/vector-store/EnhancedVectorStore.js');
 const { VectorStore } = await import('../../../../backend/core/vector-store/VectorStore.js');
+const { EmbeddingSpaceMismatchError } = await import('../../../../backend/core/vector-store/embedding-space.js');
 
 // MARK: - Données
 
@@ -126,6 +130,10 @@ const ARCHIVE_NOTE =
   'Rapport du commissaire central au préfet sur la réunion tenue salle Colbert le 18 mars 1907. ' +
   'Près de huit cents dockers et charretiers y ont voté la grève générale du port de Nantes, ' +
   'malgré les réserves du syndicat, et désigné un comité chargé de porter leurs revendications.';
+
+const SECOND_NOTE =
+  'Lettre du syndicat des dockers au maire de Nantes, datée du 20 mars 1907, demandant que la salle ' +
+  'Colbert reste ouverte aux réunions ouvrières pendant toute la durée du conflit avec les négociants.';
 
 const PDF_TEXT =
   'La grève du port de Nantes en mars 1907 : dockers et charretiers face aux négociants, ' +
@@ -330,6 +338,32 @@ describe.skipIf(!sqliteAvailable)('tropyService.search : une vraie panne lève',
     expect(results[0].chunk.content).toContain('grève générale du port de Nantes');
   });
 
+  it('une question ne lit pas la dimension majoritaire des extraits : 130 ms par question sur 40 650 extraits, contre 0,1 ms pour savoir qu’il y en a un (L06-9)', async () => {
+    await linkAndIndex();
+    const { PrimarySourcesVectorStore } = await import('../../../../backend/core/vector-store/PrimarySourcesVectorStore.js');
+    const majority = vi.spyOn(PrimarySourcesVectorStore.prototype, 'embeddingDimensions');
+    const results = await tropyService.search(question());
+    expect(results.length).toBeGreaterThan(0);
+    expect(majority).not.toHaveBeenCalled();
+  });
+
+  it('archives indexées par un autre modèle : ni la question ni la proposition de réindexer ne lisent la dimension majoritaire, à chaque question tant que la réindexation n’a pas eu lieu (L06-9)', async () => {
+    await linkAndIndex();
+    provider.mode = 'other-model';
+    const { PrimarySourcesVectorStore } = await import('../../../../backend/core/vector-store/PrimarySourcesVectorStore.js');
+    const majority = vi.spyOn(PrimarySourcesVectorStore.prototype, 'embeddingDimensions');
+
+    for (let i = 0; i < 2; i++) {
+      await expect(tropyService.search(question())).rejects.toMatchObject({
+        kind: 'dimension',
+        expected: DIMENSION,
+        actual: OTHER_DIMENSION,
+      });
+    }
+    expect(tropyService.getReembedProposal()).toMatchObject({ sources: 1, expected: DIMENSION, actual: OTHER_DIMENSION });
+    expect(majority).not.toHaveBeenCalled();
+  });
+
   it('archives indexées, Ollama arrêté : la recherche lève', async () => {
     await linkAndIndex();
     provider.mode = 'down';
@@ -342,12 +376,60 @@ describe.skipIf(!sqliteAvailable)('tropyService.search : une vraie panne lève',
     await expect(tropyService.search(question())).rejects.toThrow('embedding provider not configured');
   });
 
-  it('archives indexées par un autre modèle : la recherche du magasin lève', async () => {
+  it('archives indexées par un autre modèle : la recherche lève l’erreur des PDF, de type « dimension », et non l’erreur brute de hnswlib (L06-9)', async () => {
     await linkAndIndex();
     provider.mode = 'other-model';
-    await expect(tropyService.search(question())).rejects.toThrow(
-      `expected ${DIMENSION}, but got ${OTHER_DIMENSION}`
-    );
+    const error = await tropyService.search(question()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EmbeddingSpaceMismatchError);
+    expect(error).toMatchObject({
+      kind: 'dimension',
+      code: 'embedding_dimension_mismatch',
+      expected: DIMENSION,
+      actual: OTHER_DIMENSION,
+    });
+  });
+});
+
+// MARK: - La synchro après un changement de modèle
+
+describe.skipIf(!sqliteAvailable)('synchro Tropy après un changement de modèle : rien n’est écrit, et c’est dit (L06-9)', () => {
+  /** Les dimensions des vecteurs des archives, en base. */
+  function dimensionsInBase(): number[] {
+    const db = new Database(path.join(projectDir, '.cliodeck', 'brain.db'), { readonly: true });
+    try {
+      return (db.prepare('SELECT DISTINCT length(embedding) / 4 AS d FROM tropy_chunks').all() as Array<{ d: number }>).map(
+        (r) => r.d
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  it('une pièce ajoutée dans Tropy, le modèle passé en 1024 : aucune écriture, « embedding-space-changed », et les archives d’avant toujours servies', async () => {
+    await linkAndIndex();
+    const chunkCount = tropyService.getStatistics()?.chunkCount;
+    // L'historien ajoute une pièce dans Tropy, puis synchronise avec le nouveau modèle.
+    makeTpy(path.join(root, 'tropy'), {
+      projectId: 'projet-tropy-E2',
+      name: 'Grèves nantaises',
+      items: [
+        { id: 10, title: 'Rapport du commissaire central', notes: [{ text: ARCHIVE_NOTE }] },
+        { id: 20, title: 'Lettre du syndicat des dockers', notes: [{ text: SECOND_NOTE }] },
+      ],
+    });
+    await setTropyProvider('other-model');
+
+    const result = await tropyService.sync({ performOCR: false, ocrLanguage: 'fra' });
+
+    expect(result.issues).toEqual([
+      { code: 'embedding-space-changed', sources: 1, expected: DIMENSION, actual: OTHER_DIMENSION },
+    ]);
+    expect(tropyService.getStatistics()).toMatchObject({ sourceCount: 2, chunkCount });
+    expect(dimensionsInBase()).toEqual([DIMENSION]);
+    // L'ancien modèle revenu, l'index en mémoire n'a pas été vidé : la première pièce est trouvée.
+    await setTropyProvider('ok');
+    const results = await tropyService.search(question());
+    expect(results[0]?.chunk.content).toContain('grève générale du port de Nantes');
   });
 });
 
@@ -363,7 +445,7 @@ describe.skipIf(!sqliteAvailable)('recherche multi-corpus : la panne des archive
     const { result, map } = await outcomeOf({ query: question(), sourceType: 'both' });
 
     expect(map.primary).toMatchObject({ attempted: true, ok: false, hitCount: 0 });
-    expect(map.primary.error).toContain(`expected ${DIMENSION}, but got ${OTHER_DIMENSION}`);
+    expect(map.primary.error).toContain(`expected ${DIMENSION}, got ${OTHER_DIMENSION}`);
     expect(map.secondary).toMatchObject({ attempted: true, ok: true, hitCount: 1 });
     expect(result.hits.map((h) => h.chunk.id)).toEqual(['doc1-c0']);
   });

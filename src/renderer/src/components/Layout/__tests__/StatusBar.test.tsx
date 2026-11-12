@@ -273,3 +273,52 @@ describe('StatusBar : l’index des PDF à reconstruire se voit, panneau Bibliog
     expect(screen.queryByText('pdfIndexRebuild.status')).toBeNull();
   });
 });
+
+describe('StatusBar : les sources primaires à réindexer pour un nouveau modèle se voient, panneau fermé (Q29)', () => {
+  const electron = () => (window as unknown as { electron: { tropy?: Record<string, unknown> } }).electron;
+  let getReembedProposal: ReturnType<typeof vi.fn>;
+  let tropyBefore: Record<string, unknown> | undefined;
+
+  beforeEach(() => {
+    getReembedProposal = vi.fn(async () => ({
+      success: true,
+      proposal: { sources: 221, chunks: 40648, expected: 768, actual: 1024 },
+    }));
+    tropyBefore = electron().tropy;
+    electron().tropy = { ...tropyBefore, getReembedProposal };
+    act(() => projectLifecycle.enter('/p'));
+  });
+
+  afterEach(() => {
+    act(() => projectLifecycle.enter(null));
+    electron().tropy = tropyBefore;
+  });
+
+  it('proposée : un avertissement, qui ouvre le panneau Sources primaires', async () => {
+    const switches: unknown[] = [];
+    const onSwitch = (event: Event) => switches.push((event as CustomEvent).detail);
+    window.addEventListener('switch-panel', onSwitch);
+    try {
+      await mountWith({ filePath: null, isDirty: false });
+
+      const item = await screen.findByRole('button', { name: 'primarySources.reembed.status' });
+      expect(item).toHaveAttribute('title', 'primarySources.reembed.statusTooltip');
+      expect(item).toHaveClass('status-bar__item--warning');
+      expect(getReembedProposal).toHaveBeenCalledWith('/p');
+
+      fireEvent.click(item);
+      expect(switches).toEqual(['primary-sources']);
+    } finally {
+      window.removeEventListener('switch-panel', onSwitch);
+    }
+  });
+
+  it('témoin : rien à réindexer, rien d’affiché', async () => {
+    getReembedProposal.mockResolvedValue({ success: true, proposal: null });
+    await mountWith({ filePath: null, isDirty: false });
+
+    await waitFor(() => expect(getReembedProposal).toHaveBeenCalled());
+    await act(async () => undefined);
+    expect(screen.queryByText('primarySources.reembed.status')).toBeNull();
+  });
+});

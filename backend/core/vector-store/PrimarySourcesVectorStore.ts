@@ -19,6 +19,7 @@ import { relevanceScore } from '../rag/relevance';
 import { exactMatchKeywords, hasExactMatch, tokenize } from '../text/normalize';
 import { stripChunkHeader } from '../chunking/chunk-text';
 import { sameFile } from './file-identity';
+import { EmbeddingSpaceMismatchError } from './embedding-space';
 
 const { HierarchicalNSW } = hnswlib;
 type HierarchicalNSW = InstanceType<typeof HierarchicalNSW>;
@@ -131,6 +132,20 @@ function ocrPendingOf(value: unknown): Pick<PrimarySourceDocument, 'ocrPending' 
 export const TROPY_CHUNKS_VERSION = 1;
 
 /**
+ * La source `s` a un extrait embarqué à une autre longueur de vecteur que le paramètre (en octets,
+ * `bytesOf`) : un autre modèle d'embeddings l'a calculé (J7).
+ */
+const OTHER_DIMENSION_CHUNK = `EXISTS (
+  SELECT 1 FROM tropy_chunks o
+  WHERE o.source_id = s.id AND o.embedding IS NOT NULL AND length(o.embedding) != ?
+)`;
+
+/** La longueur en octets d'un vecteur de float32 de `dimension` composantes. */
+function bytesOf(dimension: number | undefined): number | null {
+  return dimension === undefined ? null : dimension * 4;
+}
+
+/**
  * Ce que le magasin écrit dans ses index pendant une `rebuildIndexesInSlices`, dans l'ordre, pour
  * le rejouer dans l'index qu'elle construit : les vecteurs ajoutés, et les extraits remplacés
  * (`forgetIndexedChunks`), qu'elle a pu lire avant leur remplacement.
@@ -206,10 +221,10 @@ export class PrimarySourcesVectorStore {
   private hnswInitialized: boolean = false;
   /**
    * Un journal par `rebuildIndexesInSlices` en cours : ce qui s'écrit dans les index d'ici son
-   * remplacement, à rejouer dans le nouvel index. Non vide, il retient aussi la recherche de
-   * reconstruire d'un bloc (`search`).
+   * remplacement, à rejouer dans le nouvel index, avec la dimension de cet index. Non vide, il
+   * retient aussi la recherche de reconstruire d'un bloc (`search`).
    */
-  private rebuildLogs = new Set<RebuildLogEntry[]>();
+  private rebuildLogs = new Map<RebuildLogEntry[], number>();
   /** Fermé : une reconstruction par tranches en cours s'arrête sans rien remplacer. */
   private closed = false;
 
@@ -289,7 +304,7 @@ export class PrimarySourcesVectorStore {
    */
   private initializeIndexes(): void {
     try {
-      // Detect embedding dimension from existing data
+      // La dimension du plus grand nombre d'extraits, celle d'un index qui n'est pas sur disque.
       const detectedDim = this.getEmbeddingDimension();
       if (detectedDim) {
         this.hnswDimension = detectedDim;
@@ -1166,6 +1181,9 @@ export class PrimarySourcesVectorStore {
    * Sauvegarde un chunk avec son embedding
    */
   saveChunk(chunk: PrimarySourceChunk, embedding: Float32Array): void {
+    // Avant l'écriture : un vecteur d'une autre dimension que le corpus n'entre pas (L06-9). Les
+    // autres extraits de la source restent : ils comptent.
+    const corpus = this.checkEmbeddingDimension(embedding.length);
     const embeddingBuffer = Buffer.from(embedding.buffer);
 
     this.db
@@ -1188,6 +1206,7 @@ export class PrimarySourcesVectorStore {
       );
 
     // Add to HNSW index
+    this.adoptEmbeddingDimension(corpus, embedding.length);
     this.addToHNSWIndex(chunk.id, embedding);
 
     // Add to BM25 index
@@ -1202,22 +1221,110 @@ export class PrimarySourcesVectorStore {
       this.initNewHNSWIndex();
     }
 
-    // Check embedding dimension - reinitialize index if dimension changed
+    // Un vecteur d'une autre dimension ne réinitialise plus l'index : tous les vecteurs de
+    // l'ancienne en sortaient, extraits déjà en base (S02-1-11). Les écrivains contrôlent la
+    // dimension avant d'écrire (`checkEmbeddingDimension`) ; ceci n'arrive qu'à un appel qui ne l'a
+    // pas fait. Une reconstruction en cours vers cette dimension l'ajoutera, par son journal.
     if (embedding.length !== this.hnswDimension) {
-      console.log(`📏 Primary sources: Embedding dimension changed (${this.hnswDimension} -> ${embedding.length}), reinitializing HNSW index`);
-      this.hnswDimension = embedding.length;
-      this.initNewHNSWIndex();
+      if (!this.rebuildingTo(embedding.length)) {
+        throw new EmbeddingSpaceMismatchError({ kind: 'dimension', expected: this.hnswDimension, actual: embedding.length });
+      }
+    } else {
+      // Plein : la capacité grandit, plutôt que d'abandonner le vecteur en silence (H7).
+      ensureHnswCapacity(this.hnswIndex!, this.hnswCurrentSize + 1);
+
+      const label = this.hnswCurrentSize;
+      const embeddingArray = Array.from(embedding);
+      this.hnswIndex!.addPoint(embeddingArray, label);
+      this.hnswLabelMap.set(label, chunkId);
+      this.hnswCurrentSize++;
     }
+    for (const log of this.rebuildLogs.keys()) log.push({ kind: 'add', chunkId, embedding });
+  }
 
-    // Plein : la capacité grandit, plutôt que d'abandonner le vecteur en silence (H7).
-    ensureHnswCapacity(this.hnswIndex!, this.hnswCurrentSize + 1);
+  /** Une reconstruction par tranches vers `dimension` est en cours. */
+  private rebuildingTo(dimension: number): boolean {
+    for (const target of this.rebuildLogs.values()) if (target === dimension) return true;
+    return false;
+  }
 
-    const label = this.hnswCurrentSize;
-    const embeddingArray = Array.from(embedding);
-    this.hnswIndex!.addPoint(embeddingArray, label);
-    this.hnswLabelMap.set(label, chunkId);
-    this.hnswCurrentSize++;
-    for (const log of this.rebuildLogs) log.push({ kind: 'add', chunkId, embedding });
+  /**
+   * Les dimensions des extraits embarqués, de la plus représentée à la moins représentée, comme
+   * pour les PDF (`VectorStore.embeddingDimensions`, L04-7). À égalité, la plus grande, pour que
+   * deux ouvertures choisissent la même. Lit la longueur des vecteurs, pas leur contenu.
+   */
+  embeddingDimensions(): Array<{ dimension: number; chunks: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT length(embedding) AS bytes, COUNT(*) AS chunks FROM tropy_chunks
+         WHERE embedding IS NOT NULL AND length(embedding) > 0
+         GROUP BY bytes ORDER BY chunks DESC, bytes DESC`
+      )
+      .all() as Array<{ bytes: number; chunks: number }>;
+    // Float32 : quatre octets par composante.
+    return rows.map((row) => ({ dimension: row.bytes / 4, chunks: row.chunks }));
+  }
+
+  /**
+   * Une dimension d'extraits embarqués autre que `dimension`, `null` sans aucun : la première
+   * trouvée, sans parcourir toute la base (L06-9). La recherche la demande à chaque question tant
+   * que la réindexation proposée n'a pas eu lieu, ce qui peut durer après « Plus tard », et la
+   * proposition à chaque ouverture du projet : la dimension majoritaire (`embeddingDimensions`)
+   * parcourt et groupe tous les extraits, environ 136 ms de blocage du processus principal sur
+   * 40 650 (mesuré). Une base qui en mêle plus de deux (deux changements de modèle sans
+   * réindexation) rend l'une d'elles, pas forcément la plus représentée.
+   */
+  otherEmbeddingDimension(dimension: number): number | null {
+    const bytes = this.db
+      .prepare(
+        `SELECT length(embedding) FROM tropy_chunks
+         WHERE embedding IS NOT NULL AND length(embedding) > 0 AND length(embedding) != ?
+         LIMIT 1`
+      )
+      .pluck()
+      .get(dimension * 4) as number | undefined;
+    return bytes === undefined ? null : bytes / 4;
+  }
+
+  /**
+   * Refuse, avant toute écriture, des vecteurs d'une autre dimension que le corpus (L06-9) : le
+   * modèle d'embeddings a changé depuis leur calcul. Écrits, ils réinitialisaient l'index en
+   * mémoire, et tous les vecteurs de l'ancienne dimension sortaient de la recherche (S02-1-11).
+   * Les extraits d'avant se refont par la réindexation proposée (Q29), qui fait d'abord passer
+   * l'index à la nouvelle dimension (`rebuildIndexesInSlices`).
+   *
+   * Le corpus est à la dimension de l'index tant que la base a des extraits à cette dimension, hors
+   * ceux de `replacing`, la source dont on remplace les extraits. Sans eux, il accepte toute
+   * dimension : rend `null`, et `adoptEmbeddingDimension` fait passer l'index à la nouvelle. Une
+   * reconstruction en cours vers `dimension` l'accepte aussi. Lève `EmbeddingSpaceMismatchError` ;
+   * rend la dimension du corpus, ou `null`.
+   */
+  checkEmbeddingDimension(dimension: number, replacing?: string): number | null {
+    if (dimension === this.hnswDimension || this.rebuildingTo(dimension)) return dimension;
+    const atIndexDimension = this.db
+      .prepare(
+        `SELECT 1 FROM tropy_chunks
+         WHERE embedding IS NOT NULL AND length(embedding) = ? AND source_id IS NOT ?
+         LIMIT 1`
+      )
+      .get(this.hnswDimension * 4, replacing ?? null);
+    if (atIndexDimension === undefined) return null;
+    throw new EmbeddingSpaceMismatchError(
+      { kind: 'dimension', expected: this.hnswDimension, actual: dimension },
+      `Primary sources embedding dimension mismatch: expected ${this.hnswDimension}, got ${dimension}`
+    );
+  }
+
+  /**
+   * Un corpus sans extrait à la dimension de l'index (`checkEmbeddingDimension` a rendu `null`)
+   * passe à celle des vecteurs qu'on écrit : un index neuf et vide, dont les points ne servaient
+   * plus aucun extrait. À appeler après le contrôle, une fois l'écriture assurée.
+   */
+  private adoptEmbeddingDimension(corpus: number | null, dimension: number): void {
+    if (corpus !== null || dimension === this.hnswDimension || this.rebuildingTo(dimension)) return;
+    console.log(`📏 Primary sources: no chunk left at dimension ${this.hnswDimension}, HNSW index now at ${dimension}`);
+    this.hnswDimension = dimension;
+    this.initNewHNSWIndex();
   }
 
   /**
@@ -1284,6 +1391,15 @@ export class PrimarySourcesVectorStore {
     sourceId: string,
     items: Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }>
   ): void {
+    // La dimension des vecteurs, contrôlée avant d'écrire quoi que ce soit (L06-9) : un corpus d'une
+    // autre dimension refuse la source, sans rien en retirer.
+    const dimension = items[0]?.embedding.length;
+    const mixed = items.find(({ embedding }) => embedding.length !== dimension);
+    if (dimension !== undefined && mixed) {
+      throw new EmbeddingSpaceMismatchError({ kind: 'dimension', expected: dimension, actual: mixed.embedding.length });
+    }
+    const corpus = dimension === undefined ? null : this.checkEmbeddingDimension(dimension, sourceId);
+
     const insert = this.db.prepare(`
       INSERT INTO tropy_chunks
       (id, source_id, content, chunk_index, start_position, end_position, embedding, quality_score)
@@ -1309,6 +1425,7 @@ export class PrimarySourcesVectorStore {
       }
     })();
 
+    if (dimension !== undefined) this.adoptEmbeddingDimension(corpus, dimension);
     this.forgetIndexedChunks(replaced);
     for (const { chunk, embedding } of items) {
       this.addToHNSWIndex(chunk.id, embedding);
@@ -1336,7 +1453,7 @@ export class PrimarySourcesVectorStore {
     // Moins de documents servis : la rareté des mots est à recompter.
     this.bm25IsDirty = true;
     // Une reconstruction en cours a pu les lire avant leur remplacement.
-    for (const log of this.rebuildLogs) log.push({ kind: 'forget', chunkIds });
+    for (const log of this.rebuildLogs.keys()) log.push({ kind: 'forget', chunkIds });
   }
 
   /** Les ids des extraits de la source en base. */
@@ -1409,32 +1526,68 @@ export class PrimarySourcesVectorStore {
    * `TROPY_CHUNKS_VERSION`, avec leur nombre d'extraits, dans l'ordre des
    * titres : ce que la réindexation complète doit refaire (H7). Une source
    * sans extrait n'y est pas : la synchro l'embarque, à la version courante.
+   *
+   * `dimension`, celle du fournisseur d'embeddings : une source dont des
+   * extraits sont à une autre n'y est pas (J7). La passe d'ouverture les
+   * réembarquait d'office après un changement de modèle, au prix de tout le
+   * corpus envoyé au fournisseur ; elles sont proposées à l'historien
+   * (`listOtherDimensionSources`, Q29).
    */
-  listOutdatedChunkSources(): Array<{ id: string; chunks: number }> {
+  listOutdatedChunkSources(dimension?: number): Array<{ id: string; chunks: number }> {
     return this.db
       .prepare(
         `SELECT s.id AS id, COUNT(c.id) AS chunks
          FROM tropy_sources s JOIN tropy_chunks c ON c.source_id = s.id
-         WHERE s.chunks_version IS NULL OR s.chunks_version < ?
+         WHERE (s.chunks_version IS NULL OR s.chunks_version < ?)
+           AND (? IS NULL OR NOT ${OTHER_DIMENSION_CHUNK})
          GROUP BY s.id
          ORDER BY s.title, s.id`
       )
-      .all(TROPY_CHUNKS_VERSION) as Array<{ id: string; chunks: number }>;
+      .all(TROPY_CHUNKS_VERSION, dimension ?? null, bytesOf(dimension)) as Array<{ id: string; chunks: number }>;
   }
 
   /**
    * Vrai si la source a des extraits d'une version antérieure : elle reste à
    * réindexer. Une autre écriture (synchro, transcription) a pu les refaire ou
-   * les retirer depuis que la passe a dressé sa liste.
+   * les retirer depuis que la passe a dressé sa liste. `dimension` : comme
+   * `listOutdatedChunkSources`.
    */
-  hasOutdatedChunks(sourceId: string): boolean {
+  hasOutdatedChunks(sourceId: string, dimension?: number): boolean {
     const row = this.db
       .prepare(
         `SELECT 1 FROM tropy_sources s
          WHERE s.id = ? AND (s.chunks_version IS NULL OR s.chunks_version < ?)
-           AND EXISTS (SELECT 1 FROM tropy_chunks c WHERE c.source_id = s.id)`
+           AND EXISTS (SELECT 1 FROM tropy_chunks c WHERE c.source_id = s.id)
+           AND (? IS NULL OR NOT ${OTHER_DIMENSION_CHUNK})`
       )
-      .get(sourceId, TROPY_CHUNKS_VERSION);
+      .get(sourceId, TROPY_CHUNKS_VERSION, dimension ?? null, bytesOf(dimension));
+    return row !== undefined;
+  }
+
+  /**
+   * Les sources dont des extraits sont embarqués à une autre dimension que
+   * `dimension`, celle du fournisseur d'embeddings, avec leur nombre
+   * d'extraits, dans l'ordre des titres : celles qu'un changement de modèle
+   * laisse hors de la recherche par le sens, et dont la réindexation est
+   * proposée à l'historien, jamais faite d'office (J7, Q29).
+   */
+  listOtherDimensionSources(dimension: number): Array<{ id: string; chunks: number }> {
+    return this.db
+      .prepare(
+        `SELECT s.id AS id, COUNT(c.id) AS chunks
+         FROM tropy_sources s JOIN tropy_chunks c ON c.source_id = s.id
+         WHERE ${OTHER_DIMENSION_CHUNK}
+         GROUP BY s.id
+         ORDER BY s.title, s.id`
+      )
+      .all(bytesOf(dimension)) as Array<{ id: string; chunks: number }>;
+  }
+
+  /** Vrai si la source a encore des extraits à une autre dimension que `dimension` (Q29). */
+  hasOtherDimensionChunks(sourceId: string, dimension: number): boolean {
+    const row = this.db
+      .prepare(`SELECT 1 FROM tropy_sources s WHERE s.id = ? AND ${OTHER_DIMENSION_CHUNK}`)
+      .get(sourceId, bytesOf(dimension));
     return row !== undefined;
   }
 
@@ -1553,6 +1706,22 @@ export class PrimarySourcesVectorStore {
     const sameDimension = this.hnswDimension === dimension;
     console.log(`🔍 [DEBUG] Search state: HNSW=${this.hnswCurrentSize} (dimension ${this.hnswDimension}), BM25=${this.bm25ChunkMap.size}, DB chunks with embeddings of dimension ${dimension}=${dbChunkCount}`);
 
+    // Aucun extrait à la dimension de la question, mais des extraits à une autre : tout le corpus a
+    // été embarqué avec un autre modèle (S02-1-11). La même erreur typée que les PDF (L04-7), avant
+    // hnswlib, qui levait son erreur brute, ou rien du tout quand l'index était vide : la recherche
+    // rendait alors les seuls résultats lexicaux, sans rien dire. Le corpus est en panne, pas vide ;
+    // sa réindexation est proposée dans le panneau des sources primaires (Q29). Une première ligne
+    // lue, jamais la dimension majoritaire : chaque question passe ici tant que l'écart demeure.
+    if (dbChunkCount === 0) {
+      const corpus = this.otherEmbeddingDimension(dimension);
+      if (corpus !== null) {
+        throw new EmbeddingSpaceMismatchError(
+          { kind: 'dimension', expected: corpus, actual: dimension },
+          `Query embedding dimension mismatch: expected ${corpus}, got ${dimension}`
+        );
+      }
+    }
+
     // Check if indexes are out of sync with database. Les vecteurs vivants
     // (`hnswLabelMap`), pas tous les points du graphe : un extrait remplacé y
     // laisse le sien jusqu'à la reconstruction (`forgetIndexedChunks`, H7).
@@ -1573,9 +1742,8 @@ export class PrimarySourcesVectorStore {
 
     // 1. Dense retrieval (HNSW). Un index d'une autre dimension ne peut servir la question : en
     // reconstruction vers la sienne, il ne rend rien d'ici là. Sans aucun extrait à la dimension
-    // de la question (tout le corpus embarqué avec un autre modèle), la recherche lève, comme
-    // avant : le corpus est dit en panne, pas vide.
-    const denseResults = sameDimension || dbChunkCount === 0 ? this.searchHNSW(queryEmbedding, candidateSize) : [];
+    // de la question (tout le corpus embarqué avec un autre modèle), la recherche a levé plus haut.
+    const denseResults = sameDimension ? this.searchHNSW(queryEmbedding, candidateSize) : [];
 
     // 2. Sparse retrieval (BM25) - only if query text is provided
     let sparseResults: Array<{ chunk: PrimarySourceChunk; score: number }> = [];
@@ -1853,23 +2021,27 @@ export class PrimarySourcesVectorStore {
       return;
     }
 
-    // Detect dimension from first valid embedding
-    const firstValidEmbedding = chunks.find(c => c.embedding.length > 0);
-    if (firstValidEmbedding && firstValidEmbedding.embedding.length !== this.hnswDimension) {
-      console.log(`📏 Primary sources: Updating HNSW dimension from ${this.hnswDimension} to ${firstValidEmbedding.embedding.length}`);
-      this.hnswDimension = firstValidEmbedding.embedding.length;
+    // La dimension du plus grand nombre d'extraits (L06-9), pas celle de la première ligne lue :
+    // dans une base que deux modèles ont remplie, celle-ci est le plus souvent de l'ancien.
+    const majority = this.embeddingDimensions()[0]?.dimension;
+    if (majority !== undefined && majority !== this.hnswDimension) {
+      console.log(`📏 Primary sources: Updating HNSW dimension from ${this.hnswDimension} to ${majority}`);
+      this.hnswDimension = majority;
       this.initNewHNSWIndex();
     }
 
-    // Add to HNSW. Une seule dimension : un extrait d'une autre réinitialisait
-    // l'index (`addToHNSWIndex`), et une base qui en mêle deux, après un
-    // changement de modèle d'embeddings, n'en gardait que la dernière série.
+    // Add to HNSW. Une seule dimension : les extraits d'une autre restent hors de l'index, dans BM25
+    // seulement, comptés au journal.
     let addedCount = 0;
     for (const { chunk, embedding } of chunks) {
       if (embedding.length === this.hnswDimension) {
         this.addToHNSWIndex(chunk.id, embedding);
         addedCount++;
       }
+    }
+    const outside = chunks.filter((c) => c.embedding.length > 0).length - addedCount;
+    if (outside > 0) {
+      console.warn(`⚠️ Primary sources: ${outside} chunk(s) of another embedding dimension stay out of HNSW (index: ${this.hnswDimension})`);
     }
     console.log(`🔨 Primary sources: Added ${addedCount} embeddings to HNSW index`)
 
@@ -1911,7 +2083,7 @@ export class PrimarySourcesVectorStore {
   async rebuildIndexesInSlices(sliceSize = 256, dimension = this.hnswDimension): Promise<boolean> {
     const startTime = Date.now();
     const log: RebuildLogEntry[] = [];
-    this.rebuildLogs.add(log);
+    this.rebuildLogs.set(log, dimension);
     try {
       await new Promise<void>((resolve) => setImmediate(resolve));
       if (this.closed) return false;
@@ -2701,16 +2873,25 @@ export class PrimarySourcesVectorStore {
   }
 
   /**
-   * Détecte la dimension des embeddings
+   * La dimension du plus grand nombre d'extraits embarqués, `null` sans aucun (L06-9) : le
+   * `LIMIT 1` sans ordre d'avant prenait celle d'une ligne quelconque, dans une base que deux
+   * modèles ont remplie.
    */
   getEmbeddingDimension(): number | null {
-    const row = this.db
-      .prepare('SELECT embedding FROM tropy_chunks WHERE embedding IS NOT NULL LIMIT 1')
-      .get() as any;
+    return this.embeddingDimensions()[0]?.dimension ?? null;
+  }
 
-    if (!row || !row.embedding) return null;
-
-    return row.embedding.byteLength / 4; // Float32 = 4 bytes
+  /**
+   * Au moins un extrait embarqué. Pour la recherche, qui le demande à chaque question : la
+   * dimension majoritaire (`getEmbeddingDimension`) parcourt tous les extraits, environ 130 ms de
+   * blocage du processus principal sur 40 650, contre une première ligne trouvée ici.
+   */
+  hasEmbeddedChunks(): boolean {
+    return (
+      this.db
+        .prepare('SELECT 1 FROM tropy_chunks WHERE embedding IS NOT NULL AND length(embedding) > 0 LIMIT 1')
+        .get() !== undefined
+    );
   }
 
   /**

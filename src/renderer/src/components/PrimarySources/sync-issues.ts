@@ -40,6 +40,12 @@ export function describeSyncIssue(t: TFunction, issue: TropySyncIssue): string {
       return t('primarySources.issues.embeddingFailed', { sources: issue.sources });
     case 'no-embedding-provider':
       return t('primarySources.issues.noEmbeddingProvider', { sources: issue.sources });
+    case 'embedding-space-changed':
+      return t('primarySources.issues.embeddingSpaceChanged', {
+        sources: issue.sources,
+        expected: issue.expected,
+        actual: issue.actual,
+      });
     case 'poppler-missing': {
       // Des clés écrites en entier : le test des clés appelées les voit.
       const platform = installPlatform();
@@ -75,9 +81,14 @@ export function isSyncRefusal(issue: TropySyncIssue): boolean {
  * encore : « enregistrée, pas encore indexée », jamais « réussi » tout court.
  */
 export function describeNotIndexed(t: TFunction, reason: NotIndexedReason): string {
-  return reason === 'no-embedding-provider'
-    ? t('primarySources.transcriptionNotIndexedNoProvider')
-    : t('primarySources.transcriptionNotIndexed');
+  switch (reason) {
+    case 'no-embedding-provider':
+      return t('primarySources.transcriptionNotIndexedNoProvider');
+    case 'embedding-space-changed':
+      return t('primarySources.transcriptionNotIndexedModelChanged');
+    case 'embedding-failed':
+      return t('primarySources.transcriptionNotIndexed');
+  }
 }
 
 /** Une transcription que le main n'a pas écrite. */

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { TropySyncIssue } from '@backend/integrations/tropy/TropySync';
 import { transcriptionSourceOfFormat } from '@backend/integrations/tropy/transcription-provenance';
 import { projectLifecycle } from '../lifecycle/projectLifecycle';
+import { useTropyReembedStore } from './tropyReembedStore';
 
 // MARK: - Types
 
@@ -76,7 +77,7 @@ export interface SyncOutcome {
 export type TranscriptionWriteSource = 'tesseract' | 'transkribus' | 'manual' | 'imported';
 
 /** Pourquoi une transcription écrite n'est pas encore citée par l'assistant. */
-export type NotIndexedReason = 'embedding-failed' | 'no-embedding-provider';
+export type NotIndexedReason = 'embedding-failed' | 'no-embedding-provider' | 'embedding-space-changed';
 
 /**
  * Ce qu'est devenue une transcription envoyée au main. `success` : elle est
@@ -342,7 +343,14 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
     try {
       const result = await window.electron.tropy.sync(options);
       // Le bilan d'une passe lancée pour un autre projet ne s'affiche pas ici.
-      if (startedAt === generation) set({ syncIssues: result.issues ?? [] });
+      if (startedAt === generation) {
+        set({ syncIssues: result.issues ?? [] });
+        // Le message de ce refus renvoie au bouton « Réindexer » du bandeau : fermé par « Plus
+        // tard », il revient (L06-9).
+        if (result.issues?.some((issue: TropySyncIssue) => issue.code === 'embedding-space-changed')) {
+          void useTropyReembedStore.getState().reveal();
+        }
+      }
 
       if (result.success) {
         set((state) => ({ transcriptionRevision: state.transcriptionRevision + 1 }));
@@ -597,7 +605,11 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       if (result.reindexError || result.reindexCode) {
         console.warn('Transcription écrite, pas encore indexée:', result.reindexError);
         const notIndexed: NotIndexedReason =
-          result.reindexCode === 'no-embedding-provider' ? 'no-embedding-provider' : 'embedding-failed';
+          result.reindexCode === 'no-embedding-provider' || result.reindexCode === 'embedding-space-changed'
+            ? result.reindexCode
+            : 'embedding-failed';
+        // Même renvoi au bouton « Réindexer » du bandeau que la synchro (L06-9).
+        if (notIndexed === 'embedding-space-changed') void useTropyReembedStore.getState().reveal();
         return { success: true, notIndexed };
       }
       return { success: true };

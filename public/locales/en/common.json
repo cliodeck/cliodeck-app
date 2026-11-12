@@ -1437,6 +1437,7 @@
     "importFailed": "The import failed.",
     "transcriptionNotIndexed": "Transcription saved, not indexed yet: the semantic search model did not respond (check in Settings that it is available). The assistant does not cite it for now; it will be picked up at the next synchronization.",
     "transcriptionNotIndexedNoProvider": "Transcription saved, not indexed yet: no semantic search model is available (check Settings). The assistant does not cite it for now; it will be picked up at the next synchronization.",
+    "transcriptionNotIndexedModelChanged": "Transcription saved, not indexed yet: the semantic search model has changed since the primary sources were indexed, and the two cannot be mixed in search. First reindex the primary sources (“Reindex” button, in the Primary sources panel); this source will be indexed at the synchronization that follows.",
     "transcriptionNotSaved": "The transcription was not saved.",
     "transcriptionSourceGone": "The transcription was not saved: this source is no longer in the project database. Synchronize the Tropy project, then try again.",
     "forceOCRHint": "When unchecked, recognition only processes sources with no transcription yet and those whose OCR is to be redone (PDFs waiting for Poppler, pages changed in Tropy): other transcriptions are kept.",
@@ -1452,6 +1453,7 @@
       "differentProjectUnnamed": "“{{candidateName}}” is not the Tropy project the {{sourceCount}} source(s) of this ClioDeck project come from. Nothing was changed. To work on “{{candidateName}}”, open it in another ClioDeck project. To link it here, first purge these sources: Project panel, “Actions” section, “Purge Primary Sources” button.",
       "embeddingFailed": "Last synchronization: {{sources}} source(s) saved, not indexed yet. The semantic search model did not respond (check in Settings that it is available): the assistant does not cite them for now. They will be picked up at the next synchronization.",
       "noEmbeddingProvider": "Last synchronization: {{sources}} source(s) saved, not indexed yet. No semantic search model is available (check Settings): the assistant does not cite them for now. They will be picked up at the next synchronization.",
+      "embeddingSpaceChanged": "Last synchronization: {{sources}} source(s) saved, not indexed yet. The semantic search model has changed: it produces vectors of {{actual}} dimensions, and the primary sources already indexed have {{expected}}. The two cannot be mixed in search: nothing was written to the index. First reindex the primary sources (“Reindex” button, in this panel); these sources will be indexed at the synchronization that follows.",
       "popplerMissingMac": "Poppler cannot be found: the PDFs in your archives could not go through OCR. The sources were saved without the text of their PDFs; transcriptions that were already complete are kept. To fix this, install Poppler in Terminal: brew install poppler, then click “Run OCR” again: the pending PDFs will be recognised, with no need to tick “Re-run OCR on every source”.",
       "popplerMissingWindows": "Poppler cannot be found: the PDFs in your archives could not go through OCR. The sources were saved without the text of their PDFs; transcriptions that were already complete are kept. To fix this, download Poppler for Windows (https://github.com/oschwartz10612/poppler-windows), add its “bin” folder to the PATH, restart ClioDeck, then click “Run OCR” again: the pending PDFs will be recognised, with no need to tick “Re-run OCR on every source”.",
       "popplerMissingLinux": "Poppler cannot be found: the PDFs in your archives could not go through OCR. The sources were saved without the text of their PDFs; transcriptions that were already complete are kept. To fix this, install Poppler: apt-get install poppler-utils (or your distribution's equivalent), then click “Run OCR” again: the pending PDFs will be recognised, with no need to tick “Re-run OCR on every source”.",
@@ -1469,6 +1471,24 @@
       "finishing": "Full reindexing of primary sources (once only, after a ClioDeck update): {{total}} / {{total}} source(s) redone. Last step, the search index is being rebuilt; the assistant already uses the new extracts.",
       "rebuildingIndex": "The primary sources search index was not saved when ClioDeck was last closed: it is being rebuilt, {{missing}} extract(s) to put back into it. Until then, semantic search does not find them; the assistant only finds them by their words.",
       "indexRebuilt": "Primary sources search index rebuilt: semantic search finds all extracts again."
+    },
+    "reembed": {
+      "title": "Primary sources to reindex for the new semantic search model",
+      "message": "The semantic search model (embeddings) was changed in Settings: {{sources}} primary source(s) still have extracts computed by the previous one, as vectors of {{expected}} dimensions; the current model produces {{actual}}. Semantic search cannot compare them with your questions. “Reindex” recomputes their {{chunks}} current extract(s) with the new model; each source is split again, and this number may change. Transcriptions are kept, and OCR is not redone.",
+      "action": "Reindex",
+      "later": "Later: this message will come back the next time the project opens, or as soon as a sync or a transcription cannot be indexed because of this model change",
+      "confirmTitle": "Reindex the primary sources",
+      "confirm": "Reindex {{sources}} primary source(s) with the new semantic search model? Their {{chunks}} current extract(s) will be recomputed, source by source, in the background: with Ollama, this can take a long time on a large corpus. Transcriptions are kept, and OCR is not redone. If you close the project or quit ClioDeck before the end, reindexing stops, and it will be offered again for the remaining sources the next time the project opens.",
+      "noProvider": "Reindexing could not start: no semantic search model is available (check Settings).",
+      "status": "Primary sources to reindex",
+      "statusTooltip": "Open the Primary sources panel, which offers to reindex them for the new semantic search model",
+      "running": "Reindexing primary sources for the new semantic search model: {{done}} / {{total}} source(s), about {{chunks}} extract(s) to redo. Transcriptions are kept, and OCR is not redone. Until the end, the assistant only finds the sources not yet redone by their words. If you close the project or quit ClioDeck, reindexing stops, and it will be offered again the next time the project opens.",
+      "finishing": "Reindexing primary sources for the new semantic search model: {{total}} / {{total}} source(s) redone. Last step, the search index is being rebuilt; the assistant already uses the new extracts.",
+      "stoppedNoProvider": "Reindexing primary sources for the new model interrupted: no semantic search model is available (check Settings). {{remaining}} source(s) remain to reindex; the assistant only finds them by their words. Reindexing will be offered again as soon as a model is available.",
+      "stoppedFailed": "Reindexing primary sources for the new model interrupted: the semantic search model did not respond (check in Settings that it is available). {{remaining}} source(s) remain to reindex; the assistant only finds them by their words. Reindexing is offered again below, and will be the next time the project opens.",
+      "done": "Reindexing primary sources for the new semantic search model finished: {{total}} source(s) redone.",
+      "rebuildingIndex": "The semantic search model was changed in Settings: the primary sources search index is being rebuilt for it, {{missing}} extract(s) to put back into it. Until then, semantic search does not find them; the assistant only finds them by their words.",
+      "indexRebuilt": "Primary sources search index rebuilt for the current semantic search model: semantic search finds the extracts computed by this model again."
     }
   },
   "modes": {

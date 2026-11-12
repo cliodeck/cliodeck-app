@@ -27,11 +27,20 @@ const ALLOWED_SEND_CHANNELS: string[] = [
  */
 type TropyReindexStatusShape =
   | { phase: 'idle' }
-  | { phase: 'running'; done: number; total: number; chunks: number; waitingForSync: boolean }
-  | { phase: 'stopped'; reason: 'no-embedding-provider' | 'embedding-failed'; total: number; remaining: number }
-  | { phase: 'done'; total: number }
+  | { phase: 'running'; cause?: 'model-change'; done: number; total: number; chunks: number; waitingForSync: boolean }
+  | {
+      phase: 'stopped';
+      cause?: 'model-change';
+      reason: 'no-embedding-provider' | 'embedding-failed';
+      total: number;
+      remaining: number;
+    }
+  | { phase: 'done'; cause?: 'model-change'; total: number }
   | { phase: 'rebuilding-index'; missing: number }
   | { phase: 'index-rebuilt' };
+
+/** Même forme que `TropyReembedProposal` (backend/types/tropy-reindex.ts). */
+type TropyReembedProposalShape = { sources: number; chunks: number; expected: number; actual: number };
 
 // API exposée au renderer process
 const api = {
@@ -983,6 +992,27 @@ const api = {
     // Réindexation complète des extraits d'avant (H7).
     getReindexStatus: (): Promise<{ success: boolean; status?: TropyReindexStatusShape }> =>
       ipcRenderer.invoke('tropy:get-reindex-status'),
+    /**
+     * La réindexation proposée après un changement de modèle d'embeddings (Q29), `null` sans rien à
+     * proposer. Refusé (`project-changed`) si `projectPath` n'est plus le projet ouvert.
+     */
+    getReembedProposal: (projectPath: string) =>
+      ipcRenderer.invoke('tropy:get-reembed-proposal', projectPath) as Promise<{
+        success: boolean;
+        error?: string;
+        proposal?: TropyReembedProposalShape | null;
+      }>,
+    /**
+     * « Réindexer », confirmé : la passe part en arrière-plan, sa progression arrive par
+     * `onReindexProgress`. `started` est faux, avec sa raison, quand rien ne part.
+     */
+    reembed: (projectPath: string) =>
+      ipcRenderer.invoke('tropy:reembed', projectPath) as Promise<{
+        success: boolean;
+        error?: string;
+        started?: boolean;
+        reason?: 'no-embedding-provider' | 'nothing-to-reembed';
+      }>,
 
     // File Watching
     // Sans chemin : le main surveille le projet Tropy lié au projet courant (S18-1-30).
@@ -1044,6 +1074,12 @@ const api = {
       const listener = (_event: unknown, status: TropyReindexStatusShape) => callback(status);
       ipcRenderer.on('tropy:reindex-progress', listener);
       return () => ipcRenderer.removeListener('tropy:reindex-progress', listener);
+    },
+    /** La proposition de réindexation a pu changer (modèle changé, passe finie) : la relire. */
+    onReembedProposalChanged: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('tropy:reembed-proposal-changed', listener);
+      return () => ipcRenderer.removeListener('tropy:reembed-proposal-changed', listener);
     },
   },
 
