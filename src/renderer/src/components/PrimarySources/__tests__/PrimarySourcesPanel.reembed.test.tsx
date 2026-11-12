@@ -325,6 +325,28 @@ describe.skipIf(!sqliteAvailable)('Sources primaires : après un changement de m
     expect(h.texts).toBe(0);
   });
 
+  it('un autre projet que l’ouvert : ni proposition lue, ni réindexation lancée (project-changed)', async () => {
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+    const other = path.join(root, 'autre-projet');
+
+    expect(await h.handlers.get('tropy:get-reembed-proposal')?.({ sender: null }, other)).toMatchObject({
+      success: false,
+      error: 'project-changed',
+    });
+    expect(await h.handlers.get('tropy:reembed')?.({ sender: null }, other)).toMatchObject({
+      success: false,
+      error: 'project-changed',
+    });
+    await tropyService.whenFullReindexSettled();
+    expect(h.texts).toBe(0);
+    // Témoin : le projet ouvert, lui, a sa proposition.
+    expect(await h.handlers.get('tropy:get-reembed-proposal')?.({ sender: null }, projectDir)).toMatchObject({
+      success: true,
+      proposal: { sources: 3, expected: 8, actual: 16 },
+    });
+  });
+
   it('témoin : le modèle d’avant, rien n’est proposé', async () => {
     h.dimension = 8;
     render(<PrimarySourcesPanel />);
