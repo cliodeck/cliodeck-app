@@ -318,4 +318,56 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — index écrit su
     expect(relaunched.search(vector({ 607: 1 }), 1)[0]?.chunk.id).toBe('c7');
     expect(fs.readdirSync(path.join(tmp, '.cliodeck')).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
+
+  it('app tombée après deleteChunks, avant l’écriture de l’index : à la relance, les étiquettes des extraits supprimés ne servent plus', () => {
+    const first = open();
+    // 2 200 extraits servis, loin de la question : 200 points morts restent sous les 10 % de
+    // `checkHnswIndex`, et rien ne se reconstruit à la relance.
+    addSource(first, 'fill-1', 'Remplissage');
+    first.replaceSourceChunks(
+      'fill-1',
+      Array.from({ length: 2200 }, (_, i) => ({
+        chunk: chunk('fill-1', `f-${i}`, `remplissage ${i}`, i),
+        embedding: vector({ [100 + (i % 600)]: 1, [700 + Math.floor(i / 600)]: 0.5 }),
+      }))
+    );
+    addSource(first, 'src-1', 'Registre');
+    first.replaceSourceChunks(
+      'src-1',
+      Array.from({ length: 200 }, (_, i) => ({
+        chunk: chunk('src-1', `old-${i}`, `ancienne lecture ${i}`, i),
+        embedding: vector({ 0: 1, [1 + i]: 0.05 }),
+      }))
+    );
+    addSource(first, 'src-2', 'Lettre');
+    first.replaceSourceChunks('src-2', [{ chunk: chunk('src-2', 'lettre', 'la lettre'), embedding: vector({ 0: 1, 250: 1 }) }]);
+    first.close();
+
+    // OCR manuel : `updateSourceTranscription` retire les extraits, et l'app tombe pendant
+    // l'embarquement du nouveau texte, avant toute écriture de l'index.
+    const second = open();
+    second.deleteChunks('src-1');
+    vi.spyOn(second, 'saveHNSWIndex').mockImplementation(() => undefined);
+    second.close();
+
+    // La méta relue étiquette encore les 200 extraits supprimés : leurs points ne doivent pas
+    // prendre les 50 places des candidats denses.
+    const relaunched = open();
+    expect(relaunched.checkHnswIndex()).toMatchObject({ missing: 0, stale: 200, needsRebuild: false });
+    // Le magasin rend `topK` extraits sans seuil : les extraits de remplissage (cosinus nul) suivent.
+    expect(relaunched.search(vector({ 0: 1 }), 10)[0]?.chunk.id).toBe('lettre');
+
+    // La source réembarquée (la synchro suivante la reprend) : son nouvel extrait sort dès la relance.
+    relaunched.replaceSourceChunks('src-1', [
+      { chunk: chunk('src-1', 'new', 'lecture corrigée'), embedding: vector({ 0: 1, 500: 1 }) },
+    ]);
+    const ids = relaunched.search(vector({ 0: 1 }), 10).map((r) => r.chunk.id);
+    expect(ids.slice(0, 2).sort()).toEqual(['lettre', 'new']);
+    relaunched.close();
+
+    // `project:health` compare `currentSize` aux extraits embarqués : 2 202, sans faux écart.
+    const meta = readMeta();
+    expect(meta.currentSize).toBe(2202);
+    expect(meta.labelMap.map(([, chunkId]) => chunkId)).not.toContain('old-0');
+  });
 });

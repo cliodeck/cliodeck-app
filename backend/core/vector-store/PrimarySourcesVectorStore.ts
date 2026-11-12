@@ -348,7 +348,7 @@ export class PrimarySourcesVectorStore {
         this.hnswIndex.resizeIndex(this.hnswMaxElements);
       }
 
-      if (metadata) this.hnswLabelMap = new Map(metadata.labelMap || []);
+      if (metadata) this.hnswLabelMap = this.labelsStillInBase(metadata.labelMap || []);
 
       this.hnswInitialized = true;
       console.log(`✅ Primary sources: Loaded HNSW index with ${this.hnswCurrentSize} vectors`);
@@ -356,6 +356,30 @@ export class PrimarySourcesVectorStore {
       console.warn('⚠️ Primary sources: Failed to load HNSW index, creating new:', error);
       this.initNewHNSWIndex();
     }
+  }
+
+  /**
+   * Les étiquettes de la méta relue dont l'extrait est encore en base, embarqué à la dimension de
+   * l'index. Après un arrêt brutal entre une suppression d'extraits (`deleteChunks` : OCR manuel,
+   * synchro) et l'écriture suivante de l'index, la méta étiquette encore les extraits supprimés.
+   * Comptés comme servis, leurs points prenaient les places des candidats denses sans que le filtre
+   * de `searchHNSW` s'active, et chaque écriture les reportait : une source de 200 extraits dans un
+   * corpus de 40 000 reste sous le seuil de reconstruction de `checkHnswIndex` (10 %), et la
+   * recherche dense ne rendait plus rien autour d'elle (revue de L06-6). Leurs points restent dans
+   * le graphe, sans étiquette, comme ceux que `forgetIndexedChunks` retire en cours de session.
+   * Les seuls identifiants sont lus, comme `checkHnswIndex`.
+   */
+  private labelsStillInBase(labelMap: Array<[number, string]>): Map<number, string> {
+    const inBase = this.embeddedChunkIds(this.hnswDimension);
+    const labels = new Map<number, string>();
+    for (const [label, chunkId] of labelMap) {
+      if (inBase.has(chunkId)) labels.set(label, chunkId);
+    }
+    const dropped = labelMap.length - labels.size;
+    if (dropped > 0) {
+      console.log(`🧹 Primary sources: ${dropped} HNSW label(s) without chunk in base dropped at load`);
+    }
+    return labels;
   }
 
   /**
@@ -1329,10 +1353,10 @@ export class PrimarySourcesVectorStore {
    * fermeture du magasin (`close`, que la sortie de l'app fait dans son échéance depuis L03-9),
    * après l'embarquement d'une synchro, après la réindexation d'une source (OCR manuel, import :
    * L06-6) et en fin de reconstruction. Un plantage, un arrêt forcé ou une échéance de sortie
-   * dépassée laissent sur disque l'index d'avant, que la relance relit. Ses étiquettes pointent
-   * vers des extraits supprimés, les extraits écrits depuis n'y sont pas, et ils échappent à la
-   * recherche dense. Le contrôle de `search` compare deux nombres, et ne voit rien quand il y en a
-   * autant.
+   * dépassée laissent sur disque l'index d'avant, que la relance relit. Les extraits écrits depuis
+   * n'y sont pas, et ils échappent à la recherche dense. Le contrôle de `search` compare deux
+   * nombres, et ne voit rien quand il y en a autant. Les étiquettes des extraits supprimés depuis
+   * sont retirées à la lecture (`labelsStillInBase`) : leurs points comptent ici dans `stale`.
    *
    * `missing` : les extraits embarqués (à la dimension de l'index) qui n'ont pas de point dans le
    * graphe. `stale` : les points qui ne servent aucun extrait en base (extraits remplacés ou
