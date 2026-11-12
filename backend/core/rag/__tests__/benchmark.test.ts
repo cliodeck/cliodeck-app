@@ -181,6 +181,32 @@ describe('RAG benchmark harness (2.4a)', () => {
     expect(result.hitRate[5]).toBe(0.5);
   });
 
+  // Un retriever qui fusionne des variantes sans dédoublonner peut rendre deux
+  // fois le même extrait : compté deux fois, il ferait monter le rappel au-delà
+  // de la part réelle, jusqu'à 1 ici alors que c2 n'est jamais rendu.
+  it('un extrait pertinent rendu deux fois ne compte qu’une fois', async () => {
+    const withDuplicate: Retriever = {
+      async index() {},
+      async search() {
+        return [
+          { chunkId: 'c1', score: 3 },
+          { chunkId: 'c1', score: 2 },
+          { chunkId: 'x1', score: 1 },
+        ];
+      },
+    };
+    const result = await runBenchmark({
+      docs,
+      queries: [{ id: 'q', text: 'peu importe', relevant: ['c1', 'c2'] }],
+      retriever: withDuplicate,
+    });
+    expect(result.recall[10]).toBeCloseTo(1 / 2, 10);
+    expect(result.recall[3]).toBeCloseTo(1 / 2, 10);
+    expect(result.perQuery[0].relevantFound).toBe(1);
+    expect(result.perQuery[0].relevantCount).toBe(2);
+    expect(result.perQuery[0].firstRelevantRank).toBe(1);
+  });
+
   it('diffResults donne l’écart du rappel et celui du taux de succès', async () => {
     const before = await runBenchmark({
       docs,
