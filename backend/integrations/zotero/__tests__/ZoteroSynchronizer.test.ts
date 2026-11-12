@@ -684,10 +684,9 @@ describe('résumé', () => {
     expect(second.bibtex).not.toContain('Ancien résumé');
   });
 
-  // La comparaison des autres champs ne garde que les lettres ASCII et les blancs : un résumé chinois
-  // y vaut une chaîne vide, comme un résumé absent, et serait passé pour déjà présent. Celle du
-  // résumé garde toutes les écritures, mais pas les signes : un résumé fait de seuls signes est
-  // nouveau parce que le `.bib` n'en a pas, quoi que dise la comparaison.
+  // La comparaison des autres champs ne garde que les lettres ASCII et les blancs : un résumé chinois,
+  // ou fait de seuls signes, y vaut une chaîne vide, comme un résumé absent, et serait passé pour
+  // déjà présent. Le `.bib` n'en a pas : celui de Zotero est nouveau.
   const firstAbstracts: Record<string, string> = {
     'sans lettre latine ni espace (chinois)': '本文讨论档案与数字史学的关系。',
     'fait de seuls signes': '***',
@@ -819,6 +818,55 @@ describe('résumé', () => {
 
     expect(second.report.modified.map((m) => m.fields)).toEqual([['abstract']]);
     expect(reread(second)[0].customFields?.abstract).toBe('Это книга о музеях.');
+  });
+
+  // La relecture du `.bib` ne change jamais la casse, et ne touche la ponctuation que par `---`,
+  // `--`, ``…'' : une correction faite dans Zotero sur la seule casse, la ponctuation ou un symbole
+  // change le sens du résumé, et l'emporte comme une autre. Elle passait pour identique, et la fiche
+  // gardait l'ancien texte jusqu'à la prochaine modification de la notice.
+  const corrections: Record<string, [string, string]> = {
+    'un nombre décimal': ['Une baisse de 35 % des naissances.', 'Une baisse de 3,5 % des naissances.'],
+    'la casse': ['la révolution française et l’unesco', 'La Révolution française et l’UNESCO'],
+    'un symbole': ['Un coût de 5 € par acte.', 'Un coût de 5 $ par acte.'],
+    'des signes': ['Températures de -5 à +3 degrés.', 'Températures de +5 à -3 degrés.'],
+    'la ponctuation': ['Une révolution.', 'Une révolution ?'],
+  };
+  for (const [name, [before, after]] of Object.entries(corrections)) {
+    it(`un résumé corrigé dans Zotero l’emporte, même si la correction ne porte que sur ${name}`, async () => {
+      const library = lib();
+      library.contents.ARTICLE[0].data.abstractNote = before;
+      const sync = new ZoteroSynchronizer(source(library));
+      const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+
+      library.contents.ARTICLE[0].data.abstractNote = after;
+      const second = applied(
+        await sync.synchronize({ local: reread(first), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+      );
+
+      expect(second.changed).toBe(true);
+      expect(second.report.modified.map((m) => m.fields)).toEqual([['abstract']]);
+      expect(reread(second)[0].customFields?.abstract).toBe(after);
+
+      const third = applied(
+        await sync.synchronize({ local: reread(second), collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' })
+      );
+      expect(third.changed).toBe(false);
+    });
+  }
+
+  // Better BibTeX, quand il écrit en LaTeX, note l'espace insécable `~`, que le parseur relit en
+  // espace simple : c'est le même résumé, écrit autrement, pas une correction.
+  it('une espace insécable écrite `~` dans un .bib de Better BibTeX : le même résumé, rien à réécrire', async () => {
+    const library = lib();
+    const sync = new ZoteroSynchronizer(source(library));
+    const first = applied(await sync.synchronize({ local: [], collectionKey: 'ARTICLE' }));
+    const local = new BibTeXParser().parse(withBibAbstract(first.bibtex, 'AAA', 'Lire~: un braconnage'));
+
+    library.contents.ARTICLE[0].data.abstractNote = 'Lire : un braconnage';
+    const second = applied(await sync.synchronize({ local, collectionKey: 'ARTICLE', savedCollectionKey: 'ARTICLE' }));
+
+    expect(second.report.modified).toEqual([]);
+    expect(second.changed).toBe(false);
   });
 
   // La comparaison du résumé ne doit pas faire passer pour « modifiée », à chaque synchronisation, une
