@@ -122,7 +122,8 @@ export class EnhancedVectorStore {
           console.log('✅ HNSW index rebuilt successfully from SQLite');
         } catch (rebuildError) {
           console.error('❌ Failed to rebuild indexes:', rebuildError.message);
-          // Continue without HNSW - search will fall back to linear
+          // Le projet s'ouvre quand même : la recherche lèvera tant que l'index restera vide,
+          // sauf HNSW désactivé dans la configuration (recherche linéaire, cf. `search`).
         }
       }
     } else {
@@ -242,6 +243,18 @@ export class EnhancedVectorStore {
 
     let results: SearchResult[];
 
+    // HNSW désactivé dans la configuration (`rag.useHNSWIndex: false`) : recherche linéaire, exacte,
+    // sur les extraits de SQLite, qui rend chacun avec son document. Elle levait à chaque question
+    // (S01-1-8). Elle ne lit ni HNSW ni BM25 : une reconstruction en cours ne la retient pas. Pas de
+    // fusion avec BM25 : la recherche hybride (`useHybridSearch`) est celle de HNSW et de BM25.
+    if (!this.useHNSW) {
+      results = this.vectorStore.search(queryEmbedding, k, documentIds);
+      console.log(
+        `🔍 Search completed: ${results.length} results in ${Date.now() - startTime}ms (mode: linear)`
+      );
+      return results;
+    }
+
     // If rebuilding, throw error to avoid blocking
     if (this.isRebuilding) {
       const status = this.getRebuildStatus();
@@ -252,7 +265,7 @@ export class EnhancedVectorStore {
 
     // Check if HNSW is ready
     const hnswSize = this.hnswStore.getSize();
-    const hnswReady = this.useHNSW && hnswSize > 0;
+    const hnswReady = hnswSize > 0;
 
     if (hnswReady) {
       // Use HNSW or hybrid search
@@ -292,7 +305,7 @@ export class EnhancedVectorStore {
 
     const duration = Date.now() - startTime;
     console.log(
-      `🔍 Search completed: ${results.length} results in ${duration}ms (mode: ${this.useHybrid ? 'hybrid' : this.useHNSW ? 'HNSW' : 'linear'})`
+      `🔍 Search completed: ${results.length} results in ${duration}ms (mode: ${this.useHybrid ? 'hybrid' : 'HNSW'})`
     );
 
     return results;

@@ -97,11 +97,13 @@ export class BM25Index {
     }
 
     const scores: Array<{ index: number; score: number; chunk: DocumentChunk }> = [];
+    // Un ensemble : `includes` reparcourait la sélection pour chaque extrait du corpus.
+    const allowed = documentIds ? new Set(documentIds) : null;
 
     // Calculate BM25 score for each document
     this.chunkMap.forEach((chunk, docIndex) => {
       // Filter by document IDs if provided
-      if (documentIds && !documentIds.includes(chunk.documentId)) {
+      if (allowed && !allowed.has(chunk.documentId)) {
         return;
       }
 

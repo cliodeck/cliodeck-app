@@ -328,12 +328,26 @@ export class HNSWVectorStore {
     // Set search accuracy
     this.index.setEf(this.efSearch);
 
+    // Une sélection (documents, collection) se filtre pendant la recherche, label par label :
+    // appliquée après coup aux 2k plus proches voisins du corpus entier, elle n'en gardait souvent
+    // aucun quand d'autres documents traitaient du même sujet, et la recherche par le sens ne
+    // rendait rien des documents choisis (S01-1-1). Le filtre ne fait que lire : le fichier de
+    // l'index ne change pas.
+    const allowed = documentIds ? new Set(documentIds) : null;
+    const filter = allowed
+      ? (label: number): boolean => {
+          const chunkId = this.chunkIdMap.get(label);
+          const chunk = chunkId === undefined ? undefined : this.chunkDataMap.get(chunkId);
+          return chunk !== undefined && allowed.has(chunk.documentId);
+        }
+      : undefined;
+
     // Perform search with error handling
     let result: { neighbors: number[]; distances: number[] };
     try {
       // Convert Float32Array to number[]
       const queryArray = Array.from(queryEmbedding);
-      result = this.index.searchKnn(queryArray, Math.min(k * 2, this.currentSize));
+      result = this.index.searchKnn(queryArray, Math.min(k * 2, this.currentSize), filter);
     } catch (error) {
       throw new Error(`HNSW search failed: ${error.message}`);
     }
@@ -350,11 +364,6 @@ export class HNSWVectorStore {
 
       const chunk = this.chunkDataMap.get(chunkId);
       if (!chunk) continue;
-
-      // Filter by document IDs if provided
-      if (documentIds && !documentIds.includes(chunk.documentId)) {
-        continue;
-      }
 
       searchResults.push({
         chunk,

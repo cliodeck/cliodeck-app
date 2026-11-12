@@ -661,11 +661,29 @@ export class VectorStore {
       allChunks = this.getAllChunksWithEmbeddings();
     }
 
+    // Un extrait d'une autre dimension que la question (modèle d'embeddings changé, PDF pas
+    // encore réindexés) ne se compare pas à elle : `cosineSimilarity` le notait 0, et il partait
+    // quand même comme source, jusqu'à trois par le repli du seuil. Il est écarté ; s'il n'en
+    // reste aucun, le corpus est en panne et la recherche lève, comme celle de HNSW (E2).
+    const comparable = allChunks.filter(
+      (chunkWithEmbedding) => chunkWithEmbedding.embedding.length === queryEmbedding.length
+    );
+    if (comparable.length === 0 && allChunks.length > 0) {
+      throw new Error(
+        `Query embedding dimension mismatch: expected ${allChunks[0].embedding.length}, got ${queryEmbedding.length}`
+      );
+    }
+    if (comparable.length < allChunks.length) {
+      console.warn(
+        `⚠️  ${allChunks.length - comparable.length} chunks skipped: embedding dimension differs from the query (${queryEmbedding.length}), reindexing needed`
+      );
+    }
+
     // Calculer la similarité cosinus pour chaque chunk
     const scoredChunks: Array<{ chunkWithEmbedding: ChunkWithEmbedding; similarity: number }> =
       [];
 
-    for (const chunkWithEmbedding of allChunks) {
+    for (const chunkWithEmbedding of comparable) {
       const similarity = this.cosineSimilarity(queryEmbedding, chunkWithEmbedding.embedding);
       scoredChunks.push({ chunkWithEmbedding, similarity });
     }
