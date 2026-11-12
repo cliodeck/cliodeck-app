@@ -286,3 +286,128 @@ describe('useBrainstormChat — un envoi parti avant la bascule', () => {
     ]);
   });
 });
+
+/**
+ * Un tour resté sans réponse garde sa bulle vide à l'écran (S06-1-1). Renvoyée au modèle avec la
+ * question suivante, elle faisait échouer en HTTP 400 chaque tour d'après chez Claude et Gemini,
+ * jusqu'à ce qu'on vide la conversation.
+ */
+describe('useBrainstormChat — un tour sans réponse ne repart pas au modèle', () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useChatStore.getState().setChatSettings({ sendBlockedReasons: undefined });
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  function sentMessages(start: ReturnType<typeof vi.fn>, call: number): unknown[] {
+    return (start.mock.calls[call] as [unknown[], StartOpts])[0];
+  }
+
+  it('tour en erreur avant le premier jeton : la question suivante part sans la bulle vide ni sa question', async () => {
+    const start = installFusionChat();
+    start
+      .mockResolvedValueOnce({ success: true, sessionId: 's1' })
+      .mockResolvedValueOnce({ success: true, sessionId: 's2' })
+      .mockResolvedValueOnce({ success: true, sessionId: 's3' });
+    const { result } = renderHook(() => useBrainstormChat());
+
+    await act(async () => {
+      await result.current.send('Qui était le préfet en 1934 ?');
+    });
+    act(() => {
+      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Jean Chiappe.', done: true, finishReason: 'stop' } });
+    });
+    await act(async () => {
+      await result.current.send('Et en 1936 ?');
+    });
+    act(() => {
+      chunkListeners[0]({
+        sessionId: 's2',
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code: 'provider_error', message: 'HTTP 529 overloaded' },
+      });
+    });
+    // La bulle du tour échoué reste affichée, avec son erreur.
+    expect(useChatStore.getState().messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '',
+      isError: true,
+    });
+
+    await act(async () => {
+      await result.current.send('Qui lui a succédé ?');
+    });
+
+    expect(start).toHaveBeenCalledTimes(3);
+    expect(sentMessages(start, 2)).toEqual([
+      { role: 'user', content: 'Qui était le préfet en 1934 ?' },
+      { role: 'assistant', content: 'Jean Chiappe.' },
+      { role: 'user', content: 'Qui lui a succédé ?' },
+    ]);
+  });
+
+  it('tour arrêté avant le premier jeton : même sort', async () => {
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('Qui était le préfet en 1934 ?');
+    });
+    await act(async () => {
+      await result.current.cancel();
+    });
+    expect(useChatStore.getState().messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: '',
+      finishReason: 'cancelled',
+    });
+
+    await act(async () => {
+      await result.current.send('Et en 1936 ?');
+    });
+
+    expect(sentMessages(start, 1)).toEqual([{ role: 'user', content: 'Et en 1936 ?' }]);
+  });
+
+  it('chat.start refusé (bulle local-error) : même sort', async () => {
+    const start = installFusionChat();
+    start.mockResolvedValueOnce({ success: false, error: 'boom' } as never);
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('Qui était le préfet en 1934 ?');
+    });
+    expect(useChatStore.getState().messages.at(-1)).toMatchObject({ role: 'assistant', content: '', isError: true });
+
+    await act(async () => {
+      await result.current.send('Et en 1936 ?');
+    });
+
+    expect(sentMessages(start, 1)).toEqual([{ role: 'user', content: 'Et en 1936 ?' }]);
+  });
+
+  it('témoin : un tour partiel interrompu repart avec sa question', async () => {
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('Qui était le préfet en 1934 ?');
+    });
+    act(() => {
+      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Le préfet était' } });
+      chunkListeners[0]({
+        sessionId: 's1',
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code: 'stream_error', message: 'socket hang up' },
+      });
+    });
+    await act(async () => {
+      await result.current.send('Continue.');
+    });
+
+    expect(sentMessages(start, 1)).toEqual([
+      { role: 'user', content: 'Qui était le préfet en 1934 ?' },
+      { role: 'assistant', content: 'Le préfet était' },
+      { role: 'user', content: 'Continue.' },
+    ]);
+  });
+});

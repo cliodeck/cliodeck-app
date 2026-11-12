@@ -19,6 +19,7 @@ import {
   selectEnabledToolNames,
 } from '../../stores/mcpToolsStore';
 import { useMcpToolsList } from './useMcpToolsList';
+import { toProviderHistory } from './provider-history';
 import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { projectLifecycle } from '../../lifecycle/projectLifecycle';
@@ -246,8 +247,10 @@ export function useBrainstormChat(): UseBrainstormChat {
         return;
       }
 
+      // Sans les tours restés sans réponse : leur bulle vide valait un HTTP 400 à chaque question
+      // suivante chez Claude et Gemini (S06-1-1). Elle reste affichée.
       const payload = [
-        ...priorMessages.map((m) => ({ role: m.role, content: m.content })),
+        ...toProviderHistory(priorMessages),
         { role: 'user' as const, content: trimmed },
       ];
       // Pull the persisted chat settings off the store and forward them
