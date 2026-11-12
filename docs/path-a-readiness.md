@@ -294,6 +294,30 @@ correction change est couvert par les tests de `HybridSearch`
 (« Comment la CIA est-elle intervenue ? », et cinq variantes en français,
 en anglais et en allemand).
 
+La deuxième revue a changé les listes encore deux fois :
+
+- **Elle en a retiré les mots-outils qui sont aussi des noms ou des termes**
+  dans une autre des trois langues. Ce sont « seine », « oder », « weil »,
+  « allen », « sind », « das », « ob », « wen », « mir », « sein »,
+  « durant », « celle » et « notre » : la Seine, l'Oder, Patrick Weil, Allen
+  Dulles, Will Durant, Celle, Notre-Dame, le mir russe. BM25 les retrouve,
+  comme avant L07-3. Le bonus « mot-clé exact » ne prend ceux qui sont des
+  noms propres qu'écrits comme un nom : avec une capitale, hors début de
+  phrase, dans la question comme dans l'extrait (« la Seine », pas « seine
+  Agenten » ni « Durant la guerre froide… »). Une question d'un seul mot
+  n'est pas une phrase : « Seine » vaut la Seine.
+- **Elle y a ajouté les interrogatifs et les mots-outils fréquents** que la
+  première passe avait laissés dehors (« combien », « plusieurs », « malgré »,
+  « regarding », « however », « wieviel », « wegen »…), et les consignes
+  d'une question au chat (« explique », « disent », « explain »,
+  « erkläre »).
+
+Le relevé, refait avec les mêmes commandes, est encore identique question
+par question : aucune question du jeu ne contient ces mots. Les tests de
+`BM25Index` et de `HybridSearch` couvrent ces changements. Une liste ne ferme
+pas la classe des mots-outils : un mot oublié revaut un bonus, et « sources »
+(« Que disent mes sources… ») en vaut un, puisque c'est un mot d'historien.
+
 ## Recent related work (2026-05-07)
 
 Testing with a real corpus (221 Tropy items, EEC Committee of Governors

@@ -98,6 +98,39 @@ describe('BM25Index', () => {
     expect(index.search('mais')).toEqual([]);
   });
 
+  it('trouve un nom ou un terme qui s’écrit comme un mot-outil d’une autre langue', () => {
+    // Les listes valent pour les trois langues à la fois. « seine », « oder », « weil », « allen »
+    // (allemand), « durant », « celle » (français) en faisaient disparaître la Seine, l'Oder,
+    // Patrick Weil, Allen Dulles, Will Durant et Celle : `main` les trouvait.
+    const index = indexOf(
+      chunk('seine', "Le préfet de la Seine signe l'arrêté de 1853."),
+      chunk('oder', 'La ligne Oder-Neisse est reconnue par le traité de 1970.'),
+      chunk('weil', 'Patrick Weil étudie la nationalité française.'),
+      chunk('mir', 'Le mir russe redistribue les terres entre les familles.'),
+      chunk('dulles', 'Allen Dulles dirige la CIA à partir de 1953.'),
+      chunk('durant', 'William Durant fonde General Motors en 1908.'),
+      chunk('sind', 'The conquest of Sind by Napier in 1843.'),
+      chunk('celle', 'Le camp de Bergen-Belsen, au nord de Celle.'),
+      chunk('notre-dame', "L'incendie de Notre-Dame de Paris."),
+      chunk('das', 'Veena Das et l’anthropologie de la violence.'),
+      chunk('ob', "Les rives de l'Ob en Sibérie."),
+      chunk('wen', 'Wen Jiabao, Premier ministre chinois.')
+    );
+    expect(ids(index.search('Seine'))).toEqual(['seine']);
+    expect(ids(index.search('la Seine'))).toEqual(['seine']);
+    expect(ids(index.search('Oder'))).toEqual(['oder']);
+    expect(ids(index.search('Weil'))).toEqual(['weil']);
+    expect(ids(index.search('mir'))).toEqual(['mir']);
+    expect(ids(index.search('Allen'))).toEqual(['dulles']);
+    expect(ids(index.search('Durant'))).toEqual(['durant']);
+    expect(ids(index.search('Sind'))).toEqual(['sind']);
+    expect(ids(index.search('Celle'))).toEqual(['celle']);
+    expect(ids(index.search('Notre-Dame'))).toEqual(['notre-dame']);
+    expect(ids(index.search('Das'))).toEqual(['das']);
+    expect(ids(index.search('Ob'))).toEqual(['ob']);
+    expect(ids(index.search('Wen'))).toEqual(['wen']);
+  });
+
   it('« constructor » n’empoisonne pas le score des autres termes', () => {
     // `doc['constructor']` lisait la fonction héritée d'Object : score NaN, et l'extrait disparaissait.
     const index = corpus();

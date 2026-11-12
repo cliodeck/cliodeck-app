@@ -155,11 +155,96 @@ describe('HybridSearch — bonus « mot-clé exact »', () => {
       'Warum griff die CIA während des Kalten Krieges ein?',
       'Zwischen diesen Jahren, während die Löhne stiegen, wusste niemand warum.',
     ],
+    // Après la deuxième revue : les interrogatifs et les mots-outils fréquents que la première
+    // passe avait laissés hors des listes. Chacun évinçait encore les dix meilleurs rangs denses.
+    [
+      "Combien d'agents la CIA employait-elle en Italie ?",
+      'On ne sait pas combien de syndicats se divisent ces années-là.',
+    ],
+    ['Wie viele Agenten beschäftigte die CIA ?', 'Niemand weiß, wie viele Gewerkschaften sich spalteten.'],
+    ['Wieviel Geld gab die CIA aus ?', 'Niemand weiß, wieviel die Gewerkschaften verloren.'],
+    ['What did the CIA do regarding Italy?', 'Nothing is known regarding the unions in these years.'],
+    ['La CIA est-elle intervenue dans plusieurs pays ?', 'Plusieurs syndicats se divisent ces années-là.'],
+    ["Malgré l'échec, la CIA est-elle intervenue ?", 'Malgré la crise, les syndicats se divisent.'],
+    ['However, did the CIA intervene?', 'However, the unions were divided in these years.'],
+    ['Warum griff die CIA wegen Kuba ein?', 'Wegen der Krise spalteten sich die Gewerkschaften.'],
+    // Les consignes d'une question au chat.
+    ['Explique le rôle de la CIA', "L'auteur explique la division des syndicats."],
+    ['Explain the role of the CIA', 'The author tries to explain the divided unions.'],
+    ['Erkläre die Rolle der CIA', 'Ich erkläre hier, warum sich die Gewerkschaften spalteten.'],
   ])('« %s » : le mot-outil de la question ne déplace pas les meilleurs rangs denses', async (query, distractor) => {
     const candidates = agencyThenSocial().map((c, i) =>
       i < 40 ? c : chunk(`autre-${i + 1}`, distractor)
     );
     const results = await hybridOver(candidates, candidates).search(query, new Float32Array(1), 10);
+    expect(results.map((r) => r.chunk.id)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `agence-${i + 1}`)
+    );
+  });
+
+  it('« la Seine » : les extraits qui la nomment remontent, comme avant L07-3', async () => {
+    // « seine » est un mot-outil allemand. Dans la liste commune, il faisait disparaître la Seine
+    // de BM25 et du bonus : les rangs denses 41 à 50, les seuls qui la nomment, restaient dehors.
+    const candidates = Array.from({ length: 50 }, (_, i) =>
+      i < 40
+        ? chunk(`admin-${i + 1}`, `L'administration parisienne sous le Second Empire, dossier ${i + 1}.`)
+        : chunk(`seine-${i + 1}`, `Le préfet de la Seine Haussmann signe l'arrêté ${i + 1}.`)
+    );
+    const hybrid = hybridOver(candidates, candidates);
+    for (const query of ['Seine', 'Le département de la Seine']) {
+      const results = await hybrid.search(query, new Float32Array(1), 10);
+      expect(results.map((r) => r.chunk.id)).toEqual(
+        Array.from({ length: 10 }, (_, i) => `seine-${i + 41}`)
+      );
+    }
+  });
+
+  it('« Seine », seul mot de la question : la Seine passe devant l’adjectif possessif allemand', async () => {
+    // BM25 garde « seine » partout : la lettre allemande, qui l'écrit trois fois, le devance. Le
+    // bonus départage, puisqu'il ne prend que la Seine écrite comme un nom.
+    const candidates = Array.from({ length: 50 }, (_, i) => {
+      if (i < 40) {
+        return chunk(`admin-${i + 1}`, `L'administration parisienne sous le Second Empire, dossier ${i + 1}.`);
+      }
+      return i < 45
+        ? chunk(`brief-${i + 1}`, 'Er schreibt an seine Frau, dass seine Geschäfte gut gehen. Seine Kinder lernen.')
+        : chunk(`seine-${i + 1}`, `Le préfet de la Seine Haussmann signe l'arrêté ${i + 1}.`);
+    });
+    const results = await hybridOver(candidates, candidates).search('Seine', new Float32Array(1), 10);
+    expect(results.slice(0, 5).map((r) => r.chunk.id)).toEqual(
+      Array.from({ length: 5 }, (_, i) => `seine-${i + 46}`)
+    );
+  });
+
+  it('un nom qui s’écrit comme un mot-outil donne le bonus écrit comme un nom, pas en début de phrase', async () => {
+    const candidates = agencyThenSocial();
+    candidates[44] = chunk('durant-45', 'William Durant fonde General Motors en 1908.');
+    candidates[45] = chunk('phrase-46', 'Durant ces années, les syndicats se divisent.');
+    candidates[46] = chunk('outil-47', 'Les syndicats se divisent durant la crise.');
+    const results = await hybridOver(candidates, []).search('Le rôle de Durant', new Float32Array(1), 10);
+    expect(results[0].chunk.id).toBe('durant-45');
+    expect(results.filter((r) => rank(r.chunk.id) > 40)).toHaveLength(1);
+  });
+
+  // Le même mot, écrit en minuscules ou en tête de phrase dans la question : c'est le mot-outil.
+  // BM25 vide : on ne mesure que le bonus (BM25, lui, garde ces mots, comme avant L07-3).
+  it.each([
+    [
+      'Que fait la CIA durant la guerre froide ?',
+      'Durant ces années, les syndicats se divisent ; durant la crise aussi.',
+    ],
+    [
+      'Durant la guerre froide, que fait la CIA ?',
+      'Durant ces années, les syndicats se divisent ; durant la crise aussi.',
+    ],
+    ['Welche Rolle spielten die CIA und seine Agenten?', 'Seine Frau schrieb an seine Kinder.'],
+    ['Seine Agenten: was tat die CIA?', 'Er schrieb an seine Frau. Seine Kinder blieben.'],
+    ['Et celle de la CIA, en Italie ?', 'Celle-ci et celle-là se divisent.'],
+  ])('« %s » : le mot-outil homonyme d’un nom ne vaut pas un bonus', async (query, distractor) => {
+    const candidates = agencyThenSocial().map((c, i) =>
+      i < 40 ? c : chunk(`autre-${i + 1}`, distractor)
+    );
+    const results = await hybridOver(candidates, []).search(query, new Float32Array(1), 10);
     expect(results.map((r) => r.chunk.id)).toEqual(
       Array.from({ length: 10 }, (_, i) => `agence-${i + 1}`)
     );

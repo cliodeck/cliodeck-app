@@ -9,9 +9,12 @@ import { describe, expect, it } from 'vitest';
 import {
   ALL_STOPWORDS,
   STOPWORDS,
+  FUNCTION_WORD_HOMONYMS,
   containsWord,
+  exactMatchKeywords,
   foldCase,
   foldDiacritics,
+  hasExactMatch,
   toNfc,
   tokenize,
 } from '../normalize.js';
@@ -106,6 +109,33 @@ describe('tokenize', () => {
     }
   });
 
+  it('garde les noms et les termes qui s’écrivent comme un mot-outil d’une des trois langues', () => {
+    // Les listes valent pour les trois langues à la fois : un mot-outil allemand ou français qui
+    // est aussi un nom (la Seine, l'Oder, Patrick Weil, Allen Dulles, Will Durant, Celle,
+    // Notre-Dame) ou un terme (le mir russe, le sein) disparaissait de tous les textes.
+    const kept = tokenize(
+      "le préfet de la Seine, la ligne Oder-Neisse, Patrick Weil, le mir russe, Allen Dulles, Will Durant, la conquête du Sind, Veena Das, Wen Jiabao, les rives de l'Ob, le camp de Celle, l'incendie de Notre-Dame, nourri au sein",
+      { fold: 'diacritics', stopwords: true }
+    );
+    for (const term of [
+      'seine',
+      'oder',
+      'weil',
+      'mir',
+      'allen',
+      'durant',
+      'sind',
+      'das',
+      'wen',
+      'ob',
+      'celle',
+      'notre',
+      'sein',
+    ]) {
+      expect(kept).toContain(term);
+    }
+  });
+
   it('reconnaît un mot vide accents compris, avant le repli', () => {
     // Replié d'abord, « maïs » devenait « mais », « Ware » le « wäre » replié, « étés » « êtes ».
     expect(
@@ -130,6 +160,43 @@ describe('tokenize', () => {
     expect(tokenize('Zwischen, während, warum, wann, nachdem, obwohl', { stopwords: true })).toEqual(
       []
     );
+    // Les interrogatifs et les mots-outils fréquents de cinq lettres ou plus : chacun valait un
+    // bonus « mot-clé exact » à tout extrait qui l'écrit (« Combien de… » comme « Comment… »).
+    expect(
+      tokenize(
+        'Combien, plusieurs, chaque, malgré, notamment, certains, aucune, beaucoup, cependant, pourtant, quant, auprès, toutefois, néanmoins, concernant, ensuite, souvent, seulement, également',
+        { stopwords: true }
+      )
+    ).toEqual([]);
+    expect(
+      tokenize(
+        'Regarding, concerning, according, however, although, several, until, towards, despite, being, whereas, therefore, perhaps, already',
+        { stopwords: true }
+      )
+    ).toEqual([]);
+    expect(
+      tokenize(
+        'Wieviel, wieviele, viele, wegen, trotz, immer, wieder, deren, dessen, denen, sollte, einige, mehrere, bereits, selbst, allerdings, außerdem, trotzdem, deshalb, vielleicht',
+        { stopwords: true }
+      )
+    ).toEqual([]);
+    // Les consignes d'une question au chat (« Explique… », « Que disent… »).
+    expect(
+      tokenize('Explique, décris, résume, disent ; explain, describe, summarize ; erkläre, beschreibe', {
+        stopwords: true,
+      })
+    ).toEqual([]);
+  });
+
+  it('laisse hors des listes ce qu’une consigne a de commun avec un terme', () => {
+    // « résumé », « cité », « montre » (la montre), « donne » (la nouvelle donne), « liste » (les
+    // listes électorales), « sources » : des mots d'historien.
+    expect(
+      tokenize('le résumé, la cité, la montre, la nouvelle donne, les listes, les sources', {
+        fold: 'case',
+        stopwords: true,
+      })
+    ).toEqual(['résumé', 'cité', 'montre', 'nouvelle', 'donne', 'listes', 'sources']);
   });
 
   it('découpe le chinois et le japonais en bigrammes', () => {
@@ -180,6 +247,69 @@ describe('containsWord', () => {
   });
 });
 
+describe('mots du bonus « mot-clé exact »', () => {
+  it('garde les sigles tels qu’écrits, et les autres mots de cinq lettres ou plus repliés, hors mots vides', () => {
+    expect(exactMatchKeywords("Combien d'agents la CIA employait-elle en Italie ?")).toEqual({
+      acronyms: ['CIA'],
+      names: [],
+      words: ['agents', 'employait', 'italie'],
+    });
+    expect(exactMatchKeywords('Rôle de la CIA et du KGB, CIA')).toEqual({
+      acronyms: ['CIA', 'KGB'],
+      names: [],
+      words: [],
+    });
+  });
+
+  it('un mot-outil qui est aussi un nom ne vaut que comme nom : une capitale, hors début de phrase', () => {
+    expect(exactMatchKeywords('Le préfet de la Seine')).toEqual({
+      acronyms: [],
+      names: ['Seine'],
+      words: ['prefet'],
+    });
+    expect(exactMatchKeywords('Que pensait Will Durant de Celle et de Notre-Dame ?').names).toEqual([
+      'Durant',
+      'Celle',
+      'Notre',
+    ]);
+    // Écrit en minuscules, c'est le mot-outil : « seine Agenten », « durant la guerre ».
+    expect(exactMatchKeywords('Welche Rolle spielten die CIA und seine Agenten?').names).toEqual([]);
+    expect(exactMatchKeywords('Que fait la CIA durant la guerre froide ?').names).toEqual([]);
+    // En début de phrase, la capitale ne dit rien.
+    expect(exactMatchKeywords('Durant la guerre froide, que fait la CIA ?')).toEqual({
+      acronyms: ['CIA'],
+      names: [],
+      words: ['guerre', 'froide'],
+    });
+    expect(exactMatchKeywords('Rôle de la CIA. Durant la guerre ?').names).toEqual([]);
+    expect(exactMatchKeywords('« Celle de la CIA ? »').names).toEqual([]);
+    // Une question d'un seul mot n'est pas une phrase : « Seine », c'est la Seine.
+    expect(exactMatchKeywords('Seine').names).toEqual(['Seine']);
+    expect(exactMatchKeywords(' « Celle » ?').names).toEqual(['Celle']);
+    expect(exactMatchKeywords('seine').names).toEqual([]);
+  });
+
+  it('cherche un nom comme un nom dans l’extrait, un sigle et un mot partout', () => {
+    const seine = exactMatchKeywords('Le département de la Seine');
+    expect(hasExactMatch('Les crues de la Seine en 1910.', seine)).toBe(true);
+    expect(hasExactMatch('Er schrieb an seine Frau.', seine)).toBe(false);
+    expect(hasExactMatch('Seine Frau schrieb ihm.', seine)).toBe(false);
+    expect(hasExactMatch('Er ging. Seine Frau blieb.', seine)).toBe(false);
+    expect(hasExactMatch('Er ging. « Seine Frau blieb. »', seine)).toBe(false);
+    expect(hasExactMatch('Seine Frau blieb, puis la Seine déborda.', seine)).toBe(true);
+    expect(hasExactMatch('Le département du Nord.', seine)).toBe(true);
+
+    const cia = exactMatchKeywords('Rôle de la CIA');
+    expect(hasExactMatch('CIA agents in Rome.', cia)).toBe(true);
+    expect(hasExactMatch('Les négociations sociales.', cia)).toBe(false);
+
+    const liege = exactMatchKeywords('congres de Liege');
+    expect(hasExactMatch('Le congrès de Liège.', liege)).toBe(true);
+    expect(hasExactMatch('', liege)).toBe(false);
+    expect(hasExactMatch('Le congrès de Liège.', exactMatchKeywords('la de'))).toBe(false);
+  });
+});
+
 describe('listes de mots vides', () => {
   it('sont écrites en minuscules, accents compris, et l’union les contient toutes', () => {
     for (const lang of ['fr', 'en', 'de'] as const) {
@@ -187,6 +317,13 @@ describe('listes de mots vides', () => {
         expect(foldCase(word)).toBe(word);
         expect(ALL_STOPWORDS.has(word)).toBe(true);
       }
+    }
+  });
+
+  it('un mot-outil homonyme d’un nom n’est dans aucune liste', () => {
+    for (const word of FUNCTION_WORD_HOMONYMS) {
+      expect(foldCase(word)).toBe(word);
+      expect(ALL_STOPWORDS.has(word)).toBe(false);
     }
   });
 });

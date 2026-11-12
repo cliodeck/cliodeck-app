@@ -3,7 +3,7 @@ import { BM25Index } from './BM25Index';
 import type { SearchResult, DocumentChunk } from '../../types/pdf-document';
 import type { BM25Result } from './BM25Index';
 import { relevanceScore } from '../rag/relevance';
-import { ALL_STOPWORDS, containsWord, foldCase, foldDiacritics, tokenize } from '../text/normalize';
+import { exactMatchKeywords, hasExactMatch } from '../text/normalize';
 import { stripChunkHeader } from '../chunking/chunk-text';
 
 /**
@@ -114,48 +114,30 @@ export class HybridSearch {
   ): SearchResult[] {
     const scores = new Map<string, RRFScore & { hasExactMatch?: boolean }>();
 
-    // Extract potential keywords. Two paths because a single length threshold
-    // either lets in stopwords ("the", "what") or excludes short acronyms
-    // ("KAQG", "CIA"). Both fail us — common words make the boost meaningless,
-    // short acronyms are exactly the case hybrid search needs to rescue.
+    // Extract potential keywords (`exactMatchKeywords`). Two paths because a
+    // single length threshold either lets in stopwords ("the", "what") or
+    // excludes short acronyms ("KAQG", "CIA"). Both fail us — common words make
+    // the boost meaningless, short acronyms are exactly the case hybrid search
+    // needs to rescue.
     //   (1) Acronyms in the original query: 2–6 chars, all uppercase, kept in
     //       their case. These are usually proper-noun identifiers the embedding
     //       model has never seen, so BM25 is the only retriever that finds
     //       them and they desperately need the boost.
     //   (2) Long tokens (>= 5 chars) outside the stopword lists, folded
     //       (lowercase, no accents): ordinary proper nouns and significant terms.
-    //       Le mot vide se reconnaît comme dans `tokenize`, en minuscules et
-    //       avant le repli des accents. Les listes contiennent les mots-outils
-    //       des questions : « Comment la CIA… » doublait sinon chaque extrait
-    //       qui écrit « comment ».
+    //       Les listes contiennent les mots-outils des questions : « Comment la
+    //       CIA… » ou « Combien de… » doublait sinon chaque extrait qui écrit
+    //       « comment » ou « combien ». Un mot-outil qui est aussi un nom
+    //       (« Seine », « Durant ») ne compte qu'écrit comme un nom.
     //
     // Un mot-clé ne vaut que comme mot entier (`containsWord`) : en sous-chaîne,
     // « CIA » donnait le bonus à « sociale », et dix extraits doublés de rang
     // 41 à 50 passaient devant les meilleurs résultats denses. Et il se cherche
     // dans le texte de l'extrait, sans le préfixe « [Doc: titre | Section: …] »
     // posé sur tous les extraits d'un ouvrage (`stripChunkHeader`).
-    const queryWords = originalQuery ? tokenize(originalQuery) : [];
-    const acronyms = Array.from(
-      new Set(queryWords.filter((w) => /^\p{Lu}[\p{Lu}\p{N}]{1,5}$/u.test(w)))
-    );
-    const longWords = Array.from(
-      new Set(
-        queryWords
-          .filter((w) => !ALL_STOPWORDS.has(foldCase(w)))
-          .map((w) => foldDiacritics(w))
-          .filter((w) => w.length >= 5)
-      )
-    );
-
-    // Helper to check if chunk contains exact keyword matches
-    const checkExactMatch = (content: string): boolean => {
-      if (acronyms.length === 0 && longWords.length === 0) return false;
-      const text = stripChunkHeader(content);
-      if (acronyms.some((acronym) => containsWord(text, acronym))) return true;
-      if (longWords.length === 0) return false;
-      const folded = foldDiacritics(text);
-      return longWords.some((word) => containsWord(folded, word));
-    };
+    const keywords = originalQuery ? exactMatchKeywords(originalQuery) : null;
+    const checkExactMatch = (content: string): boolean =>
+      keywords !== null && hasExactMatch(stripChunkHeader(content), keywords);
 
     // Add dense results
     denseResults.forEach((result, rank) => {
