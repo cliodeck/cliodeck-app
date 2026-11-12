@@ -245,6 +245,26 @@ const RETRIEVAL_FAILED_TEXT: Record<'fr' | 'en', string> = {
 };
 
 /**
+ * Retire les tours `user` / `assistant` au contenu vide (S06-1-1). Un tour resté sans réponse laisse
+ * dans l'historique un assistant `''` : Claude refuse tout message non final au contenu vide, Gemini
+ * une part de texte vide, et chaque tour suivant échouait en HTTP 400. Le renderer ne l'envoie plus
+ * (`toProviderHistory`) ; ce filtre vaut pour tout autre appelant, et les fournisseurs n'en ont pas
+ * d'autre. La question restée sans réponse reste ici : aucun adaptateur ne refuse deux `user` de
+ * suite (Claude, Mistral, OpenAI-compatible et Ollama les envoient tels quels, Gemini les réunit).
+ *
+ * Ne touche ni `system`, ni `tool`, ni un assistant porteur de `toolCalls`, dont le contenu est vide
+ * par construction.
+ */
+export function dropEmptyTurns(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter(
+    (m) =>
+      (m.role !== 'user' && m.role !== 'assistant') ||
+      (m.toolCalls?.length ?? 0) > 0 ||
+      m.content.trim().length > 0
+  );
+}
+
+/**
  * Run one logical chat turn, possibly iterating the provider several
  * times to satisfy tool-use calls. Resolves when a terminal chunk has
  * been emitted (either via `onDone` or `onError`).
@@ -273,7 +293,9 @@ export async function runChatTurn<TSource = unknown>(
   // Until 2026-10 the code prepended the retrieval block in front of this
   // one, contradicting this very comment — the model read 10–20k chars of
   // extracts before learning its role (docs/poids-du-manuscrit.md).
-  let messages = args.messages;
+  // Une seule fois, à l'entrée, avant le compacteur et la boucle : l'assistant porteur de
+  // `toolCalls` que la boucle ajoute plus bas a un contenu vide.
+  let messages = dropEmptyTurns(args.messages);
   const customText = args.systemPrompt?.customText;
   if (customText && customText.trim().length > 0) {
     messages = [{ role: 'system', content: customText }, ...messages];

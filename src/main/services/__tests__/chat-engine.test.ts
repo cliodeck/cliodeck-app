@@ -515,3 +515,94 @@ describe('chat-engine — raisonnement d’un modèle pensant', () => {
     expect(phases.indexOf('thinking')).toBeLessThan(phases.indexOf('generating'));
   });
 });
+
+/**
+ * Un tour resté sans réponse laisse un message assistant vide dans l'historique (S06-1-1). Claude
+ * refuse tout message non final au contenu vide, Gemini une part de texte vide : HTTP 400 à chaque
+ * tour suivant. Le renderer ne l'envoie plus, et le moteur le retire pour tout autre appelant.
+ */
+describe('chat-engine — un tour sans réponse ne repart pas au fournisseur', () => {
+  function recordingProvider(seen: ChatMessage[][]): LLMProvider {
+    const provider = makeFakeProvider([]);
+    provider.chat = async function* (messages: ChatMessage[]) {
+      seen.push(messages);
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    return provider;
+  }
+
+  it('[user, assistant vide, user] arrive au fournisseur comme [user, user]', async () => {
+    const seen: ChatMessage[][] = [];
+    await runChatTurn({
+      provider: recordingProvider(seen),
+      messages: [
+        { role: 'user', content: 'Qui était le préfet en 1934 ?' },
+        { role: 'assistant', content: '' },
+        { role: 'user', content: 'Et en 1936 ?' },
+      ],
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toEqual([
+      { role: 'user', content: 'Qui était le préfet en 1934 ?' },
+      { role: 'user', content: 'Et en 1936 ?' },
+    ]);
+  });
+
+  it('un assistant fait d’espaces seuls est retiré lui aussi', async () => {
+    const seen: ChatMessage[][] = [];
+    await runChatTurn({
+      provider: recordingProvider(seen),
+      messages: [
+        { role: 'user', content: 'q1' },
+        { role: 'assistant', content: ' \n ' },
+        { role: 'user', content: 'q2' },
+      ],
+    });
+    expect(seen[0].map((m) => m.role)).toEqual(['user', 'user']);
+  });
+
+  it('ne touche ni system, ni tool, ni un assistant porteur de toolCalls au contenu vide', async () => {
+    const seen: ChatMessage[][] = [];
+    const history: ChatMessage[] = [
+      { role: 'system', content: '' },
+      { role: 'user', content: 'Cherche Chiappe.' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'search', arguments: '{}' }] },
+      { role: 'tool', toolCallId: 'c1', content: '' },
+      { role: 'assistant', content: 'Trouvé.' },
+      { role: 'user', content: 'Merci.' },
+    ];
+    await runChatTurn({ provider: recordingProvider(seen), messages: history });
+    expect(seen[0]).toEqual(history);
+  });
+
+  it('le message assistant de tool-call à contenu vide reste présent au second passage de la boucle', async () => {
+    const seen: ChatMessage[][] = [];
+    const provider = makeFakeProvider([]);
+    provider.chat = async function* (messages: ChatMessage[]) {
+      seen.push(messages);
+      if (seen.length === 1) {
+        yield { delta: '', toolCall: { id: 'c1', name: 'search', arguments: '{"q":"Chiappe"}' } };
+        yield { delta: '', done: true, finishReason: 'tool_call' };
+        return;
+      }
+      yield { delta: 'Trouvé.' };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'Cherche Chiappe.' }],
+      tools: [{ name: 'search', description: 'cherche', parameters: { type: 'object' } }],
+      toolHandler: { call: async () => ({ ok: true, result: { hits: 1 } }) },
+    });
+    expect(seen).toHaveLength(2);
+    expect(seen[1]).toEqual([
+      { role: 'user', content: 'Cherche Chiappe.' },
+      {
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'c1', name: 'search', arguments: '{"q":"Chiappe"}' }],
+      },
+      { role: 'tool', toolCallId: 'c1', content: '{"hits":1}' },
+    ]);
+  });
+});
