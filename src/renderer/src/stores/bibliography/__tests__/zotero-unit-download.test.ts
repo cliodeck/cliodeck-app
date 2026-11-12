@@ -211,6 +211,28 @@ describe('un PDF téléchargé que le main ne rattache pas', () => {
     expect(fs.readFileSync(BibliographyMetadataService.getMetadataPath(project), 'utf-8')).toBe(damaged);
   });
 
+  it('indexation refusée, le modèle d’embeddings ayant changé : le refus se lit traduit, pas en code (L04-7)', async () => {
+    pdfIndex.mockResolvedValueOnce({
+      success: false,
+      error: 'Embedding dimension mismatch: expected 768, got 1024',
+      code: 'embedding_dimension_mismatch',
+      expected: 768,
+      actual: 1024,
+    });
+
+    const error = await bib()
+      .downloadAndIndexZoteroPDF(X.id, 'QQBJJVQY', project)
+      .then(
+        () => null,
+        (e: unknown) => e
+      );
+
+    expect((error as Error).message).toBe(
+      i18n.t('bibliography.embeddingDimensionMismatch', { corpus: 768, model: 1024 })
+    );
+    expect((error as Error).message).toContain('« Purger la base »');
+  });
+
   it('autre échec : l’erreur dit lequel, et rien n’est indexé', async () => {
     updateAttachment.mockResolvedValueOnce({ success: false, error: 'EACCES: permission denied' });
 

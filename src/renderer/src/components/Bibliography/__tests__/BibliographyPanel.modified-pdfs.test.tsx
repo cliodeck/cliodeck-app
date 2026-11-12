@@ -241,6 +241,31 @@ describe('Bandeau « PDF modifiés » : « Tout ré-indexer »', () => {
     });
   });
 
+  it('modèle d’embeddings changé depuis l’indexation : le refus se lit traduit, avec le geste qui le règle (L04-7)', async () => {
+    const a1 = withPdf(A, 'a1');
+    checkModifiedPDFs.mockResolvedValue(flat([modified(a1)]));
+    pdfIndex.mockResolvedValue({
+      success: false,
+      error: 'Embedding dimension mismatch: expected 768, got 1024',
+      code: 'embedding_dimension_mismatch',
+      expected: 768,
+      actual: 1024,
+    });
+    await mountIn(A, 'Mémoire A', [a1]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('Tout ré-indexer'));
+    });
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+    });
+
+    expect(dialogs().alertMessage).toContain('• Article a1: ');
+    expect(dialogs().alertMessage).not.toContain('Embedding dimension mismatch');
+    expect(dialogs().alertMessage).toContain('« Purger la base »');
+    expect(banner()?.textContent).toBe('1 PDF(s) modifié(s) détecté(s)');
+  });
+
   it('témoin : tout réussi, le bandeau se ferme', async () => {
     const a1 = withPdf(A, 'a1');
     checkModifiedPDFs.mockResolvedValue(flat([modified(a1)]));

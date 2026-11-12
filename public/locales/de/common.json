@@ -221,6 +221,7 @@
     "importPrompt": "Importieren Sie eine BibTeX-Datei, um zu beginnen",
     "pdfIndexed": "PDF indexiert:",
     "indexError": "Fehler:",
+    "embeddingDimensionMismatch": "Dieses PDF wurde nicht indexiert: Das aktuelle Embedding-Modell erzeugt Vektoren mit {{model}} Dimensionen, die bereits indexierten PDFs dieses Projekts haben {{corpus}}. Das Modell wurde seit ihrer Indexierung geändert, und beide lassen sich in der Suche nicht mischen. Es wurde nichts geändert. Um zu diesem Modell zu wechseln: Bereinigen Sie die PDF-Datenbank (Bereich „Projekt“, Abschnitt „Aktionen“, Schaltfläche „Datenbank bereinigen“) und indexieren Sie anschließend alle PDFs neu („Alle PDFs indexieren“ in der Bibliographie). Um den aktuellen Index zu behalten: Kehren Sie zum vorherigen Modell zurück (Einstellungen, „Embedding-Modell“).",
     "viewDetails": "Details anzeigen",
     "copyKey": "Zitierschlüssel kopieren",
     "indexPDF": "PDF indexieren",

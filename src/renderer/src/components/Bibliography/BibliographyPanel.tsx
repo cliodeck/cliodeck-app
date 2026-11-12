@@ -11,6 +11,7 @@ import {
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
 import { describeNotAttached } from '../../stores/bibliography/zoteroSlice';
+import { pdfIndexFailure } from '../../stores/bibliography/indexingSlice';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useMenuIntentStore } from '../../stores/menuIntentStore';
@@ -517,7 +518,7 @@ export const BibliographyPanel: React.FC = () => {
           // son projet seulement (le main refuse s'il a déjà basculé) : ailleurs, ce serait une
           // réponse donnée dans l'autre. Ceux en échec restent au bandeau.
           if (stillShown(projectPath)) await acknowledge([pdf]);
-        } else if (!refusedAsProjectChanged(result)) errors.push(`${citation.title}: ${result?.error}`);
+        } else if (!refusedAsProjectChanged(result)) errors.push(`${citation.title}: ${pdfIndexFailure(result ?? {}, 'Failed to index PDF')}`);
         if (refusedAsProjectChanged(result) || !(await stillIn(projectPath))) return await interrupted();
       }
 

@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next';
 import type { Citation, NotAttached, ZoteroSliceState, BibliographySliceCreator } from './types';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
-import { idleBatchIndexing } from './indexingSlice';
+import { idleBatchIndexing, pdfIndexFailure } from './indexingSlice';
 import { refusedAsProjectChanged, stillIn, stillShown } from '../../services/still-in-project';
 import i18n from '../../i18n';
 
@@ -226,10 +226,11 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       }
 
       if (!indexResult.success) {
+        const message = pdfIndexFailure(indexResult, 'Failed to index PDF');
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
-          detail: { citationId, success: false, error: indexResult.error }
+          detail: { citationId, success: false, error: message }
         }));
-        throw new Error(indexResult.error || 'Failed to index PDF');
+        throw new Error(message);
       }
 
       // Add to indexed set
@@ -459,7 +460,7 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
               batchIndexing: { ...state.batchIndexing, indexed: downloaded }
             }));
           } else {
-            errors.push(`${citation.title}: ${indexResult.error || 'Failed to index'}`);
+            errors.push(`${citation.title}: ${pdfIndexFailure(indexResult, 'Failed to index')}`);
           }
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);

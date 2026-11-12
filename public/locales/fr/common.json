@@ -221,6 +221,7 @@
     "importPrompt": "Importez un fichier BibTeX pour commencer",
     "pdfIndexed": "PDF indexé:",
     "indexError": "Erreur:",
+    "embeddingDimensionMismatch": "Ce PDF n'a pas été indexé : le modèle d'embeddings actuel produit des vecteurs de {{model}} dimensions, et les PDF déjà indexés dans ce projet en ont {{corpus}}. Le modèle a changé depuis leur indexation, et les deux ne peuvent pas se mêler dans la recherche. Rien n'a été modifié. Pour passer à ce modèle : purgez la base des PDF (panneau Projet, section « Actions », bouton « Purger la base »), puis réindexez-les tous (« Indexer tous les PDFs », dans la Bibliographie). Pour garder l'index actuel : revenez au modèle d'avant (Paramètres, « Modèle d'embedding »).",
     "viewDetails": "Voir détails",
     "copyKey": "Copier la clé de citation",
     "indexPDF": "Indexer le PDF",

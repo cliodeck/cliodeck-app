@@ -24,6 +24,7 @@ import {
 } from '../../../../backend/services/BibliographyMetadataService.js';
 import type { Citation } from '../../../../backend/types/citation.js';
 import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
+import { EmbeddingSpaceMismatchError } from '../../../../backend/core/vector-store/embedding-space.js';
 import { runWithJournalContext } from '../../../../backend/core/usage-journal/context.js';
 import { logger } from '../../utils/logger.js';
 
@@ -125,7 +126,11 @@ export function setupPDFHandlers() {
       return successResponse({ document });
     } catch (error: unknown) {
       logger.error('ipc', 'pdf:index', { error: error instanceof Error ? error.message : String(error) });
-      return errorResponse(error);
+      // Un PDF embarqué dans une autre dimension que le corpus (modèle d'embeddings changé) : un
+      // code et les deux dimensions, que l'interface traduit avec le geste qui règle l'écart.
+      return error instanceof EmbeddingSpaceMismatchError
+        ? { ...errorResponse(error), code: error.code, expected: error.expected, actual: error.actual }
+        : errorResponse(error);
     }
   });
 

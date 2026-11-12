@@ -2,10 +2,32 @@ import type { BatchIndexingState, IndexingSliceState, BibliographySliceCreator }
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { useProjectStore } from '../projectStore';
 import { refusedAsProjectChanged, stillIn, stillShown } from '../../services/still-in-project';
+import i18n from '../../i18n';
 
 /** Aucun lot en cours : ni barre de progression dans le panneau, ni indicateur dans la barre d'état. */
 export function idleBatchIndexing(): BatchIndexingState {
   return { isIndexing: false, current: 0, total: 0, skipped: 0, indexed: 0, errors: [] };
+}
+
+/** Ce que rend un `pdf:index` en échec : un texte, et pour certains refus un code. */
+interface PdfIndexRefusal {
+  error?: string;
+  code?: string;
+  expected?: number;
+  actual?: number;
+}
+
+/**
+ * Le message d'un `pdf:index` en échec. Un PDF embarqué dans une autre dimension que le corpus (le
+ * modèle d'embeddings a changé depuis la première indexation) est refusé avec un code et les deux
+ * dimensions (L04-7) : l'historien lit leur traduction et le geste qui règle l'écart, jamais le
+ * texte anglais du main.
+ */
+export function pdfIndexFailure(result: PdfIndexRefusal, fallback: string): string {
+  if (result.code === 'embedding_dimension_mismatch') {
+    return i18n.t('bibliography.embeddingDimensionMismatch', { corpus: result.expected, model: result.actual });
+  }
+  return result.error || fallback;
 }
 
 /**
@@ -95,10 +117,11 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       }
 
       if (!result.success) {
+        const message = pdfIndexFailure(result, 'Failed to index PDF');
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
-          detail: { citationId, success: false, error: result.error }
+          detail: { citationId, success: false, error: message }
         }));
-        throw new Error(result.error || 'Failed to index PDF');
+        throw new Error(message);
       }
 
       // Add to indexed set
@@ -198,10 +221,11 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       }
 
       if (!result.success) {
+        const message = pdfIndexFailure(result, 'Failed to re-index PDF');
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
-          detail: { citationId, success: false, error: result.error }
+          detail: { citationId, success: false, error: message }
         }));
-        throw new Error(result.error || 'Failed to re-index PDF');
+        throw new Error(message);
       }
 
       // Add to indexed set
@@ -338,6 +362,7 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
           return interrupt();
         }
 
+        const failure = result.success ? undefined : pdfIndexFailure(result, 'Failed to index PDF');
         if (result.success) {
           indexed++;
           set((state) => ({
@@ -346,11 +371,11 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
           }));
         } else {
           console.error('❌ [indexing] Échec:', citation.title, result.error);
-          errors.push(`${citation.title}: ${result.error}`);
+          errors.push(`${citation.title}: ${failure}`);
         }
 
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
-          detail: { citationId: citation.id, success: result.success, error: result.error }
+          detail: { citationId: citation.id, success: result.success, error: failure }
         }));
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
