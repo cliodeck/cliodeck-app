@@ -1,4 +1,4 @@
-import { VectorStore } from './VectorStore';
+import { VectorStore, type IndexRebuildReason } from './VectorStore';
 import { HNSWVectorStore } from './HNSWVectorStore';
 import { BM25Index } from '../search/BM25Index';
 import { HybridSearch } from '../search/HybridSearch';
@@ -32,8 +32,16 @@ export class EnhancedVectorStore {
   /**
    * Des documents ont quitté SQLite : HNSW et BM25 ne savent pas retirer un
    * vecteur, ils gardent ceux des extraits supprimés jusqu'à reconstruction.
+   * Noté aussi dans `brain.db` (`markStale`) : une reconstruction abandonnée à la
+   * fermeture du projet se propose à la réouverture (J8).
    */
   private indexesStale: boolean = false;
+  /**
+   * Une session précédente a laissé l'index à reconstruire (la marque de `brain.db`), et
+   * l'ouverture ne l'a pas refait d'office : la reconstruction est proposée à l'historien,
+   * jamais lancée sans lui. Tombe quand une reconstruction réussit.
+   */
+  private proposeRebuild: boolean = false;
   /**
    * La dernière reconstruction a échoué, et l'auteur l'a lu : le message lui promet
    * la prochaine ouverture. Rien ne repart avant, sauf s'il y a un nouveau motif :
@@ -133,6 +141,11 @@ export class EnhancedVectorStore {
       }
     }
 
+    // La marque d'une session précédente (J8). Un index refait d'office ci-dessus l'a effacée, et un
+    // index vide se refait au préchauffage s'il y a des extraits (`needsRebuild`) : reste un index non
+    // vide, que rien ne refait d'office. Il est proposé à l'historien, pas reconstruit sans lui.
+    this.proposeRebuild = this.hnswStore.getSize() > 0 && this.rebuildMarked();
+
     const duration = Date.now() - startTime;
     console.log(`✅ Indexes loaded in ${duration}ms`);
     console.log(`HNSW indexing: ${this.useHNSW ? 'enabled' : 'disabled'}`);
@@ -163,6 +176,8 @@ export class EnhancedVectorStore {
    */
   getRebuildStatus(): {
     isRebuilding: boolean;
+    /** La reconstruction que la réouverture propose (J8) : ni en cours, ni échouée depuis. */
+    rebuildDue: boolean;
     current: number;
     total: number;
     status: string;
@@ -174,9 +189,53 @@ export class EnhancedVectorStore {
         : 0;
     return {
       isRebuilding: this.isRebuilding,
+      rebuildDue: this.rebuildProposed(),
       ...this.rebuildProgress,
       percentage,
     };
+  }
+
+  /**
+   * Proposée tant qu'aucune reconstruction n'a réussi. Pas pendant l'une d'elles, ni après un échec :
+   * son message promet déjà la prochaine ouverture, où la marque, restée, la proposera de nouveau.
+   */
+  private rebuildProposed(): boolean {
+    return this.proposeRebuild && !this.closed && !this.isRebuilding && !this.rebuildFailureReported;
+  }
+
+  /**
+   * L'historien a accepté la reconstruction proposée. Rend faux s'il n'y a rien à reconstruire ; sinon
+   * l'index est périmé, et la reconstruction part par le chemin ordinaire (`needsRebuild`, puis
+   * `rebuildIndexes`) : depuis les vecteurs de SQLite, sans aucun appel au fournisseur d'embeddings.
+   */
+  requestRebuild(): boolean {
+    if (!this.rebuildProposed()) return false;
+    this.indexesStale = true;
+    return true;
+  }
+
+  /** La marque de `brain.db`, lue sans faire échouer l'ouverture : illisible, rien n'est proposé. */
+  private rebuildMarked(): boolean {
+    try {
+      return this.vectorStore.getIndexRebuildDue() !== null;
+    } catch (error: unknown) {
+      console.warn('⚠️  Index rebuild mark unreadable:', error);
+      return false;
+    }
+  }
+
+  /**
+   * L'index ne correspond plus à SQLite : à reconstruire, dans cette session et, si elle se ferme
+   * avant, à la réouverture (J8). La marque est posée après l'écriture dans SQLite, jamais avant : un
+   * index sain n'en porte pas. Une marque qui ne s'écrit pas ne fait pas échouer l'écriture faite.
+   */
+  private markStale(reason: IndexRebuildReason): void {
+    this.indexesStale = true;
+    try {
+      this.vectorStore.markIndexRebuildDue(reason);
+    } catch (error: unknown) {
+      console.warn('⚠️  Index rebuild mark not written:', error);
+    }
   }
 
   /**
@@ -215,7 +274,7 @@ export class EnhancedVectorStore {
       this.bm25Index.addChunks(chunks.map((c) => c.chunk));
       await this.save();
     } catch (error) {
-      this.indexesStale = true;
+      this.markStale('chunks-missing');
       throw error;
     }
     console.log(`📥 [ENHANCED] HNSW and BM25 updated, indexes saved`);
@@ -227,7 +286,7 @@ export class EnhancedVectorStore {
    * l'ajout échoue en route, SQLite les a déjà reçus.
    */
   private markStaleIfIncomplete(): void {
-    if (this.indexesIncomplete) this.indexesStale = true;
+    if (this.indexesIncomplete) this.markStale('chunks-missing');
   }
 
   /**
@@ -352,6 +411,7 @@ export class EnhancedVectorStore {
       if (chunks.length === 0) {
         console.log('⚠️  No chunks to index');
         this.indexesIncomplete = false;
+        this.settleRebuildMark();
         this.rebuildProgress = { current: 100, total: 100, status: 'No chunks to index' };
         this.notifyProgress('done');
         return;
@@ -388,6 +448,7 @@ export class EnhancedVectorStore {
 
       // Save indexes
       await this.save();
+      this.settleRebuildMark();
 
       const duration = Date.now() - startTime;
       console.log(`✅ Indexes rebuilt in ${duration}ms`);
@@ -404,6 +465,21 @@ export class EnhancedVectorStore {
       throw error;
     } finally {
       this.isRebuilding = false;
+    }
+  }
+
+  /**
+   * La reconstruction a fini sans erreur, index écrit : plus rien n'est proposé, et la marque de
+   * `brain.db` tombe, sauf si un nouveau motif est arrivé pendant elle (`indexesStale`, remis par une
+   * suppression). Seule cette sortie l'efface : un échec la laisse pour la réouverture.
+   */
+  private settleRebuildMark(): void {
+    this.proposeRebuild = false;
+    if (this.indexesStale) return;
+    try {
+      this.vectorStore.clearIndexRebuildDue();
+    } catch (error: unknown) {
+      console.warn('⚠️  Index rebuild mark not cleared:', error);
     }
   }
 
@@ -534,7 +610,7 @@ export class EnhancedVectorStore {
 
   deleteDocument(documentId: string): void {
     this.vectorStore.deleteDocument(documentId);
-    this.indexesStale = true;
+    this.markStale('documents-removed');
   }
 
   getDocumentIdsByFilePath(filePath: string): string[] {
@@ -547,12 +623,12 @@ export class EnhancedVectorStore {
 
   mergeDocumentsInto(keepId: string, replacedIds: string[]): void {
     this.vectorStore.mergeDocumentsInto(keepId, replacedIds);
-    if (replacedIds.some((id) => id !== keepId)) this.indexesStale = true;
+    if (replacedIds.some((id) => id !== keepId)) this.markStale('documents-removed');
   }
 
   removeDuplicateDocuments(): { files: number; removed: number } {
     const result = this.vectorStore.removeDuplicateDocuments();
-    if (result.removed > 0) this.indexesStale = true;
+    if (result.removed > 0) this.markStale('documents-removed');
     return result;
   }
 
@@ -653,6 +729,11 @@ export class EnhancedVectorStore {
     // Purge base vector store (SQLite)
     this.vectorStore.purgeAllData();
     console.log('✅ Vector store purged');
+
+    // L'index et la base sont vides tous les deux : rien n'est périmé, et la reconstruction que
+    // proposait la réouverture (J8) n'a plus d'objet. `VectorStore.purgeAllData` a effacé la marque.
+    this.indexesStale = false;
+    this.proposeRebuild = false;
   }
 
   getAllChunksWithEmbeddings(): any[] {

@@ -497,12 +497,36 @@ class PDFService {
     this.rebuildTimer = setTimeout(() => {
       this.rebuildTimer = null;
       if (this.vectorStore !== store) return;
+      // Une indexation écrit encore : on repasse au délai ordinaire, même pour une demande immédiate
+      // (`rebuildIndexOnRequest`), qui sinon tournerait à vide toutes les millisecondes.
       if (this.inFlightIndexing.size > 0) {
-        this.scheduleIndexRebuild(store, delayMs);
+        this.scheduleIndexRebuild(store);
         return;
       }
       void PdfVectorStore.maybeRebuild(store);
     }, delayMs);
+  }
+
+  /**
+   * L'index des PDF que la réouverture propose de reconstruire (J8) : une session précédente l'a
+   * laissé périmé, et l'a noté dans `brain.db`. Faux sans magasin, ou avec le magasin simple.
+   */
+  getIndexState(): { rebuildDue: boolean } {
+    const store = this.vectorStore;
+    return { rebuildDue: store instanceof EnhancedVectorStore && store.getRebuildStatus().rebuildDue };
+  }
+
+  /**
+   * « Reconstruire », depuis le bandeau : la reconstruction proposée, depuis les vecteurs de SQLite.
+   * Elle suit les règles de `scheduleIndexRebuild` : pour ce magasin seulement, après les indexations
+   * en vol, annulée par la fermeture du projet, qui laisse la marque pour la réouverture suivante. Rend
+   * faux quand rien n'est proposé.
+   */
+  rebuildIndexOnRequest(): boolean {
+    const store = this.vectorStore;
+    if (!(store instanceof EnhancedVectorStore) || !store.requestRebuild()) return false;
+    this.scheduleIndexRebuild(store, 0);
+    return true;
   }
 
   /**

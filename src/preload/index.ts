@@ -177,6 +177,27 @@ const api = {
         code?: string;
         remembered?: number;
       }>,
+    /**
+     * L'index de recherche des PDF à reconstruire (J8) : une session précédente l'a laissé périmé,
+     * et la réouverture le propose. Refusé (`project-changed`) si `projectPath` n'est plus le projet
+     * ouvert.
+     */
+    getIndexState: (projectPath: string) =>
+      ipcRenderer.invoke('pdf:get-index-state', projectPath) as Promise<{
+        success: boolean;
+        error?: string;
+        rebuildDue?: boolean;
+      }>,
+    /**
+     * « Reconstruire » : la reconstruction proposée, depuis les vecteurs déjà calculés. Sa progression
+     * arrive par `project.onRebuildProgress`. `started` est faux quand plus rien n'est proposé.
+     */
+    rebuildIndex: (projectPath: string) =>
+      ipcRenderer.invoke('pdf:rebuild-index', projectPath) as Promise<{
+        success: boolean;
+        error?: string;
+        started?: boolean;
+      }>,
     /** Un PDF indexé n'a presque pas de texte : image sans OCR (#132). */
     onLowText: (
       callback: (info: { title: string; fileName: string; pageCount: number; charsPerPage: number }) => void

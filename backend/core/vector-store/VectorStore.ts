@@ -16,6 +16,12 @@ import type {
   TopicAnalysisOptions,
 } from '../analysis/TopicModelingService';
 
+/**
+ * Pourquoi l'index HNSW des PDF est à reconstruire : des documents ont quitté SQLite (suppression,
+ * copie remplacée par une réindexation, doublon retiré), ou des extraits de SQLite n'y sont pas entrés.
+ */
+export type IndexRebuildReason = 'documents-removed' | 'chunks-missing';
+
 export class VectorStore {
   private db: Database.Database;
   private dbPath: string;
@@ -229,6 +235,20 @@ export class VectorStore {
         bibtex_key TEXT NOT NULL,
         collection_key TEXT NOT NULL,
         PRIMARY KEY (bibtex_key, collection_key)
+      );
+    `);
+
+    // L'index HNSW des PDF est à reconstruire (J8) : HNSW ne sait pas retirer un vecteur, et
+    // `EnhancedVectorStore.indexesStale` ne vivait qu'en mémoire. Une reconstruction abandonnée à la
+    // fermeture du projet ne repartait pas, et l'index gardait en silence les vecteurs des documents
+    // partis. Une seule ligne ; le format de `hnsw.index` ne change pas. Une version antérieure de
+    // ClioDeck ignore la table.
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS pdf_index_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        rebuild_due INTEGER NOT NULL DEFAULT 0,
+        marked_at TEXT,
+        reason TEXT
       );
     `);
 
@@ -824,6 +844,37 @@ export class VectorStore {
     };
   }
 
+  // MARK: - Index HNSW à reconstruire (J8)
+
+  /**
+   * Note dans `brain.db` que l'index HNSW des PDF ne correspond plus à SQLite. La date est celle de
+   * la première marque ; la raison, la dernière.
+   */
+  markIndexRebuildDue(reason: IndexRebuildReason): void {
+    this.db
+      .prepare(
+        `INSERT INTO pdf_index_state (id, rebuild_due, marked_at, reason) VALUES (1, 1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           marked_at = CASE WHEN rebuild_due = 1 THEN marked_at ELSE excluded.marked_at END,
+           rebuild_due = 1,
+           reason = excluded.reason`
+      )
+      .run(new Date().toISOString(), reason);
+  }
+
+  /** Une reconstruction a fini sans erreur : l'index correspond de nouveau à SQLite. */
+  clearIndexRebuildDue(): void {
+    this.db.prepare('UPDATE pdf_index_state SET rebuild_due = 0, marked_at = NULL, reason = NULL WHERE id = 1').run();
+  }
+
+  /** La marque posée par une session précédente, ou null. */
+  getIndexRebuildDue(): { markedAt: string; reason: IndexRebuildReason } | null {
+    const row = this.db
+      .prepare('SELECT marked_at, reason FROM pdf_index_state WHERE id = 1 AND rebuild_due = 1')
+      .get() as { marked_at: string; reason: IndexRebuildReason } | undefined;
+    return row ? { markedAt: row.marked_at, reason: row.reason } : null;
+  }
+
   // MARK: - Purge complète
 
   purgeAllData(): void {
@@ -832,6 +883,9 @@ export class VectorStore {
 
     // Supprimer tous les documents
     this.db.exec('DELETE FROM pdf_documents;');
+
+    // Plus rien à reconstruire : l'index des PDF est vidé avec la base (`EnhancedVectorStore.purgeAllData`).
+    this.clearIndexRebuildDue();
 
     // Vacuum pour récupérer l'espace disque
     this.db.exec('VACUUM;');

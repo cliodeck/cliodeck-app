@@ -212,8 +212,23 @@ export function runHealthChecks(projectPath, db) {
           const known = new Set(db.prepare('SELECT id FROM pdf_chunks WHERE embedding IS NOT NULL').all().map((r) => r.id));
           const stale = [...ids].filter((id) => !known.has(id)).length;
           const absent = [...known].filter((id) => !ids.has(id)).length;
+          // La marque « reconstruction due » (J8) : l'app sait l'index en retard et, à
+          // l'ouverture, propose de le reconstruire au lieu de le faire d'office. L'écart
+          // reste (les réponses y perdent des extraits), mais il est expliqué.
+          const mark = has('pdf_index_state')
+            ? db.prepare('SELECT marked_at FROM pdf_index_state WHERE id = 1 AND rebuild_due = 1').get()
+            : undefined;
+          const gap = `index HNSW : ${stale} vecteur(s) d’extraits disparus, ${absent} extrait(s) absent(s) de l’index`;
           if (!stale && !absent) add('pdf', 'ok', `index HNSW aligné sur la base (${ids.size} vecteurs)`);
-          else add('pdf', 'ecart', `index HNSW : ${stale} vecteur(s) d’extraits disparus, ${absent} extrait(s) absent(s) de l’index`, 'Attendu juste après une suppression ou un dédoublonnage : l’index se reconstruit une fois l’indexation terminée. Persistant après relance = anomalie.');
+          else if (mark) {
+            const since = mark.marked_at ? ` depuis le ${String(mark.marked_at).slice(0, 10)}` : '';
+            add(
+              'pdf',
+              'ecart',
+              `${gap} — reconstruction proposée à l’ouverture, en attente${since}`,
+              'Le projet a été fermé avant la reconstruction, ou « Plus tard » a été choisi. Le bandeau du panneau Bibliographie (et la barre d’état) la propose à chaque ouverture : « Reconstruire » remet l’index d’aplomb à partir des vecteurs déjà calculés, sans rien envoyer au fournisseur d’embeddings.',
+            );
+          } else add('pdf', 'ecart', gap, 'Attendu juste après une suppression ou un dédoublonnage : l’index se reconstruit une fois l’indexation terminée. Persistant après relance, sans reconstruction proposée à l’ouverture = anomalie.');
         } catch {
           add('pdf', 'ecart', 'hnsw.index.meta.json illisible');
         }

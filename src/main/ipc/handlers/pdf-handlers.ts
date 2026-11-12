@@ -15,6 +15,7 @@ import {
   PDFCheckModifiedSchema,
   PDFRememberModifiedSchema,
   StringIdSchema,
+  StringPathSchema,
 } from '../utils/validation.js';
 import { PDFModificationDetector } from '../../../../backend/services/PDFModificationDetector.js';
 import {
@@ -313,6 +314,28 @@ export function setupPDFHandlers() {
         ? { ...errorResponse(error), code: error.code }
         : errorResponse(error);
     }
+  });
+
+  // L'index des PDF à reconstruire, trouvé à l'ouverture du projet (J8). Pour le projet ouvert
+  // seulement : l'état d'un projet quitté ne s'affiche pas dans le suivant.
+  ipcMain.handle('pdf:get-index-state', (_event, rawProjectPath: unknown) => {
+    const projectPath = validate(StringPathSchema, rawProjectPath);
+    const currentProject = projectManager.getCurrentProjectPath();
+    if (!currentProject || !sameFile(currentProject, projectPath)) return errorResponse('project-changed');
+    return successResponse(pdfService.getIndexState());
+  });
+
+  // « Reconstruire », depuis le bandeau : depuis les vecteurs de SQLite, sans rien envoyer au
+  // fournisseur d'embeddings. La progression arrive par `project:rebuild-progress`, comme celle de
+  // l'ouverture. `started` est faux quand plus rien n'est proposé.
+  ipcMain.handle('pdf:rebuild-index', (_event, rawProjectPath: unknown) => {
+    const projectPath = validate(StringPathSchema, rawProjectPath);
+    const currentProject = projectManager.getCurrentProjectPath();
+    if (!currentProject || !sameFile(currentProject, projectPath)) {
+      logger.warn('ipc', 'pdf:rebuild-index:project-changed', { projectPath, currentProject });
+      return errorResponse('project-changed');
+    }
+    return successResponse({ started: pdfService.rebuildIndexOnRequest() });
   });
 
   console.log('✅ PDF handlers registered');

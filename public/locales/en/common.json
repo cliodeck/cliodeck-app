@@ -2614,6 +2614,14 @@
     "message": "“{{title}}” was indexed, but almost no text could be extracted from it: it is probably a scan or an image without OCR. Search and the assistant will find nothing in it.",
     "details": "{{fileName}} — {{pageCount}} page(s), {{charsPerPage}} characters per page on average. Run it through OCR software (for instance ocrmypdf or Adobe Acrobat), then re-index it."
   },
+  "pdfIndexRebuild": {
+    "title": "PDF search index to rebuild",
+    "message": "The project was closed before this index was redone, after PDFs were removed or re-indexed: it keeps extracts that no longer exist, or lacks some, and semantic search returns fewer extracts to the assistant. “Rebuild” redoes it from the vectors already computed, without sending anything to the embedding provider.",
+    "rebuild": "Rebuild",
+    "later": "Later: this message will come back the next time the project opens",
+    "status": "PDF index to rebuild",
+    "statusTooltip": "Open the Bibliography panel, which offers to rebuild the PDF search index"
+  },
   "sandboxDisabled": {
     "title": "ClioDeck is running without Chromium's sandbox",
     "messageAppImage": "On this system the AppImage cannot enable it and started without it. Everything works, but one protection is missing. To get it back, install the .deb package instead of the AppImage.",
