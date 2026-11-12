@@ -11,7 +11,7 @@ import {
 import { useProjectStore } from '../../stores/projectStore';
 import { withErrorDetails } from './errorDetails';
 import { describeNotAttached } from '../../stores/bibliography/zoteroSlice';
-import { pdfIndexFailure } from '../../stores/bibliography/indexingSlice';
+import { isEmbeddingDimensionRefusal, pdfIndexFailure } from '../../stores/bibliography/indexingSlice';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useMenuIntentStore } from '../../stores/menuIntentStore';
@@ -321,6 +321,30 @@ export const BibliographyPanel: React.FC = () => {
     return useDialogStore.getState().showAlert(withErrorDetails(message, progress.errors));
   };
 
+  /**
+   * Un lot arrêté au premier PDF refusé : ses embeddings n'ont pas la dimension du corpus, et les
+   * suivants l'auraient été de même (L04-7). Ce qui a été fait et ce qui reste ; le refus, avec le
+   * geste qui règle l'écart, suit une fois dans la liste des erreurs.
+   */
+  const alertStoppedOnDimension = (
+    batchKey: string,
+    progress: { done: number; remaining: number; errors: string[] }
+  ) =>
+    useDialogStore.getState().showAlert(
+      withErrorDetails(
+        [
+          t('bibliography.downloadAllStopped', {
+            batch: t(batchKey),
+            done: progress.done,
+            errors: progress.errors.length,
+            remaining: progress.remaining,
+          }),
+          t('bibliography.batchStoppedDimensionRest'),
+        ].join(' '),
+        progress.errors
+      )
+    );
+
   const handleIndexAllPDFs = async () => {
     if (batchIndexing.isIndexing) return;
 
@@ -344,6 +368,14 @@ export const BibliographyPanel: React.FC = () => {
       if (result.interrupted) {
         await alertBatchInterrupted('bibliography.indexAllPDFs', currentProject.name, {
           done: result.indexed,
+          remaining: result.remaining ?? 0,
+          errors: result.errors,
+        });
+        return;
+      }
+      if (result.stoppedOnDimension && (result.remaining ?? 0) > 0) {
+        await alertStoppedOnDimension('bibliography.indexAllPDFs', {
+          done: result.indexed + result.skipped,
           remaining: result.remaining ?? 0,
           errors: result.errors,
         });
@@ -391,6 +423,14 @@ export const BibliographyPanel: React.FC = () => {
           remaining: result.remaining ?? 0,
           errors: result.errors,
           toIndex: result.toIndex,
+        });
+        return;
+      }
+      if (result.stoppedOnDimension && (result.remaining ?? 0) > 0) {
+        await alertStoppedOnDimension('bibliography.downloadAllMissing', {
+          done: result.downloaded,
+          remaining: result.remaining ?? 0,
+          errors: result.errors,
         });
         return;
       }
@@ -497,9 +537,11 @@ export const BibliographyPanel: React.FC = () => {
         errors,
       });
 
+    /** Arrêté sur un PDF refusé pour la dimension de ses embeddings (L04-7) : ceux qui ne sont pas partis. */
+    let stoppedRemaining: number | undefined;
     try {
       // Re-index each PDF
-      for (const { pdf, citation, file } of toReindex) {
+      for (const [index, { pdf, citation, file }] of toReindex.entries()) {
         if (!(await stillIn(projectPath))) return await interrupted();
         const result = await window.electron.pdf.index(
           file,
@@ -520,11 +562,24 @@ export const BibliographyPanel: React.FC = () => {
           if (stillShown(projectPath)) await acknowledge([pdf]);
         } else if (!refusedAsProjectChanged(result)) errors.push(`${citation.title}: ${pdfIndexFailure(result ?? {}, 'Failed to index PDF')}`);
         if (refusedAsProjectChanged(result) || !(await stillIn(projectPath))) return await interrupted();
+        // Le modèle d'embeddings a changé : les suivants seraient refusés de même.
+        if (isEmbeddingDimensionRefusal(result)) {
+          stoppedRemaining = toReindex.length - index - 1;
+          break;
+        }
       }
 
       // Refresh indexed PDFs
       await refreshIndexedPDFs();
 
+      if (stoppedRemaining !== undefined && stoppedRemaining > 0) {
+        await alertStoppedOnDimension('bibliography.reindexAll', {
+          done: reindexed.length,
+          remaining: stoppedRemaining,
+          errors,
+        });
+        return;
+      }
       await useDialogStore.getState().showAlert(
         withErrorDetails(
           t('bibliography.reindexComplete', { indexed: reindexed.length, errors: errors.length }),

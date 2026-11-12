@@ -93,12 +93,14 @@ describe('PDF d’une autre dimension que le corpus : le code devient le message
     expectTranslated((error as Error).message);
   });
 
-  it('« Indexer tous les PDFs » : chaque erreur du lot, après le titre', async () => {
+  it('« Indexer tous les PDFs » : le lot s’arrête au premier refus, que les suivants auraient eu de même', async () => {
     const result = await bib().indexAllPDFs('/projet');
 
-    expect(result.indexed).toBe(0);
-    expect(result.errors).toHaveLength(2);
+    expect(window.electron.pdf.index).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ indexed: 0, skipped: 0, stoppedOnDimension: true, remaining: 1 });
+    expect(result.errors).toHaveLength(1);
     expect(result.errors[0].startsWith('Mémorandum: ')).toBe(true);
-    for (const message of result.errors) expectTranslated(message);
+    expectTranslated(result.errors[0]);
+    expect(bib().batchIndexing).toMatchObject({ isIndexing: false, current: 1, total: 2 });
   });
 });

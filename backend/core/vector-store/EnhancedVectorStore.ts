@@ -276,6 +276,15 @@ export class EnhancedVectorStore {
   }
 
   /**
+   * Le refus d'`adoptEmbeddingDimension`, sans rien adopter ni toucher à HNSW : l'indexeur l'applique
+   * dès le premier vecteur d'un PDF, avant d'embarquer les suivants pour rien. Rend la dimension du
+   * corpus, null s'il est vide.
+   */
+  checkEmbeddingDimension(dimension: number): number | null {
+    return this.vectorStore.checkEmbeddingDimension(dimension);
+  }
+
+  /**
    * La dimension des vecteurs qu'une indexation va écrire, contrôlée avant toute écriture (L04-7).
    * Un corpus sans extrait embarqué l'adopte : HNSW est refait vide à cette dimension (projet neuf
    * avec un modèle qui n'est pas en 768, base purgée). HNSW sautait sinon chaque vecteur avec un

@@ -375,3 +375,63 @@ describe('bilan de santé — index HNSW en retard et reconstruction proposée (
     expect(hnswFinding(await check())?.aide).toMatch(/anomalie/);
   });
 });
+
+/**
+ * L04-7 : une base où deux modèles d'embeddings ont écrit garde l'index des PDF dans sa dimension
+ * majoritaire ; les extraits de l'autre restent hors de l'index, voulu, sans marque J8, et aucune
+ * reconstruction ne les y remettrait. Le bilan les annonce à part, avec le geste qui les y remet,
+ * au lieu de les compter « absents de l'index » et de parler d'anomalie.
+ */
+describe('bilan de santé — base mêlée de deux dimensions d’embeddings (L04-7)', () => {
+  const inDimension = (dimension: number) => new Uint8Array(dimension * 4);
+
+  /** Trois extraits en 768, six en 1024 ; l'index a été écrit dans `indexDimension`. */
+  function mixedBase(indexDimension: 768 | 1024): void {
+    const pdf = write('PDFs/a.pdf', '%PDF-1.4');
+    const old = ['v0', 'v1', 'v2'];
+    const recent = ['n0', 'n1', 'n2', 'n3', 'n4', 'n5'];
+    const indexed = indexDimension === 1024 ? recent : old;
+    write(
+      '.cliodeck/hnsw.index.meta.json',
+      JSON.stringify({ dimension: indexDimension, chunkIdMap: indexed.map((id, label) => [label, id]) })
+    );
+    createBrain((db) => {
+      db.prepare('INSERT INTO pdf_documents VALUES (?, ?)').run('d1', pdf);
+      for (const id of old) db.prepare('INSERT INTO pdf_chunks VALUES (?, ?, ?)').run(id, 'd1', inDimension(768));
+      for (const id of recent) db.prepare('INSERT INTO pdf_chunks VALUES (?, ?, ?)').run(id, 'd1', inDimension(1024));
+    });
+  }
+
+  const pdfFindings = (findings: Finding[]) => findings.filter((f) => f.domaine === 'pdf');
+
+  it('index dans la dimension majoritaire : l’index est aligné, et les extraits de l’autre modèle sont annoncés à part', async () => {
+    mixedBase(1024);
+
+    const findings = pdfFindings(await check());
+
+    expect(findings.find((f) => f.message.startsWith('index HNSW'))).toMatchObject({
+      niveau: 'ok',
+      message: 'index HNSW aligné sur la base (6 vecteurs)',
+    });
+    const other = findings.find((f) => /autre modèle d’embeddings/.test(f.message));
+    expect(other).toMatchObject({ niveau: 'ecart' });
+    expect(other?.message).toMatch(/3 extrait\(s\) en 768/);
+    expect(other?.message).toMatch(/index en 1024/);
+    expect(other?.aide).toMatch(/« Purger la base »/);
+    expect(other?.aide).toMatch(/« Indexer tous les PDFs »/);
+    expect(findings.some((f) => /anomalie/.test(f.aide ?? ''))).toBe(false);
+  });
+
+  it('index écrit dans la dimension minoritaire (version antérieure) : l’ouverture le refait, le bilan le dit', async () => {
+    mixedBase(768);
+
+    const findings = pdfFindings(await check());
+
+    const minority = findings.find((f) => /dimension minoritaire/.test(f.message));
+    expect(minority).toMatchObject({ niveau: 'ecart' });
+    expect(minority?.message).toMatch(/768/);
+    expect(minority?.message).toMatch(/6 extrait\(s\) en 1024/);
+    expect(minority?.aide).toMatch(/ouverture du projet/);
+    expect(findings.some((f) => /anomalie/.test(f.aide ?? ''))).toBe(false);
+  });
+});

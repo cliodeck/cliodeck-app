@@ -21,7 +21,12 @@ import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { EditorFileError, openErrorKey, useEditorStore } from '../../stores/editorStore';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
-import { AttachmentNotSavedError, describeNotAttached } from '../../stores/bibliography/zoteroSlice';
+import {
+  AttachmentNotSavedError,
+  DownloadedNotIndexedError,
+  describeNotAttached,
+  describeNotIndexed,
+} from '../../stores/bibliography/zoteroSlice';
 import {
   hiddenAutomaticCount,
   projectTagsOf,
@@ -187,13 +192,16 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
       if ((await downloadAndIndexZoteroPDF(citation.id, attachmentKey, currentProject.path)).interrupted) return;
       await useDialogStore.getState().showAlert(t('bibliography.pdfDownloadedAndIndexed', { title: citation.title }));
     } catch (error) {
-      // Téléchargé mais pas rattaché : le PDF est dans PDFs/, et l'historien doit le savoir.
+      // Téléchargé mais pas rattaché, ou rattaché mais pas indexé : le PDF est dans PDFs/, et
+      // l'historien doit le savoir, plutôt que de relancer un téléchargement qui a réussi.
       await useDialogStore
         .getState()
         .showAlert(
           error instanceof AttachmentNotSavedError
             ? describeNotAttached(t, error.notAttached)
-            : `${t('bibliography.downloadError')} ${error}`
+            : error instanceof DownloadedNotIndexedError
+              ? describeNotIndexed(t, error)
+              : `${t('bibliography.downloadError')} ${error}`
         );
     } finally {
       setIsIndexing(false);

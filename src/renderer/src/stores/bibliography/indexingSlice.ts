@@ -18,6 +18,14 @@ interface PdfIndexRefusal {
 }
 
 /**
+ * Le refus d'un PDF dont les embeddings n'ont pas la dimension du corpus (L04-7). Il ne dépend que du
+ * modèle d'embeddings : dans un lot, les PDF suivants seraient refusés de même, et le lot s'arrête.
+ */
+export function isEmbeddingDimensionRefusal(result: PdfIndexRefusal | null | undefined): boolean {
+  return result?.code === 'embedding_dimension_mismatch';
+}
+
+/**
  * Le message d'un `pdf:index` en échec. Un PDF embarqué dans une autre dimension que le corpus (le
  * modèle d'embeddings a changé depuis la première indexation) est refusé avec un code et les deux
  * dimensions (L04-7) : l'historien lit leur traduction et le geste qui règle l'écart, jamais le
@@ -292,6 +300,8 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
     const errors: string[] = [];
     let indexed = 0;
     let skipped = 0;
+    /** L'indice du PDF refusé pour la dimension de ses embeddings, où le lot s'est arrêté (L04-7). */
+    let stoppedAt: number | undefined;
     /**
      * Le projet du lot n'est plus l'ouvert (S18-2-0) : ses PDF suivants iraient dans le corpus de
      * l'autre. Le lot s'arrête, la progression disparaît, et ce qui reste se dit.
@@ -377,6 +387,12 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
           detail: { citationId: citation.id, success: result.success, error: failure }
         }));
+        // Le modèle d'embeddings a changé depuis l'indexation du corpus : les PDF suivants seraient
+        // refusés de même, chacun après son extraction, et le bilan répéterait le même refus.
+        if (!result.success && isEmbeddingDimensionRefusal(result)) {
+          stoppedAt = i;
+          break;
+        }
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         console.error('❌ [indexing] Échec:', citation.title, errorMsg);
@@ -387,10 +403,11 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       }
     }
 
+    const processed = stoppedAt === undefined ? citationsWithPDFs.length : stoppedAt + 1;
     set({
       batchIndexing: {
         isIndexing: false,
-        current: citationsWithPDFs.length,
+        current: processed,
         total: citationsWithPDFs.length,
         skipped,
         indexed,
@@ -398,7 +415,9 @@ export const createIndexingSlice: BibliographySliceCreator<IndexingSliceState> =
       }
     });
 
-    return { indexed, skipped, errors };
+    return stoppedAt === undefined
+      ? { indexed, skipped, errors }
+      : { indexed, skipped, errors, stoppedOnDimension: true, remaining: citationsWithPDFs.length - processed };
   },
 
   refreshIndexedPDFs: async () => {

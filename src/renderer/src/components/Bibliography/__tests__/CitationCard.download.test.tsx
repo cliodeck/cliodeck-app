@@ -123,3 +123,43 @@ describe('CitationCard : un PDF téléchargé mais pas rattaché', () => {
     expect(pdfIndex).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Le PDF est téléchargé dans `PDFs/` et rattaché (le rattachement est écrit), puis l'indexation le
+ * refuse : le modèle d'embeddings a changé depuis l'indexation du corpus (L04-7). L'alerte ne doit
+ * dire ni « Erreur de téléchargement », ni « Rien n'a été modifié » : l'historien relancerait un
+ * téléchargement réussi.
+ */
+describe('CitationCard : un PDF téléchargé et rattaché, mais pas indexé', () => {
+  it('modèle d’embeddings changé : l’alerte dit que le PDF est là et rattaché, et pourquoi il n’est pas indexé', async () => {
+    pdfIndex.mockResolvedValueOnce({
+      success: false,
+      error: 'Embedding dimension mismatch: expected 768, got 1024',
+      code: 'embedding_dimension_mismatch',
+      expected: 768,
+      actual: 1024,
+    });
+
+    await download();
+
+    const message = useDialogStore.getState().alertMessage;
+    expect(message).toMatch(
+      /^Le PDF de « La guerre de l’intelligence artificielle » a été téléchargé dans PDFs\/ \(2023_-_Documents_sauvegardés\.pdf\) et rattaché à la référence, mais son indexation a échoué\. /
+    );
+    expect(message).not.toContain('Erreur de téléchargement');
+    expect(message).not.toContain('Rien n\'a été modifié');
+    expect(message).toContain('L\'index des PDF n\'a pas été modifié.');
+    expect(message).toContain('« Purger la base »');
+    expect(updateAttachment).toHaveBeenCalledTimes(1);
+  });
+
+  it('autre échec de l’indexation : la même phrase, avec la cause', async () => {
+    pdfIndex.mockResolvedValueOnce({ success: false, error: 'Embedding failed: fetch failed (Ollama)' });
+
+    await download();
+
+    const message = useDialogStore.getState().alertMessage;
+    expect(message).toContain('et rattaché à la référence, mais son indexation a échoué. Embedding failed: fetch failed (Ollama)');
+    expect(message).not.toContain('Erreur de téléchargement');
+  });
+});

@@ -449,6 +449,9 @@ export class PDFIndexer {
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
         const embedding = await this.generateEmbeddingFn(chunk.content);
+        // Dès le premier vecteur, le refus d'un corpus d'une autre dimension (L04-7) : après un
+        // changement de modèle, chaque PDF d'un lot était embarqué en entier, puis refusé.
+        if (i === 0) this.vectorStore.checkEmbeddingDimension(embedding.length);
         chunksWithEmbeddings.push({ chunk, embedding });
 
         // Mise à jour de la progression
@@ -486,7 +489,8 @@ export class PDFIndexer {
       // La dimension des vecteurs, contrôlée avant d'écrire quoi que ce soit (L04-7) : un corpus vide
       // l'adopte, un corpus d'une autre dimension refuse ce PDF (`EmbeddingSpaceMismatchError`). Le
       // modèle d'embeddings a changé depuis la première indexation : HNSW sautait ces vecteurs en
-      // silence, et le PDF passait pour indexé sans être trouvable par le sens.
+      // silence, et le PDF passait pour indexé sans être trouvable par le sens. Contrôlée de nouveau
+      // ici, et non au seul premier vecteur : une autre indexation a pu remplir le corpus entre-temps.
       const dimension = chunksWithEmbeddings[0]?.embedding.length;
       if (dimension !== undefined) {
         if (isEnhancedStore) {

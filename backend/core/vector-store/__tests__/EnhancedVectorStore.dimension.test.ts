@@ -96,12 +96,13 @@ const vectorOf = (dimension: number, seed: number): Float32Array =>
 
 /**
  * Une base où deux modèles ont écrit, comme le laissait un changement de modèle avant ce correctif :
- * trois extraits en 768, écrits les premiers (`LIMIT 1` les voyait donc d'abord), puis six en 1024.
+ * `old` extraits en 768 (trois par défaut), écrits les premiers (`LIMIT 1` les voyait donc d'abord),
+ * puis six en 1024, trois par document.
  */
-function seedMixedBase(): void {
+function seedMixedBase(old = 3): void {
   const base = new VectorStore(project);
   base.saveDocument(documentOf('ancien'));
-  for (let i = 0; i < 3; i += 1) base.saveChunk(chunkOf('ancien', i), vectorOf(768, i));
+  for (let i = 0; i < old; i += 1) base.saveChunk(chunkOf('ancien', i), vectorOf(768, i));
   ['nouveau1', 'nouveau2'].forEach((documentId, d) => {
     base.saveDocument(documentOf(documentId));
     for (let i = 0; i < 3; i += 1) base.saveChunk(chunkOf(documentId, i), vectorOf(1024, 100 + d * 10 + i));
@@ -223,6 +224,33 @@ describe.skipIf(!sqliteAvailable)('L04-7 : la dimension de l’index des PDF est
       expect((await store.search('Haute Autorité', await embedIn(768)(TEXT), 5)).length).toBeGreaterThan(0);
     });
 
+    it('le refus tombe dès le premier embedding : les extraits suivants ne sont pas embarqués pour rien', async () => {
+      const { store } = await open();
+      track(store);
+      await indexer(store, 768).indexPDF(pdf('Rapport_1952'), 'Rapport_1952');
+      const chunks = onDisk().chunks;
+      expect(chunks).toBeGreaterThan(1);
+      const calls: string[] = [];
+      const counted = async (content: string) => {
+        calls.push(content);
+        return embedIn(1024)(content);
+      };
+      // Un PDF trois fois plus long : six pages, au moins trois fois plus d'extraits.
+      const longer = async () => {
+        const { pages, ...rest } = await extract();
+        return { ...rest, pages: [...pages, ...pages, ...pages].map((page, i) => ({ ...page, pageNumber: i + 1 })) };
+      };
+      const refusing = new PDFIndexer(store, counted, 'cpuOptimized', undefined, false, RAW, longer);
+
+      await expect(refusing.indexPDF(pdf('Rapport_1953'), 'Rapport_1953')).rejects.toMatchObject({
+        code: 'embedding_dimension_mismatch',
+      });
+
+      // Un seul appel au fournisseur, pas un par extrait : le refus ne dépend que de la dimension.
+      expect(calls).toHaveLength(1);
+      expect(onDisk().chunks).toBe(chunks);
+    });
+
     it('réindexer le même PDF avec un autre modèle : refusé aussi, l’ancien document reste', async () => {
       const { store } = await open();
       track(store);
@@ -308,6 +336,26 @@ describe.skipIf(!sqliteAvailable)('L04-7 : la dimension de l’index des PDF est
       expect(store.getRebuildStatus().rebuildDue).toBe(false);
       expect(onDisk().mark).toBe(false);
       expect(await hnsw(store)).toMatchObject({ dimension: 1024, currentSize: 6 });
+    });
+
+    it('la majorité bascule en session (un PDF supprimé) : la reconstruction refait l’index dans la nouvelle, et efface la marque', async () => {
+      // Quatre extraits en 768, six en 1024 : l'index s'ouvre en 1024.
+      seedMixedBase(4);
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const { store } = await open();
+      track(store);
+      expect(await hnsw(store)).toMatchObject({ dimension: 1024, currentSize: 6 });
+
+      // Plus que trois en 1024 : la majorité passe en 768, et la suppression pose la marque (J8).
+      store.deleteDocument('nouveau1');
+      expect(onDisk().mark).toBe(true);
+      await PdfVectorStore.maybeRebuild(store);
+
+      expect(await hnsw(store)).toMatchObject({ dimension: 768, currentSize: 4 });
+      expect(onDisk().mark).toBe(false);
+      expect(store.getRebuildStatus().rebuildDue).toBe(false);
+      const hits = await store.search('Haute Autorité', vectorOf(768, 0), 3);
+      expect(hits.map((hit) => hit.chunk.documentId)).toContain('ancien');
     });
 
     it('un index écrit dans la dimension minoritaire (avant ce correctif) : la réouverture le refait dans la majoritaire', async () => {

@@ -23,7 +23,7 @@ import os from 'os';
 import path from 'path';
 import { useBibliographyStore } from '../../bibliographyStore';
 import { useProjectStore } from '../../projectStore';
-import { AttachmentNotSavedError } from '../zoteroSlice';
+import { AttachmentNotSavedError, DownloadedNotIndexedError } from '../zoteroSlice';
 import type { Citation } from '../types';
 import { BibliographyMetadataService, MetadataUnreadableError } from '../../../../../../backend/services/BibliographyMetadataService';
 import i18n from '../../../i18n';
@@ -227,6 +227,8 @@ describe('un PDF téléchargé que le main ne rattache pas', () => {
         (e: unknown) => e
       );
 
+    // Téléchargé et rattaché : l'erreur le porte, pour que la fiche ne dise pas « Erreur de téléchargement ».
+    expect(error).toBeInstanceOf(DownloadedNotIndexedError);
     expect((error as Error).message).toBe(
       i18n.t('bibliography.embeddingDimensionMismatch', { corpus: 768, model: 1024 })
     );
