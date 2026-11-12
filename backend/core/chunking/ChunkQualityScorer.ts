@@ -113,16 +113,8 @@ export class ChunkQualityScorer {
       return `low unique word ratio (${score.uniqueWordRatio.toFixed(2)} < ${thresholds.minUniqueWordRatio})`;
     }
 
-    if (
-      score.wordCount < SENTENCE_REQUIRED_BELOW_WORDS &&
-      score.sentenceCount < thresholds.minSentenceCount
-    ) {
-      return `too few sentences (${score.sentenceCount} < ${thresholds.minSentenceCount})`;
-    }
-
-    if (score.wordCount < thresholds.minWordCount) {
-      return `too few words (${score.wordCount} < ${thresholds.minWordCount})`;
-    }
+    const sizeReason = this.sizeRejection(score, thresholds);
+    if (sizeReason) return sizeReason;
 
     if (score.avgWordLength > thresholds.maxAvgWordLength) {
       return `avg word too long (${score.avgWordLength.toFixed(1)} > ${thresholds.maxAvgWordLength})`;
@@ -135,7 +127,33 @@ export class ChunkQualityScorer {
     return null;
   }
 
+  /**
+   * Vrai si le filtre écarterait cet extrait pour sa seule taille, aux seuils
+   * de ce filtre : trop peu de mots, ou un fragment sans phrase. Quelle que soit
+   * sa qualité, il ne passera pas : `AdaptiveChunker` lui donne alors en
+   * recouvrement les mots du bloc sans ponctuation qu'il touche.
+   */
+  isFragment(content: string): boolean {
+    return this.sizeRejection(this.scoreChunk(content), this.config) !== null;
+  }
+
   // MARK: - Private Methods
+
+  /** La raison d'écarter un extrait pour sa seule taille, ou `null`. */
+  private sizeRejection(score: ChunkQualityScore, thresholds: QualityFilterConfig): string | null {
+    if (
+      score.wordCount < SENTENCE_REQUIRED_BELOW_WORDS &&
+      score.sentenceCount < thresholds.minSentenceCount
+    ) {
+      return `too few sentences (${score.sentenceCount} < ${thresholds.minSentenceCount})`;
+    }
+
+    if (score.wordCount < thresholds.minWordCount) {
+      return `too few words (${score.wordCount} < ${thresholds.minWordCount})`;
+    }
+
+    return null;
+  }
 
   /**
    * Tokenize text into words

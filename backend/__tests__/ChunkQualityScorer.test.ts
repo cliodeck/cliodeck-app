@@ -74,6 +74,21 @@ describe('ChunkQualityScorer — listes et inventaires sans ponctuation (S03-1-2
     expect(scorer.meetsQualityThreshold(scorer.scoreChunk(list(50)), PDF_FILTER)).toBe(true);
   });
 
+  it('isFragment : écarté pour sa seule taille, quelle que soit sa qualité', () => {
+    // `AdaptiveChunker` s'en sert pour reconnaître l'extrait trop court qui
+    // touche un bloc sans ponctuation : la règle est celle du filtre.
+    const scorer = new ChunkQualityScorer();
+    const list = (n: number) => Array.from({ length: n }, (_, i) => word(i)).join(' ');
+
+    expect(scorer.isFragment(list(12))).toBe(true);
+    expect(scorer.isFragment(`${list(12)}.`)).toBe(true);
+    expect(scorer.isFragment(list(30))).toBe(true);
+    expect(scorer.isFragment(`${list(30)}.`)).toBe(false);
+    expect(scorer.isFragment(list(50))).toBe(false);
+    // Trop répétitif pour le filtre, mais ce n'est pas sa taille qui l'écarte.
+    expect(scorer.isFragment('STOP '.repeat(60))).toBe(false);
+  });
+
   it('la raison donnée et la décision disent la même chose', () => {
     const scorer = new ChunkQualityScorer();
     const samples = [
