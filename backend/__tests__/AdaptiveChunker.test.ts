@@ -75,6 +75,30 @@ describe('AdaptiveChunker — taille des extraits (#157)', () => {
     expect(chunks.flatMap((chunk) => words(chunk.content)).join(' ')).toBe(table);
   });
 
+  // Un bloc sans ponctuation (S03-1-27) laissait des extraits de quelques mots,
+  // que le filtre de qualité jetait : le court énoncé qui le précède dans le
+  // même paragraphe, seul, et la fin de son découpage en tranches pleines.
+  // L'énoncé ouvre désormais la première tranche, et les tranches sont égales.
+  it.each([
+    { cas: 'un court énoncé avant le bloc', heading: 'Inventaire des liasses du carton.', count: 700 },
+    { cas: 'un bloc de 1 205 mots', heading: '', count: 1205 },
+  ])('$cas : pas d’extrait de quelques mots, aucun au-delà de la limite, aucun mot perdu', ({ heading, count }) => {
+    const table = Array.from({ length: count }, (_, i) => `m${i}`).join(' ');
+    const text = heading ? `${heading} ${table}` : table;
+
+    const chunks = new AdaptiveChunker(CHUNKING_CONFIGS.cpuOptimized).createChunks(
+      [{ pageNumber: 1, text }],
+      'doc'
+    );
+
+    for (const chunk of chunks) {
+      expect(words(chunk.content).length).toBeLessThanOrEqual(MAX);
+      expect(words(chunk.content).length).toBeGreaterThanOrEqual(20);
+    }
+    if (heading) expect(chunks[0].content.startsWith(heading)).toBe(true);
+    expect(chunks.flatMap((chunk) => words(chunk.content)).join(' ')).toBe(text);
+  });
+
   it('relie deux extraits consécutifs par un recouvrement', () => {
     const chunks = chunkPdf(pdfLike(3, 34));
 

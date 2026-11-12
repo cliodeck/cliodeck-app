@@ -330,6 +330,11 @@ export class AdaptiveChunker {
    * Les morceaux qu'on ne recoupe pas : un paragraphe s'il tient dans un
    * extrait, sinon ses phrases, et pour une phrase démesurée (tableau, liste
    * sans ponctuation) des tranches de mots.
+   *
+   * Une petite unité du même paragraphe juste avant une phrase démesurée
+   * (« Inventaire des liasses. » devant la liste) ouvre sa première tranche :
+   * seule, elle formait un extrait de quelques mots, que le filtre de qualité
+   * jetait (S03-1-27).
    */
   private splitIntoUnits(text: string): TextRange[] {
     const max = this.config.maxChunkSize;
@@ -341,9 +346,19 @@ export class AdaptiveChunker {
         units.push(paragraph);
         continue;
       }
+      const paragraphStart = units.length;
       for (const sentence of splitRange(text, paragraph, SENTENCE_BREAK)) {
-        if (sentence.words <= max) units.push(sentence);
-        else units.push(...sliceByWords(text, sentence, max));
+        if (sentence.words <= max) {
+          units.push(sentence);
+          continue;
+        }
+        const previous = units.length > paragraphStart ? units[units.length - 1] : undefined;
+        let start = sentence.start;
+        if (previous && previous.words < SMALL_UNIT_WORDS) {
+          units.pop();
+          start = previous.start;
+        }
+        units.push(...sliceByWords(text, { start, end: sentence.end, words: 0 }, max));
       }
     }
 
@@ -491,6 +506,9 @@ const PARAGRAPH_BREAK = /\n[ \t]*\n\s*/g;
 /** Les blancs qui suivent une fin de phrase, guillemet ou parenthèse fermante compris. */
 const SENTENCE_BREAK = /(?<=[.!?…][)\]"'’»]*)\s+/g;
 
+/** Sous ce nombre de mots, une unité ne fait pas seule un extrait devant une phrase démesurée. */
+const SMALL_UNIT_WORDS = 20;
+
 function countWords(text: string): number {
   return text.match(/\S+/g)?.length ?? 0;
 }
@@ -519,16 +537,24 @@ function splitRange(text: string, range: TextRange, separator: RegExp): TextRang
   return parts;
 }
 
-/** `range` en tranches d'au plus `size` mots. */
+/**
+ * `range` en tranches d'au plus `size` mots, égales à un mot près. Des
+ * tranches pleines laissaient une fin de quelques mots (1 205 mots : quatre de
+ * 300 et une de 5), extrait sans phrase que le filtre de qualité jetait
+ * (S03-1-27).
+ */
 function sliceByWords(text: string, range: TextRange, size: number): TextRange[] {
   const words = [...text.slice(range.start, range.end).matchAll(/\S+/g)];
+  const count = Math.ceil(words.length / size);
   const slices: TextRange[] = [];
-  for (let i = 0; i < words.length; i += size) {
-    const last = words[Math.min(i + size, words.length) - 1];
+  for (let j = 0; j < count; j++) {
+    const first = Math.floor((j * words.length) / count);
+    const end = Math.floor(((j + 1) * words.length) / count);
+    const last = words[end - 1];
     slices.push({
-      start: range.start + words[i].index,
+      start: range.start + words[first].index,
       end: range.start + last.index + last[0].length,
-      words: Math.min(size, words.length - i),
+      words: end - first,
     });
   }
   return slices;

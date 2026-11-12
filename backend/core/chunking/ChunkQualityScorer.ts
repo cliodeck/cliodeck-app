@@ -5,7 +5,8 @@
  * - Shannon entropy: Measures lexical diversity (higher = more information)
  * - Unique word ratio: Proportion of unique words (higher = less repetition)
  * - Average word length: Detects OCR garbage (too short or too long)
- * - Sentence count: Indicates coherence (very few = fragment)
+ * - Sentence count: Indicates coherence (very few = fragment), only required
+ *   of a fragment (`SENTENCE_REQUIRED_BELOW_WORDS`)
  */
 
 export interface ChunkQualityScore {
@@ -34,6 +35,14 @@ const DEFAULT_QUALITY_CONFIG: QualityFilterConfig = {
   maxAvgWordLength: 20,
   minAvgWordLength: 2,
 };
+
+/**
+ * Une phrase n'est exigée que d'un extrait de moins de 50 mots : un fragment.
+ * Au-delà, un extrait sans ponctuation est une liste, un inventaire, un
+ * tableau ou un registre, que le découpage recoupe exprès en tranches de mots
+ * (#157) : l'exiger de lui les jetait en entier, sans aucun signe (S03-1-27).
+ */
+const SENTENCE_REQUIRED_BELOW_WORDS = 50;
 
 export class ChunkQualityScorer {
   private config: QualityFilterConfig;
@@ -82,37 +91,13 @@ export class ChunkQualityScorer {
     score: ChunkQualityScore,
     config?: Partial<QualityFilterConfig>
   ): boolean {
-    const thresholds = { ...this.config, ...config };
-
-    // Check each criterion
-    if (score.entropy < thresholds.minEntropy) {
-      return false;
-    }
-
-    if (score.uniqueWordRatio < thresholds.minUniqueWordRatio) {
-      return false;
-    }
-
-    if (score.sentenceCount < thresholds.minSentenceCount) {
-      return false;
-    }
-
-    if (score.wordCount < thresholds.minWordCount) {
-      return false;
-    }
-
-    if (
-      score.avgWordLength > thresholds.maxAvgWordLength ||
-      score.avgWordLength < thresholds.minAvgWordLength
-    ) {
-      return false;
-    }
-
-    return true;
+    // Une seule règle : la décision et la raison donnée ne peuvent diverger.
+    return this.getRejectionReason(score, config) === null;
   }
 
   /**
-   * Get rejection reason for debugging
+   * La raison du rejet, ou `null` si l'extrait est retenu : c'est elle qui
+   * décide (`meetsQualityThreshold`).
    */
   getRejectionReason(
     score: ChunkQualityScore,
@@ -128,7 +113,10 @@ export class ChunkQualityScorer {
       return `low unique word ratio (${score.uniqueWordRatio.toFixed(2)} < ${thresholds.minUniqueWordRatio})`;
     }
 
-    if (score.sentenceCount < thresholds.minSentenceCount) {
+    if (
+      score.wordCount < SENTENCE_REQUIRED_BELOW_WORDS &&
+      score.sentenceCount < thresholds.minSentenceCount
+    ) {
       return `too few sentences (${score.sentenceCount} < ${thresholds.minSentenceCount})`;
     }
 
