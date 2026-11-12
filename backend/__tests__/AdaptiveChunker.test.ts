@@ -77,14 +77,33 @@ describe('AdaptiveChunker — taille des extraits (#157)', () => {
 
   // Un bloc sans ponctuation (S03-1-27) laissait des extraits de quelques mots,
   // que le filtre de qualité jetait : le court énoncé qui le précède dans le
-  // même paragraphe, seul, et la fin de son découpage en tranches pleines.
-  // L'énoncé ouvre désormais la première tranche, et les tranches sont égales.
+  // même paragraphe, seul, la courte formule qui le suit (dernière tranche
+  // presque pleine), et la fin de son découpage en tranches pleines. Les
+  // petites unités qui l'entourent entrent dans ses tranches, égales.
   it.each([
-    { cas: 'un court énoncé avant le bloc', heading: 'Inventaire des liasses du carton.', count: 700 },
-    { cas: 'un bloc de 1 205 mots', heading: '', count: 1205 },
-  ])('$cas : pas d’extrait de quelques mots, aucun au-delà de la limite, aucun mot perdu', ({ heading, count }) => {
+    { cas: 'un court énoncé avant le bloc', heading: 'Inventaire des liasses du carton.', count: 700, closing: '' },
+    {
+      cas: 'deux courtes phrases avant le bloc',
+      heading: 'Archives départementales de la Marne, série M. Inventaire sommaire des liasses.',
+      count: 590,
+      closing: '',
+    },
+    {
+      cas: 'une formule de douze mots après un bloc de 1 180 mots',
+      heading: '',
+      count: 1180,
+      closing: 'Fait à Reims le 3 août 1914, le préfet de la Marne.',
+    },
+    {
+      cas: 'une formule de douze mots après un bloc de 590 mots',
+      heading: '',
+      count: 590,
+      closing: 'Fait à Reims le 3 août 1914, le préfet de la Marne.',
+    },
+    { cas: 'un bloc de 1 205 mots', heading: '', count: 1205, closing: '' },
+  ])('$cas : pas d’extrait de quelques mots, aucun au-delà de la limite, aucun mot perdu', ({ heading, count, closing }) => {
     const table = Array.from({ length: count }, (_, i) => `m${i}`).join(' ');
-    const text = heading ? `${heading} ${table}` : table;
+    const text = [heading, closing ? `${table}.` : table, closing].filter(Boolean).join(' ');
 
     const chunks = new AdaptiveChunker(CHUNKING_CONFIGS.cpuOptimized).createChunks(
       [{ pageNumber: 1, text }],

@@ -331,10 +331,15 @@ export class AdaptiveChunker {
    * extrait, sinon ses phrases, et pour une phrase démesurée (tableau, liste
    * sans ponctuation) des tranches de mots.
    *
-   * Une petite unité du même paragraphe juste avant une phrase démesurée
-   * (« Inventaire des liasses. » devant la liste) ouvre sa première tranche :
-   * seule, elle formait un extrait de quelques mots, que le filtre de qualité
-   * jetait (S03-1-27).
+   * Les petites unités du même paragraphe qui entourent une phrase démesurée
+   * entrent dans ses tranches, tant qu'elles font ensemble moins de
+   * `SMALL_UNIT_WORDS` mots de chaque côté : avant elle (« Archives de la
+   * Marne, série M. Inventaire des liasses. » devant la liste), elles ouvrent
+   * la première tranche ; après elle (« Fait à Reims le 3 août 1914. »), elles
+   * ferment la dernière. Seules, elles formaient un extrait de quelques mots,
+   * que le filtre de qualité jetait (S03-1-27). Une tranche fait au moins la
+   * moitié de la limite (tranches égales, `sliceByWords`) : ces unités y
+   * tiennent entières, aucune n'est coupée.
    */
   private splitIntoUnits(text: string): TextRange[] {
     const max = this.config.maxChunkSize;
@@ -347,18 +352,30 @@ export class AdaptiveChunker {
         continue;
       }
       const paragraphStart = units.length;
-      for (const sentence of splitRange(text, paragraph, SENTENCE_BREAK)) {
+      const sentences = splitRange(text, paragraph, SENTENCE_BREAK);
+      for (let k = 0; k < sentences.length; k++) {
+        const sentence = sentences[k];
         if (sentence.words <= max) {
           units.push(sentence);
           continue;
         }
-        const previous = units.length > paragraphStart ? units[units.length - 1] : undefined;
         let start = sentence.start;
-        if (previous && previous.words < SMALL_UNIT_WORDS) {
+        let before = 0;
+        while (units.length > paragraphStart) {
+          const previous = units[units.length - 1];
+          if (before + previous.words >= SMALL_UNIT_WORDS) break;
           units.pop();
+          before += previous.words;
           start = previous.start;
         }
-        units.push(...sliceByWords(text, { start, end: sentence.end, words: 0 }, max));
+        let end = sentence.end;
+        let after = 0;
+        while (k + 1 < sentences.length && after + sentences[k + 1].words < SMALL_UNIT_WORDS) {
+          k++;
+          after += sentences[k].words;
+          end = sentences[k].end;
+        }
+        units.push(...sliceByWords(text, { start, end, words: 0 }, max));
       }
     }
 
@@ -506,7 +523,11 @@ const PARAGRAPH_BREAK = /\n[ \t]*\n\s*/g;
 /** Les blancs qui suivent une fin de phrase, guillemet ou parenthèse fermante compris. */
 const SENTENCE_BREAK = /(?<=[.!?…][)\]"'’»]*)\s+/g;
 
-/** Sous ce nombre de mots, une unité ne fait pas seule un extrait devant une phrase démesurée. */
+/**
+ * Les petites unités qui précèdent ou suivent une phrase démesurée entrent
+ * dans ses tranches tant qu'elles font ensemble moins de ce nombre de mots, de
+ * chaque côté : le minimum de mots du filtre de qualité.
+ */
 const SMALL_UNIT_WORDS = 20;
 
 function countWords(text: string): number {
