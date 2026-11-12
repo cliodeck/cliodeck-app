@@ -150,11 +150,85 @@ describe('cliodeck CLI (4.6)', () => {
     const parsed = JSON.parse(stdout()) as {
       retriever: string;
       recall: Record<string, number>;
+      hitRate: Record<string, number>;
       mrr: number;
     };
     expect(parsed.retriever).toBe('bm25');
     expect(parsed.mrr).toBe(1);
+    // Un seul pertinent par question : rappel et taux de succès coïncident.
     expect(parsed.recall[1]).toBe(1);
+    expect(parsed.hitRate[1]).toBe(1);
+  });
+
+  // Le jeu de contrôle versionné (docs/path-a-readiness.md) : le relevé de référence et celui de
+  // L07-3 se font dessus, par les deux retrievers.
+  it('rag-benchmark passe le jeu de contrôle par les deux retrievers, journaux sur stderr', async () => {
+    const fixtures = path.resolve(__dirname, '../../test-fixtures/rag-benchmark');
+    const corpusPath = path.join(fixtures, 'corpus.json');
+    const queriesPath = path.join(fixtures, 'queries.json');
+    const corpus = JSON.parse(await fs.readFile(corpusPath, 'utf8')) as Array<{
+      chunks: Array<{ id: string }>;
+    }>;
+    const queries = JSON.parse(await fs.readFile(queriesPath, 'utf8')) as Array<{
+      id: string;
+      relevant: string[];
+    }>;
+    const chunkIds = corpus.flatMap((d) => d.chunks.map((c) => c.id));
+    expect(new Set(chunkIds).size).toBe(chunkIds.length);
+    expect(queries.length).toBeLessThanOrEqual(20);
+    expect(queries.some((q) => q.id.startsWith('fr-'))).toBe(true);
+    expect(queries.some((q) => q.id.startsWith('de-'))).toBe(true);
+    for (const q of queries) {
+      expect(q.relevant.length).toBeGreaterThan(0);
+      for (const id of q.relevant) expect(chunkIds).toContain(id);
+    }
+
+    for (const retriever of ['bm25', 'pdf-lexical']) {
+      stdoutChunks = [];
+      // `BM25Index` et `HybridSearch` écrivent par `console.log` : sur stdout, ils casseraient le JSON.
+      const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      const code = await runCli([
+        'rag-benchmark',
+        '--corpus',
+        corpusPath,
+        '--queries',
+        queriesPath,
+        '--retriever',
+        retriever,
+      ]);
+      expect(code).toBe(0);
+      expect(log).not.toHaveBeenCalled();
+      if (retriever === 'pdf-lexical') expect(error).toHaveBeenCalled();
+      log.mockRestore();
+      error.mockRestore();
+      const parsed = JSON.parse(stdout()) as {
+        retriever: string;
+        queryCount: number;
+        recall: Record<string, number>;
+        hitRate: Record<string, number>;
+        perQuery: Array<{ queryId: string; relevantCount: number }>;
+      };
+      expect(parsed.retriever).toBe(retriever);
+      expect(parsed.queryCount).toBe(queries.length);
+      expect(Object.keys(parsed.recall)).toEqual(['1', '3', '5', '10']);
+      expect(Object.keys(parsed.hitRate)).toEqual(['1', '3', '5', '10']);
+      expect(parsed.perQuery.map((q) => q.queryId)).toEqual(queries.map((q) => q.id));
+    }
+  });
+
+  it('rag-benchmark refuse un retriever inconnu et nomme les deux', async () => {
+    const code = await runCli([
+      'rag-benchmark',
+      '--corpus',
+      'c.json',
+      '--queries',
+      'q.json',
+      '--retriever',
+      'dense',
+    ]);
+    expect(code).toBe(2);
+    expect(stderr()).toMatch(/bm25, pdf-lexical/);
   });
 
   it('rag-benchmark missing flags returns usage error 2', async () => {

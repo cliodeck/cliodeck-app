@@ -40,7 +40,7 @@ Usage:
   cliodeck hints set      --workspace <path> [--file path | content]
   cliodeck import-cliobrain <workspace> [--overwrite] [--name <label>]
   cliodeck rag-benchmark   --corpus <docs.json> --queries <queries.json>
-                            [--retriever bm25] [--topK 10]
+                            [--retriever bm25|pdf-lexical] [--topK 10]
 `;
 
 /**

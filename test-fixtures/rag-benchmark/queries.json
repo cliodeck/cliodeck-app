@@ -1,0 +1,15 @@
+[
+  { "id": "fr-liege", "cas": "mot accentué", "text": "Liège", "relevant": ["liege-1", "liege-2"] },
+  { "id": "fr-liege-sans-accent", "cas": "mot accentué, tapé sans accent", "text": "Liege", "relevant": ["liege-1", "liege-2"] },
+  { "id": "fr-etat", "cas": "mot accentué parmi des mots vides", "text": "réforme de l'État", "relevant": ["etat-1"] },
+  { "id": "fr-revolution", "cas": "mots accentués", "text": "Révolution française", "relevant": ["revolution-1"] },
+  { "id": "fr-cia", "cas": "sigle face à une sous-chaîne (sociale, négociations…), mots vides", "text": "Le rôle de la CIA en 1954", "relevant": ["guatemala-1", "guatemala-2"] },
+  { "id": "fr-grenelle", "cas": "témoin sans accent", "text": "accords de Grenelle", "relevant": ["social-1"] },
+  { "id": "fr-verdun", "cas": "témoin sans accent", "text": "Verdun 1916", "relevant": ["guerre-1"] },
+  { "id": "de-zurich", "cas": "mot accentué", "text": "Zürich", "relevant": ["schweiz-1"] },
+  { "id": "de-zurich-ohne-umlaut", "cas": "mot accentué, tapé sans accent", "text": "Zurich", "relevant": ["schweiz-1"] },
+  { "id": "de-oesterreich", "cas": "mot accentué", "text": "Österreich", "relevant": ["oesterreich-1"] },
+  { "id": "de-grossbritannien", "cas": "ß", "text": "Großbritannien", "relevant": ["oesterreich-2"] },
+  { "id": "de-gewerkschaften", "cas": "témoin sans accent", "text": "Gewerkschaften Achtstundentag", "relevant": ["arbeit-1"] },
+  { "id": "de-mauer", "cas": "témoin sans accent", "text": "Berliner Mauer", "relevant": ["arbeit-2"] }
+]

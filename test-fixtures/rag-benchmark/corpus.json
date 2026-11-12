@@ -1,0 +1,71 @@
+[
+  {
+    "id": "liege",
+    "chunks": [
+      { "id": "liege-1", "content": "En 1890, le congrès socialiste réuni à Liège adopte la journée de huit heures comme revendication commune." },
+      { "id": "liege-2", "content": "Les délégués wallons quittent Liège après trois jours de débats sur le suffrage universel." }
+    ]
+  },
+  {
+    "id": "etat",
+    "chunks": [
+      { "id": "etat-1", "content": "La réforme de l'État engagée en 1945 crée l'École nationale d'administration." },
+      { "id": "etat-2", "content": "Le chef de l'État promulgue la Constitution du 4 octobre 1958." }
+    ]
+  },
+  {
+    "id": "revolution",
+    "chunks": [
+      { "id": "revolution-1", "content": "La Révolution française abolit les privilèges dans la nuit du 4 août 1789." }
+    ]
+  },
+  {
+    "id": "guatemala",
+    "chunks": [
+      { "id": "guatemala-1", "content": "En 1954, la CIA organise le renversement du président guatémaltèque Árbenz." },
+      { "id": "guatemala-2", "content": "Le rôle de l'agence de renseignement américaine dans le coup de juin 1954 reste discuté." }
+    ]
+  },
+  {
+    "id": "social",
+    "chunks": [
+      { "id": "social-1", "content": "Les accords de Grenelle, en mai 1968, concluent les négociations sociales entre syndicats et patronat." },
+      { "id": "social-2", "content": "La loi de 1901 sur les associations garantit la liberté de se réunir sans autorisation préalable." },
+      { "id": "social-3", "content": "Les ordonnances de 1945 fondent la Sécurité sociale et généralisent les assurances sociales." },
+      { "id": "social-4", "content": "Les négociations de l'hôtel Matignon, en juin 1936, ouvrent la voie aux congés payés." },
+      { "id": "social-5", "content": "Les historiens spécialistes de la protection sociale ont longtemps négligé les mutuelles." },
+      { "id": "social-6", "content": "Le tribunal de commerce tranche les litiges entre négociants de la place de Lyon." },
+      { "id": "social-7", "content": "La réforme judiciaire de 1958 supprime les justices de paix." },
+      { "id": "social-8", "content": "Le conseil provincial de Namur vote le budget de la voirie." },
+      { "id": "social-9", "content": "La politique commerciale de la Troisième République revient au protectionnisme avec le tarif Méline." }
+    ]
+  },
+  {
+    "id": "guerre",
+    "chunks": [
+      { "id": "guerre-1", "content": "La bataille de Verdun, de février à décembre 1916, coûte plus de 300 000 morts." },
+      { "id": "guerre-2", "content": "Les mutineries de 1917 touchent une partie de l'armée française après l'offensive Nivelle." }
+    ]
+  },
+  {
+    "id": "schweiz",
+    "chunks": [
+      { "id": "schweiz-1", "content": "Der Landesstreik von 1918 legte Zürich und die ganze Schweiz für drei Tage lahm." },
+      { "id": "schweiz-2", "content": "Die Neutralität der Schweiz wurde im Wiener Kongress von 1815 anerkannt." }
+    ]
+  },
+  {
+    "id": "oesterreich",
+    "chunks": [
+      { "id": "oesterreich-1", "content": "Nach dem Zusammenbruch der Monarchie entstand 1918 die Republik Österreich." },
+      { "id": "oesterreich-2", "content": "Großbritannien garantierte 1839 die Unabhängigkeit Belgiens." }
+    ]
+  },
+  {
+    "id": "arbeit",
+    "chunks": [
+      { "id": "arbeit-1", "content": "Die Gewerkschaften forderten seit 1890 den Achtstundentag." },
+      { "id": "arbeit-2", "content": "Der Bau der Berliner Mauer begann am 13. August 1961." }
+    ]
+  }
+]

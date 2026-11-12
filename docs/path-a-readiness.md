@@ -1,6 +1,6 @@
 # Path A readiness — RAG benchmark gate
 
-Status: scaffolded — 2026-04-14 | updated 2026-07-25
+Status: scaffolded — 2026-04-14 | updated 2026-11-12
 
 ## What Path A is
 
@@ -29,7 +29,9 @@ proves equivalent retrieval quality before vs after.
 - **`inMemoryBM25Retriever`** ([source](../backend/core/rag/retrievers/in-memory-bm25.ts))
   — deterministic, dependency-free Okapi BM25 baseline. Useful for
   validating the harness end-to-end and for measuring how much hybrid
-  search adds on top of pure lexical retrieval.
+  search adds on top of pure lexical retrieval. Attention : c'est sa propre
+  implémentation, avec son propre tokeniseur ; elle ne dit rien de la
+  recherche de l'app (voir `pdf-lexical`, plus bas).
 
 What is **not** shipped: a real `EnhancedVectorStoreRetriever` adapter.
 That requires wiring an embedding provider through the CLI (Ollama or a
@@ -93,11 +95,25 @@ Build first (the CLI lives in `dist/scripts/cliodeck-cli.js` after build):
 npm run build
 node dist/scripts/cliodeck-cli.js rag-benchmark \
   --corpus path/to/corpus.json \
-  --queries path/to/queries.json
+  --queries path/to/queries.json \
+  [--retriever bm25|pdf-lexical]
 ```
 
-Output is JSON: `recall@K`, `mrr`, `latencyMs.p50/p95/mean`, plus a
-per-query breakdown (so you can see which queries the retriever misses).
+Output is JSON: `recall@K`, `hitRate@K`, `mrr`, `latencyMs.p50/p95/mean`,
+plus a per-query breakdown (so you can see which queries the retriever
+misses: `firstRelevantRank`, `relevantFound` / `relevantCount`).
+
+- `recall@K` — **rappel** : pour chaque question, la part de ses extraits
+  pertinents rendus dans le top K, moyennée sur les questions.
+- `hitRate@K` — **taux de succès** : la part des questions qui ont au moins
+  un pertinent dans le top K.
+
+> **Les `recall` relevés avant le 2026-11-12 ne se comparent pas à ceux
+> d'après** (S04-1-20, L07-23). Jusque-là, `recall` publiait le taux de
+> succès : une question à trois pertinents dont un seul rendu comptait 1, au
+> lieu d'un tiers. Ce chiffre s'appelle désormais `hitRate` ; un relevé
+> antérieur se compare sur lui. Rien n'était calibré sur l'ancien `recall`,
+> ni seuil ni référence.
 
 ## What "ready for Path A" means
 
@@ -123,6 +139,97 @@ shipping.
 > results and left Tropy unfiltered. The benchmark below is still worth
 > building, now to calibrate per-corpus thresholds rather than to gate a
 > schema migration.
+
+## Banc de contrôle et relevé de référence (2026-11-12, L07-23)
+
+### Le retriever `pdf-lexical`
+
+[`pdf-lexical.ts`](../backend/core/rag/retrievers/pdf-lexical.ts) mesure la
+**part lexicale de la recherche des PDF, par le code de l'app** : le vrai
+`BM25Index` indexe et cherche, `HybridSearch` fusionne (bonus « mot-clé
+exact » compris) et coupe à `topK`, puis le tri suit la pertinence publiée,
+comme `SecondaryRetriever`. Le retriever `bm25` du banc, lui, a son propre
+tokeniseur : un correctif de `BM25Index` ou de `HybridSearch` ne s'y voit pas.
+
+**Aucun embedding** : la jambe dense est un index HNSW vide, en mémoire, qui ne
+rend rien. Ni Ollama, ni modèle embarqué, ni service en ligne ; le relevé est
+reproductible. Ce que le banc ne voit donc pas : un extrait que seul le sens
+rapproche de la question, l'expansion FR → EN de `SecondaryRetriever`, le
+seuil de pertinence (il ne coupe rien de ce que classe BM25).
+
+### Le jeu de contrôle
+
+[`test-fixtures/rag-benchmark/`](../test-fixtures/rag-benchmark/) :
+`corpus.json` (24 extraits courts) et `queries.json` (13 questions, 7 en
+français, 6 en allemand). Chaque question dit ce qu'elle vise (`cas`) : mots
+accentués (« Liège », « Zürich », « Österreich », « État », « ß »), les mêmes
+tapés sans accent, un sigle face à des sous-chaînes (« CIA » et
+« socialiste », « négociations », « judiciaire »…), des mots vides
+(« le », « de », « la »), et quatre témoins sans accent.
+
+**Ce n'est pas l'étalon de l'historien** qu'attend la condition 1 ci-dessus
+(au moins 30 questions jugées par un historien sur un corpus réel). La
+pertinence y est posée **par construction** : chaque extrait a été écrit pour
+les questions qui le désignent. Ce jeu sert à voir ce que change un correctif
+de la recherche lexicale — d'abord L07-3, qui le refera après son correctif —,
+pas à juger la qualité de la recherche ni à régler un seuil.
+
+### Relevé de référence
+
+`main` à `f6f0f05` plus L07-23, qui ne touche ni `BM25Index` ni
+`HybridSearch` : c'est la recherche lexicale d'avant L07-3.
+
+```bash
+npm run build:main
+for r in bm25 pdf-lexical; do
+  bin/cliodeck rag-benchmark --retriever $r \
+    --corpus test-fixtures/rag-benchmark/corpus.json \
+    --queries test-fixtures/rag-benchmark/queries.json
+done
+```
+
+| retriever     | recall@1 | recall@10 | hitRate@1 | hitRate@10 | MRR   |
+|---------------|----------|-----------|-----------|------------|-------|
+| `bm25`        | 0,769    | 0,846     | 0,846     | 0,846      | 0,846 |
+| `pdf-lexical` | 0,346    | 0,423     | 0,385     | 0,462      | 0,393 |
+
+Par question (`perQuery` : rang du premier pertinent, pertinents rendus dans
+le top 10) :
+
+| question                | cas                             | `bm25`  | `pdf-lexical` |
+|-------------------------|---------------------------------|---------|---------------|
+| `fr-liege`              | accent                          | 1 · 2/2 | — · 0/2       |
+| `fr-liege-sans-accent`  | accent tapé sans accent         | — · 0/2 | — · 0/2       |
+| `fr-etat`               | accent parmi des mots vides     | 1 · 1/1 | 9 · 1/1       |
+| `fr-revolution`         | accents                         | 1 · 1/1 | — · 0/1       |
+| `fr-cia`                | sigle, sous-chaînes, mots vides | 1 · 2/2 | 1 · 1/2       |
+| `fr-grenelle`           | témoin                          | 1 · 1/1 | 1 · 1/1       |
+| `fr-verdun`             | témoin                          | 1 · 1/1 | 1 · 1/1       |
+| `de-zurich`             | accent                          | 1 · 1/1 | — · 0/1       |
+| `de-zurich-ohne-umlaut` | accent tapé sans accent         | — · 0/1 | — · 0/1       |
+| `de-oesterreich`        | accent                          | 1 · 1/1 | — · 0/1       |
+| `de-grossbritannien`    | ß                               | 1 · 1/1 | — · 0/1       |
+| `de-gewerkschaften`     | témoin                          | 1 · 1/1 | 1 · 1/1       |
+| `de-mauer`              | témoin                          | 1 · 1/1 | 1 · 1/1       |
+
+Ce que le relevé montre de la recherche lexicale de l'app, avant L07-3 :
+
+- **Aucun mot accentué n'est trouvé** (`fr-liege`, `fr-revolution`,
+  `de-zurich`, `de-oesterreich`, `de-grossbritannien`) : le tokeniseur de
+  `natural` coupe les mots sur chaque lettre accentuée à l'indexation
+  (« Liège » devient « li » et « ge »), alors que la requête garde le mot
+  entier. `fr-etat` n'est retrouvé qu'au rang 9, par le seul mot vide « de ».
+- **Le sigle est battu par des sous-chaînes** (`fr-cia`) : `guatemala-2`, 2e
+  en BM25 seul, sort du top 10 après la fusion, où neuf extraits qui
+  contiennent « cia » (« socialiste », « provincial », « négociants »,
+  « judiciaire »…) reçoivent le bonus « mot-clé exact ». Ils ne sont
+  candidats que par les mots vides de la question (« le », « de », « la »,
+  « en »). Le taux de succès ne le voit pas (1) ; le rappel, si (1/2).
+- Les quatre témoins sont trouvés au rang 1 : le banc ne compte pas pour un
+  défaut ce qui n'en est pas un.
+- Le `bm25` du banc trouve les mots accentués : il ne mesurait pas la
+  recherche de l'app. Ni l'un ni l'autre ne trouve un mot tapé sans son
+  accent (« Liege », « Zurich »).
 
 ## Recent related work (2026-05-07)
 
