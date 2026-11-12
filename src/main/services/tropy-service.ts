@@ -10,7 +10,8 @@ import { PopplerNotFoundError } from '../../../backend/integrations/tropy/PDFCon
 import { PrimarySourcesVectorStore, PrimarySourceChunk, PrimarySourceDocument, PrimarySourceSearchResult, PrimarySourcesStatistics, TROPY_CHUNKS_VERSION } from '../../../backend/core/vector-store/PrimarySourcesVectorStore.js';
 import type { NERService } from '../../../backend/core/ner/NERService.js';
 import type { EntityStatistics, ExtractedEntity } from '../../../backend/types/entity.js';
-import type { TropyReindexStatus } from '../../../backend/types/tropy-reindex.js';
+import type { TropyReembedProposal, TropyReindexStatus } from '../../../backend/types/tropy-reindex.js';
+import { EmbeddingSpaceMismatchError } from '../../../backend/core/vector-store/embedding-space.js';
 import { ProjectChangedError, type ProjectHandle } from '../../../backend/types/project-handle.js';
 
 // Chunking optimization modules
@@ -57,8 +58,19 @@ export interface TropySearchResult {
   error?: string;
 }
 
-/** Pourquoi une source n'a pas été réindexée, à dire par le renderer. */
-export type ReindexFailure = 'source-not-found' | 'no-embedding-provider' | 'embedding-failed';
+/**
+ * Pourquoi une source n'a pas été réindexée, à dire par le renderer.
+ * `embedding-space-changed` : le modèle d'embeddings a changé depuis
+ * l'indexation des archives, et rien n'a été écrit (L06-9).
+ */
+export type ReindexFailure = 'source-not-found' | 'no-embedding-provider' | 'embedding-failed' | 'embedding-space-changed';
+
+/** Ce que fait le geste « Réindexer » de la proposition (Q29). */
+export interface ReembedRequest {
+  started: boolean;
+  /** Sans fournisseur d'embeddings, pas de dimension à viser ; ou plus rien à refaire. */
+  reason?: 'no-embedding-provider' | 'nothing-to-reembed';
+}
 
 /** Ce que le découpage d'une source lit : son en-tête, son texte, ses notes. */
 type IndexableSource = Pick<
@@ -143,7 +155,13 @@ class TropyService {
    * d'un projet quitté qui finit de s'arrêter.
    */
   private reindexStatus: TropyReindexStatus = { phase: 'idle' };
-  private reindexRuns = new Set<Promise<void>>();
+  /** Chaque passe, avec le magasin qu'elle refait : une passe confirmée attend celles du sien. */
+  private reindexRuns = new Map<Promise<void>, PrimarySourcesVectorStore>();
+  /**
+   * Le magasin dont la réindexation pour un nouveau modèle est confirmée (Q29), le temps de sa
+   * passe : elle ne se propose plus, son message la dit.
+   */
+  private reembedPending: PrimarySourcesVectorStore | null = null;
   /** Les synchros en cours : la réindexation complète leur cède le magasin. */
   private syncsRunning = 0;
   private syncWaiters: Array<() => void> = [];
@@ -246,6 +264,7 @@ class TropyService {
     const registries = [this.registry, this.llmRegistry];
     this.vectorStore = null;
     this.reindexStatus = { phase: 'idle' };
+    this.reembedPending = null;
     this.tropySync = null;
     this.watcher = null;
     this.ocrPipeline = null;
@@ -308,8 +327,11 @@ class TropyService {
     } catch (e) {
       console.warn('[tropy-service] failed to rebuild provider registry:', e);
       await this.disposePreviousRegistry();
+      if (this.vectorStore) this.announceReembedProposal(this.vectorStore);
       return;
     }
+    // Un autre modèle d'embeddings : les archives à réindexer ne sont plus les mêmes (Q29).
+    if (embeddingChanged && this.vectorStore) this.announceReembedProposal(this.vectorStore);
     await Promise.all(previous.map((r) => r?.dispose().catch(() => undefined)));
   }
 
@@ -574,6 +596,8 @@ class TropyService {
 
     console.log(`📐 [TROPY-SERVICE] Processing ${sourcesToProcess.length} sources for embeddings...`);
 
+    let spaceChanged: EmbeddingSpaceMismatchError | null = null;
+    let notTried = 0;
     for (let i = 0; i < sourcesToProcess.length; i++) {
       const source = sourcesToProcess[i];
 
@@ -595,11 +619,32 @@ class TropyService {
         chunksCreated += outcome.chunks;
         sourcesProcessed++;
       } catch (error) {
+        // Le modèle d'embeddings a changé depuis l'indexation des archives (L06-9) : rien n'a été
+        // écrit, et chaque source suivante serait embarquée pour être refusée de même. Elles
+        // attendent la réindexation des archives, proposée dans le panneau (Q29).
+        if (error instanceof EmbeddingSpaceMismatchError) {
+          spaceChanged = error;
+          notTried = sourcesToProcess.length - i - 1;
+          console.warn(`⚠️ [TROPY-SERVICE] ${error.message} : ${notTried + 1} source(s) laissée(s) sans extrait`);
+          break;
+        }
         sourcesFailed++;
         console.error(`❌ [TROPY-SERVICE] Failed to process source ${source.id}:`, error);
       }
     }
 
+    if (spaceChanged) {
+      return {
+        sourcesProcessed,
+        chunksCreated,
+        issue: {
+          code: 'embedding-space-changed',
+          sources: sourcesFailed + notTried + 1,
+          expected: Number(spaceChanged.expected),
+          actual: Number(spaceChanged.actual),
+        },
+      };
+    }
     const issue: TropySyncIssue | undefined =
       sourcesFailed > 0 ? { code: 'embedding-failed', sources: sourcesFailed } : undefined;
     return { sourcesProcessed, chunksCreated, issue };
@@ -1323,7 +1368,11 @@ class TropyService {
     const text = this.indexableText(source);
     const items: Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }> = [];
     for (const chunk of this.prepareSourceChunks(source, text)) {
-      items.push({ chunk, embedding: await this.embedOne(chunk.content) });
+      const embedding = await this.embedOne(chunk.content);
+      // Dès le premier vecteur, le refus d'un corpus d'une autre dimension (L06-9) : la source
+      // s'embarquait sinon en entier, pour être refusée à l'écriture (`replaceSourceChunks`).
+      if (items.length === 0) store.checkEmbeddingDimension(embedding.length, source.id);
+      items.push({ chunk, embedding });
     }
 
     // Relire la source puis écrire, sans `await` entre les deux : better-sqlite3
@@ -1382,7 +1431,7 @@ class TropyService {
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
-        code: 'embedding-failed',
+        code: error instanceof EmbeddingSpaceMismatchError ? 'embedding-space-changed' : 'embedding-failed',
       };
     }
   }
@@ -1399,7 +1448,7 @@ class TropyService {
    * ou arrêtées, y compris celle d'un projet quitté.
    */
   async whenFullReindexSettled(): Promise<void> {
-    await Promise.all([...this.reindexRuns]);
+    await Promise.all([...this.reindexRuns.keys()]);
   }
 
   /** La dimension du fournisseur d'embeddings, s'il y en a un et qu'il la connaît. */
@@ -1408,14 +1457,84 @@ class TropyService {
     return dimension && dimension > 0 ? dimension : undefined;
   }
 
-  private startFullReindex(): void {
+  /**
+   * Lance une passe sur le magasin ouvert : celle d'ouverture (H7), ou celle que l'historien a
+   * confirmée après un changement de modèle (`model-change`, Q29). Une passe à la fois par
+   * magasin : la seconde attend la fin de la première. Finie, la proposition a pu changer : le
+   * panneau la relit.
+   */
+  private startFullReindex(cause?: 'model-change'): void {
     const store = this.vectorStore;
     const projectPath = this.projectPath;
     if (!store || !projectPath) return;
-    const run: Promise<void> = this.reindexOutdatedChunks(store, projectPath).finally(() => {
+    const previous = [...this.reindexRuns].filter(([, of]) => of === store).map(([run]) => run);
+    const pass = (): Promise<void> => this.reindexOutdatedChunks(store, projectPath, cause);
+    const started =
+      previous.length === 0
+        ? pass()
+        : Promise.all(previous).then(() => (this.vectorStore === store ? pass() : undefined));
+    const run: Promise<void> = started.finally(() => {
       this.reindexRuns.delete(run);
+      if (cause === 'model-change' && this.reembedPending === store) this.reembedPending = null;
+      this.announceReembedProposal(store);
     });
-    this.reindexRuns.add(run);
+    this.reindexRuns.set(run, store);
+  }
+
+  /**
+   * La réindexation proposée après un changement de modèle d'embeddings (J7, Q29) : les sources
+   * dont des extraits sont à une autre dimension que celle du fournisseur. Les questions du chat,
+   * à la nouvelle, ne peuvent pas comparer leurs vecteurs : elles sortent de la recherche par le
+   * sens. Proposée dans le panneau des sources primaires, jamais faite d'office ; `null` sans
+   * fournisseur (aucune dimension à viser), sans rien à refaire, ou quand la passe confirmée
+   * tourne, que son message dit.
+   */
+  getReembedProposal(): TropyReembedProposal | null {
+    const store = this.vectorStore;
+    const actual = this.embeddingDimension();
+    if (!store || !actual || this.reembedPending === store) return null;
+    const sources = store.listOtherDimensionSources(actual);
+    const expected = store.embeddingDimensions().find((entry) => entry.dimension !== actual)?.dimension;
+    if (sources.length === 0 || expected === undefined) return null;
+    return {
+      sources: sources.length,
+      chunks: sources.reduce((sum, source) => sum + source.chunks, 0),
+      expected,
+      actual,
+    };
+  }
+
+  /**
+   * « Réindexer », confirmé par l'historien (Q29) : la passe de H7, sur les sources d'une autre
+   * dimension que le fournisseur, à la sienne. Source par source, en arrière-plan, dite dans le
+   * panneau et la barre d'état ; transcriptions, notes et métadonnées gardées, Tropy ni relu ni
+   * repassé à l'OCR. Interrompue (projet fermé, app quittée), elle ne reprend pas seule : les
+   * sources restantes sont toujours à l'autre dimension, et la proposition revient.
+   */
+  requestReembed(): ReembedRequest {
+    const store = this.vectorStore;
+    if (!store) return { started: false, reason: 'nothing-to-reembed' };
+    if (this.reembedPending === store) return { started: true };
+    const dimension = this.embeddingDimension();
+    if (!dimension) return { started: false, reason: 'no-embedding-provider' };
+    if (store.listOtherDimensionSources(dimension).length === 0) {
+      return { started: false, reason: 'nothing-to-reembed' };
+    }
+    this.reembedPending = store;
+    this.startFullReindex('model-change');
+    this.announceReembedProposal(store);
+    return { started: true };
+  }
+
+  /**
+   * Dit au renderer que la proposition de réindexation a pu changer, pour le magasin du projet
+   * ouvert : il la relit (`tropy:get-reembed-proposal`), avec le projet qu'il affiche.
+   */
+  private announceReembedProposal(store: PrimarySourcesVectorStore): void {
+    if (this.vectorStore !== store) return;
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send('tropy:reembed-proposal-changed');
+    });
   }
 
   /**
@@ -1466,27 +1585,61 @@ class TropyService {
    * passe. Plus aucune source à refaire, cette reconstruction est dite à
    * l'écran si des extraits manquent à l'index, puis sa fin.
    *
+   * Après un changement de modèle d'embeddings (J7) : les sources dont des
+   * extraits sont à une autre dimension que celle du fournisseur ne sont pas
+   * réembarquées à l'ouverture, qui enverrait tout le corpus au fournisseur
+   * sans geste de l'historien. Elles lui sont proposées
+   * (`getReembedProposal`), et, confirmée (`cause: 'model-change'`, Q29), la
+   * passe les refait par ce même chemin. Elle commence alors par faire passer
+   * l'index à la dimension du fournisseur, par tranches : les points de
+   * l'ancienne ne servent plus aucune question, et les extraits refaits y
+   * entrent au fil de la passe. Interrompue, elle ne reprend pas seule à la
+   * prochaine ouverture : les sources restantes sont toujours à l'autre
+   * dimension, et elle est proposée de nouveau.
+   *
    * Au journal d'usage IA, un lot d'embeddings par source, inscrit dès qu'elle
    * est finie, et lié au projet de la passe : une passe interrompue laisse la
    * trace de ce qu'elle a fait, et un changement de projet n'inscrit rien dans
    * le journal du suivant (`recordBatch` de `usage-journal-service`).
    */
-  private async reindexOutdatedChunks(store: PrimarySourcesVectorStore, projectPath: string): Promise<void> {
+  private async reindexOutdatedChunks(
+    store: PrimarySourcesVectorStore,
+    projectPath: string,
+    cause?: 'model-change'
+  ): Promise<void> {
+    const reembed = cause === 'model-change';
+    const tag = reembed ? { cause } : {};
     try {
-      const outdated = store.listOutdatedChunkSources();
+      // La dimension du fournisseur, celle des questions du chat ; sans fournisseur, celle de l'index.
+      const providerDimension = this.embeddingDimension();
+      const dimension = providerDimension ?? store.getIndexStats().hnswDimension;
+      const remainingSources = (): Array<{ id: string; chunks: number }> =>
+        reembed ? store.listOtherDimensionSources(dimension) : store.listOutdatedChunkSources(dimension);
+      const stillToDo = (id: string): boolean =>
+        reembed ? store.hasOtherDimensionChunks(id, dimension) : store.hasOutdatedChunks(id, dimension);
+      const outdated = remainingSources();
       const total = outdated.length;
       const chunks = outdated.reduce((sum, source) => sum + source.chunks, 0);
+      const running = (done: number, waitingForSync: boolean): TropyReindexStatus => ({
+        phase: 'running',
+        ...tag,
+        done,
+        total,
+        chunks,
+        waitingForSync,
+      });
 
       // Contrôlé avant la première attente : la reconstruction en cours retient
       // la recherche du chat d'en lancer une autre. À la dimension du
       // fournisseur d'embeddings, celle des questions du chat : après un
       // changement de modèle, l'index relu peut être de l'ancienne alors que
       // des extraits sont déjà refaits à la nouvelle (app quittée en pleine
-      // passe).
-      const index = store.checkHnswIndex(this.embeddingDimension());
-      if (index.needsRebuild) {
+      // passe). La passe confirmée y fait passer l'index dans tous les cas.
+      const index = store.checkHnswIndex(providerDimension);
+      const target = reembed && total > 0 ? dimension : index.dimension;
+      if (index.needsRebuild || target !== store.getIndexStats().hnswDimension) {
         console.log(
-          `🔨 [TROPY-SERVICE] Index des sources primaires en retard sur la base (${index.missing} extrait(s) absent(s), ${index.stale} point(s) inutile(s)) : reconstruction par tranches, dimension ${index.dimension}`
+          `🔨 [TROPY-SERVICE] Index des sources primaires en retard sur la base (${index.missing} extrait(s) absent(s), ${index.stale} point(s) inutile(s)) : reconstruction par tranches, dimension ${target}`
         );
         // Plus aucune source à refaire, mais des extraits manquent à l'index
         // (app quittée pendant la reconstruction finale, ou après une
@@ -1496,11 +1649,11 @@ class TropyService {
         // recherche : leur compactage se tait.
         const announced = total === 0 && index.missing > 0;
         if (total > 0) {
-          this.reportReindex(store, { phase: 'running', done: 0, total, chunks, waitingForSync: false });
+          this.reportReindex(store, running(0, false));
         } else if (announced) {
           this.reportReindex(store, { phase: 'rebuilding-index', missing: index.missing });
         }
-        const rebuild = store.rebuildIndexesInSlices(undefined, index.dimension);
+        const rebuild = store.rebuildIndexesInSlices(undefined, target);
         this.reindexStep = rebuild;
         if (!(await rebuild) || this.vectorStore !== store) return;
         if (announced) {
@@ -1512,7 +1665,9 @@ class TropyService {
 
       if (total === 0) return;
       console.log(
-        `🔁 [TROPY-SERVICE] Réindexation complète : ${total} source(s), ${chunks} extrait(s) d'avant la version ${TROPY_CHUNKS_VERSION}`
+        reembed
+          ? `🔁 [TROPY-SERVICE] Réindexation pour le nouveau modèle : ${total} source(s), ${chunks} extrait(s) à une autre dimension que ${dimension}`
+          : `🔁 [TROPY-SERVICE] Réindexation complète : ${total} source(s), ${chunks} extrait(s) d'avant la version ${TROPY_CHUNKS_VERSION}`
       );
 
       let done = 0;
@@ -1525,22 +1680,26 @@ class TropyService {
       for (let i = 0; i < outdated.length; ) {
         const { id } = outdated[i];
         while (this.syncsRunning > 0 && this.vectorStore === store) {
-          this.reportReindex(store, { phase: 'running', done, total, chunks, waitingForSync: true });
+          this.reportReindex(store, running(done, true));
           await new Promise<void>((resume) => this.syncWaiters.push(resume));
         }
-        // Projet fermé ou changé : la suite reprendra à sa prochaine ouverture.
+        // Projet fermé ou changé : la suite reprendra à sa prochaine ouverture,
+        // ou, pour un changement de modèle, y sera proposée de nouveau.
         if (this.vectorStore !== store) return;
         if (!this.embedding) {
           stopped = 'no-embedding-provider';
           break;
         }
-        this.reportReindex(store, { phase: 'running', done, total, chunks, waitingForSync: false });
+        this.reportReindex(store, running(done, false));
 
         // Refaite ou vidée depuis par la synchro ou une transcription : plus rien à faire ici.
         const source = store.getSource(id);
-        if (source && store.hasOutdatedChunks(id)) {
-          if (!source.transcription?.trim()) {
-            // Comme la synchro : sans transcription, rien à embarquer.
+        if (source && stillToDo(id)) {
+          if (!reembed && !source.transcription?.trim()) {
+            // Comme la synchro : sans transcription, rien à embarquer ; ses
+            // extraits sont gardés. La passe confirmée refait toutes ses
+            // sources : des extraits d'une autre dimension ne servent plus la
+            // recherche par le sens, transcription ou non.
             store.markChunksCurrent(id);
           } else {
             const step = runWithJournalContext({ workspaceRoot: projectPath }, () =>
@@ -1552,6 +1711,14 @@ class TropyService {
             } catch (error) {
               // Son magasin fermé pendant l'embarquement : ce n'est pas une panne.
               if (this.vectorStore !== store) return;
+              // Le modèle a changé pendant la passe : les sources restantes ne sont plus à la
+              // dimension du fournisseur, et sa nouvelle réindexation est proposée (Q29). Ni
+              // second essai, ni panne à dire.
+              if (error instanceof EmbeddingSpaceMismatchError) {
+                console.warn(`⚠️ [TROPY-SERVICE] Réindexation arrêtée, le modèle d'embeddings a changé : ${error.message}`);
+                this.reportReindex(store, { phase: 'idle' });
+                return;
+              }
               if (!retried) {
                 retried = true;
                 console.warn(`⚠️ [TROPY-SERVICE] Réindexation complète : source ${id} en échec, nouvel essai`, error);
@@ -1573,14 +1740,14 @@ class TropyService {
       if (stopped) {
         // Dit avant la reconstruction : la passe est arrêtée, et la
         // reconstruction ne change rien à ce qui reste à faire.
-        const remaining = store.listOutdatedChunkSources().length;
-        this.reportReindex(store, { phase: 'stopped', reason: stopped, total, remaining });
+        const remaining = remainingSources().length;
+        this.reportReindex(store, { phase: 'stopped', ...tag, reason: stopped, total, remaining });
         console.warn(`⚠️ [TROPY-SERVICE] Réindexation complète arrêtée (${stopped}) : ${remaining} source(s) restent à refaire`);
       } else if (written > 0) {
         // Toutes les sources sont faites : pendant la reconstruction finale,
         // une centaine de secondes sur 40 000 extraits, l'écran ne dit pas
         // qu'il en reste une.
-        this.reportReindex(store, { phase: 'running', done, total, chunks, waitingForSync: false });
+        this.reportReindex(store, running(done, false));
       }
       if (written > 0) {
         // Par tranches : d'un bloc, une centaine de secondes de gel du processus
@@ -1593,7 +1760,7 @@ class TropyService {
         if (!(await rebuild) || this.vectorStore !== store) return;
       }
       if (!stopped) {
-        this.reportReindex(store, { phase: 'done', total });
+        this.reportReindex(store, { phase: 'done', ...tag, total });
         // Dit une fois : un panneau ouvert plus tard n'a plus rien à annoncer.
         this.reindexStatus = { phase: 'idle' };
         console.log(`✅ [TROPY-SERVICE] Réindexation complète finie : ${total} source(s)`);
@@ -1623,6 +1790,8 @@ class TropyService {
       // Plus de projet lié : sa surveillance s'arrête aussi (S08-2-9).
       this.stopWatching();
       this.currentTPYPath = null;
+      // Plus d'extrait : plus rien à proposer de réindexer (Q29).
+      this.announceReembedProposal(this.vectorStore);
       console.log('🗑️ Purged tropy_* tables in brain.db');
 
       return { success: true };

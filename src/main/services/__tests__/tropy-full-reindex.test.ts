@@ -130,6 +130,7 @@ const { setBatchSink, setInferenceSink } = await import('../../../../backend/cor
 const { PrimarySourcesVectorStore, TROPY_CHUNKS_VERSION } = await import(
   '../../../../backend/core/vector-store/PrimarySourcesVectorStore.js'
 );
+const { TropySync } = await import('../../../../backend/integrations/tropy/TropySync.js');
 
 // MARK: - Données
 
@@ -778,96 +779,187 @@ describe.skipIf(!sqliteAvailable)('réindexation complète : une interruption ne
 
 // MARK: - Modèle d'embeddings changé
 
-describe.skipIf(!sqliteAvailable)('réindexation complète : modèle d’embeddings changé de dimension (1024 → 768)', () => {
+describe.skipIf(!sqliteAvailable)('modèle d’embeddings changé de dimension (1024 → 768) : la réindexation est proposée, jamais faite d’office (J7, Q29)', () => {
   /**
-   * La base embarquée à 1024 dimensions (mxbai, mistral-embed), le modèle passé à 768 (nomic) :
-   * la passe refait les extraits à la nouvelle dimension, et jusqu'à sa fin la base en mêle deux.
+   * La base embarquée à 1024 dimensions (mxbai, mistral-embed), le modèle passé à 768 (nomic).
+   * `before` : extraits d'avant la version courante, que la passe d'ouverture (H7) refait d'office
+   * quand ils sont à la dimension du fournisseur. À une autre, elle les réembarquait aussi, sans
+   * geste, au prix de toutes les requêtes au fournisseur sur tout le corpus.
    */
-  async function baseAt1024ThenModelAt768(): Promise<void> {
+  async function baseAt1024ThenModelAt768(before = true): Promise<void> {
     provider.dimension = 1024;
     await linkSyncAndClose();
     compactIndex();
-    makeBaseFromBefore();
+    if (before) makeBaseFromBefore();
     provider.dimension = 768;
+    provider.texts = [];
   }
 
-  it('pendant la passe, puis après son arrêt, les questions du chat ne reconstruisent jamais l’index d’un bloc, et la source refaite est trouvée par la recherche dense ; la passe suivante finit', async () => {
+  /** Les dimensions des vecteurs en base, sans répétition. */
+  function dimensionsInBase(): number[] {
+    return query<{ d: number }>('SELECT DISTINCT length(embedding) / 4 AS d FROM tropy_chunks ORDER BY d').map((r) => r.d);
+  }
+
+  const totalChunks = (): number => query<{ n: number }>('SELECT COUNT(*) AS n FROM tropy_chunks')[0].n;
+
+  /** Les signaux « la proposition a changé » envoyés au renderer depuis `since`. */
+  function proposalSignals(since = 0): number {
+    return sent.slice(since).filter((e) => e.channel === 'tropy:reembed-proposal-changed').length;
+  }
+
+  it('projet rouvert, extraits d’avant en 1024, modèle en 768 : rien n’est réembarqué sans geste, et la réindexation est proposée', async () => {
     await baseAt1024ThenModelAt768();
     const ids = [ARRETE, LETTRE_X, RAPPORT].map(sourceId);
-    // D'un bloc, une centaine de secondes de gel du processus principal sur 40 000 extraits, à
-    // chaque question tant que 90 % des extraits ne sont pas refaits.
-    const blockingRebuild = vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildAllIndexes');
-    const ask = async (): Promise<void> => {
-      for (let q = 0; q < 3; q++) {
-        await tropyService.search('maire interdit les réunions publiques cours Saint-Pierre', { topK: 3 });
-      }
-    };
+    const before = ids.map((id) => chunks(id));
 
-    // L'arrêté est refait, puis la passe s'arrête un moment sur la lettre.
-    const gate = gateFirstEmbed(LETTRE_X);
     await tropyService.init(projectDir);
-    let arrete: Array<{ id: string; content: string }> = [];
-    try {
-      await gate.reached;
-      await ask();
-      arrete = chunks(ids[0]);
-      for (const c of arrete) expect(denseIds(c.content)).toContain(c.id);
-      expect(blockingRebuild).not.toHaveBeenCalled();
-    } finally {
-      // Puis Ollama tombe sur la lettre : la passe s'arrête. Même en échec : une passe suspendue
-      // ferait attendre les tests suivants.
-      provider.mode = 'fail-on';
-      provider.failOn = LETTRE_X;
-      gate.open();
-    }
-    await vi.waitFor(() => expect(reindexEvents().at(-1)).toMatchObject({ phase: 'stopped' }), WAIT);
-    await tropyService.whenFullReindexSettled();
-    await ask();
-    for (const c of arrete) expect(denseIds(c.content)).toContain(c.id);
-    expect(blockingRebuild).not.toHaveBeenCalled();
-    await tropyService.close();
-
-    // Ollama relancé, projet rouvert : la passe finit, à la nouvelle dimension.
-    await setProvider('ok');
-    await tropyService.init(projectDir);
-    await vi.waitFor(() => expect(reindexEvents().at(-1)?.phase).toMatch(/done|stopped/), WAIT);
     await tropyService.whenFullReindexSettled();
 
-    expect(reindexEvents().at(-1)).toEqual({ phase: 'done', total: 2 });
-    expect(embeddedSequence(provider.texts)).toEqual(['lettre', 'rapport']);
-    expect(chunks(ids[0])).toEqual(arrete);
-    for (const c of ids.flatMap((id) => chunks(id))) expect(denseIds(c.content)).toContain(c.id);
-    expect(blockingRebuild).not.toHaveBeenCalled();
+    expect(provider.texts).toEqual([]);
+    expect(reindexEvents()).toEqual([]);
+    expect(ids.map((id) => chunks(id))).toEqual(before);
+    expect(dimensionsInBase()).toEqual([1024]);
+    expect(tropyService.getReembedProposal()).toEqual({ sources: 3, chunks: totalChunks(), expected: 1024, actual: 768 });
+    expect(proposalSignals()).toBeGreaterThan(0);
   });
 
-  it('l’app quittée en pleine passe : à la relance, l’index relu, de l’ancienne dimension, est refait à la nouvelle avant la suite, et la source déjà refaite est trouvée par la recherche dense', async () => {
+  it('témoin : extraits de la version courante en 1024, modèle en 768 : rien sans geste non plus, et la même proposition', async () => {
+    await baseAt1024ThenModelAt768(false);
+
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+
+    expect(provider.texts).toEqual([]);
+    expect(reindexEvents()).toEqual([]);
+    expect(tropyService.getReembedProposal()).toEqual({ sources: 3, chunks: totalChunks(), expected: 1024, actual: 768 });
+  });
+
+  it('le geste : les sources sont réembarquées en 768 par le chemin de H7, transcriptions gardées et Tropy non relu, et l’écran dit une réindexation pour le nouveau modèle', async () => {
+    await baseAt1024ThenModelAt768();
+    const ids = [ARRETE, LETTRE_X, RAPPORT].map(sourceId);
+    const rowsBefore = historianRows();
+    const chunksBefore = totalChunks();
+    const blockingRebuild = vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildAllIndexes');
+    // Ni lecture du .tpy ni OCR : seuls les extraits et leurs vecteurs changent.
+    const tropyRead = vi.spyOn(TropySync.prototype, 'sync');
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+
+    expect(await tropyService.requestReembed()).toEqual({ started: true });
+    // La passe en cours se dit par son propre message : plus rien n'est proposé.
+    expect(tropyService.getReembedProposal()).toBeNull();
+    await vi.waitFor(() => expect(reindexEvents().at(-1)).toMatchObject({ phase: 'done' }), WAIT);
+    await tropyService.whenFullReindexSettled();
+
+    expect(reindexEvents()[0]).toEqual({
+      phase: 'running',
+      cause: 'model-change',
+      done: 0,
+      total: 3,
+      chunks: chunksBefore,
+      waitingForSync: false,
+    });
+    expect(reindexEvents().at(-1)).toEqual({ phase: 'done', cause: 'model-change', total: 3 });
+    expect(dimensionsInBase()).toEqual([768]);
+    expect(ids.map(versionOf)).toEqual([TROPY_CHUNKS_VERSION, TROPY_CHUNKS_VERSION, TROPY_CHUNKS_VERSION]);
+    expect(historianRows()).toEqual(rowsBefore);
+    for (const c of ids.flatMap((id) => chunks(id))) expect(denseIds(c.content)).toContain(c.id);
+    expect(blockingRebuild).not.toHaveBeenCalled();
+    expect(tropyRead).not.toHaveBeenCalled();
+    expect(tropyService.getReembedProposal()).toBeNull();
+    // La question du chat, en 768, trouve de nouveau les archives.
+    const results = await tropyService.search('maire interdit les réunions publiques cours Saint-Pierre', { topK: 3 });
+    expect(results.length).toBeGreaterThan(0);
+  });
+
+  it('interrompue (projet fermé), la passe ne reprend pas seule : à la réouverture, rien sans geste, la proposition revient pour les sources restantes, et le geste les finit', async () => {
+    await baseAt1024ThenModelAt768();
+    const ids = [ARRETE, LETTRE_X, RAPPORT].map(sourceId);
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+
+    // L'arrêté est refait, puis le projet est fermé pendant la lettre.
+    const gate = gateFirstEmbed(LETTRE_X);
+    expect(await tropyService.requestReembed()).toEqual({ started: true });
+    await gate.reached;
+    const redone = chunks(ids[0]);
+    await tropyService.close();
+    gate.open();
+    await tropyService.whenFullReindexSettled();
+
+    await setProvider('ok');
+    const since = sent.length;
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+
+    expect(provider.texts).toEqual([]);
+    expect(reindexEvents(since).filter((e) => e.phase === 'running')).toEqual([]);
+    const remaining = chunks(ids[1]).length + chunks(ids[2]).length;
+    expect(tropyService.getReembedProposal()).toEqual({ sources: 2, chunks: remaining, expected: 1024, actual: 768 });
+    for (const c of redone) expect(denseIds(c.content)).toContain(c.id);
+
+    expect(await tropyService.requestReembed()).toEqual({ started: true });
+    await vi.waitFor(() => expect(reindexEvents().at(-1)).toMatchObject({ phase: 'done' }), WAIT);
+    await tropyService.whenFullReindexSettled();
+    expect(reindexEvents().at(-1)).toEqual({ phase: 'done', cause: 'model-change', total: 2 });
+    expect(embeddedSequence(provider.texts)).toEqual(['lettre', 'rapport']);
+    expect(chunks(ids[0])).toEqual(redone);
+    expect(dimensionsInBase()).toEqual([768]);
+  });
+
+  it('l’app quittée en pleine passe : à la relance, l’index est refait en 768 sans rien réembarquer ni geler l’app, la source refaite est trouvée par la recherche dense, et la proposition revient', async () => {
     await baseAt1024ThenModelAt768();
     const ids = [ARRETE, LETTRE_X, RAPPORT].map(sourceId);
     const blockingRebuild = vi.spyOn(PrimarySourcesVectorStore.prototype, 'rebuildAllIndexes');
-
-    // Première session : l'arrêté est refait, puis l'app est quittée pendant la lettre.
-    const first = gateFirstEmbed(LETTRE_X);
     await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+
+    const first = gateFirstEmbed(LETTRE_X);
+    expect(await tropyService.requestReembed()).toEqual({ started: true });
     await first.reached;
     const redone = chunks(ids[0]);
     await quitWithoutClosing(first.open);
 
-    // Relance : la passe reprend à la lettre, et s'y arrête un moment.
-    const resumed = gateFirstEmbed();
+    await setProvider('ok');
     await tropyService.init(projectDir);
-    try {
-      await resumed.reached;
-      for (const c of redone) expect(denseIds(c.content)).toContain(c.id);
-      expect(blockingRebuild).not.toHaveBeenCalled();
-    } finally {
-      resumed.open();
-    }
-    await vi.waitFor(() => expect(reindexEvents().at(-1)).toMatchObject({ phase: 'done' }), WAIT);
     await tropyService.whenFullReindexSettled();
 
-    expect(embeddedSequence(provider.texts)).toEqual(['lettre', 'rapport']);
-    for (const c of ids.flatMap((id) => chunks(id))) expect(denseIds(c.content)).toContain(c.id);
+    expect(provider.texts).toEqual([]);
+    for (const c of redone) expect(denseIds(c.content)).toContain(c.id);
     expect(blockingRebuild).not.toHaveBeenCalled();
+    expect(tropyService.getReembedProposal()).toMatchObject({ sources: 2, expected: 1024, actual: 768 });
+  });
+
+  it('le fournisseur tombe pendant la passe : arrêtée, dite comme une réindexation pour le nouveau modèle, et proposée de nouveau aussitôt pour les sources restantes', async () => {
+    await baseAt1024ThenModelAt768();
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+    await setProvider('fail-on', LETTRE_X);
+    const since = sent.length;
+
+    expect(await tropyService.requestReembed()).toEqual({ started: true });
+    await vi.waitFor(() => expect(reindexEvents().at(-1)).toMatchObject({ phase: 'stopped' }), WAIT);
+    await tropyService.whenFullReindexSettled();
+
+    expect(reindexEvents().at(-1)).toEqual({
+      phase: 'stopped',
+      cause: 'model-change',
+      reason: 'embedding-failed',
+      total: 3,
+      remaining: 2,
+    });
+    expect(tropyService.getReembedProposal()).toMatchObject({ sources: 2, expected: 1024, actual: 768 });
+    expect(proposalSignals(since)).toBeGreaterThan(0);
+  });
+
+  it('aucun fournisseur : rien n’est proposé, et le geste ne lance rien', async () => {
+    await baseAt1024ThenModelAt768();
+    await setProvider('absent');
+    await tropyService.init(projectDir);
+    await tropyService.whenFullReindexSettled();
+
+    expect(tropyService.getReembedProposal()).toBeNull();
+    expect(await tropyService.requestReembed()).toEqual({ started: false, reason: 'no-embedding-provider' });
   });
 });
 

@@ -15,6 +15,11 @@
  *   refait levait à l'ajout, après son écriture en base.
  * - La reconstruction prenait la dimension de la première ligne lue, quelle qu'elle soit.
  *
+ * Depuis L06-9 (J7, Q29), la passe à la nouvelle dimension n'est plus faite d'office : l'historien
+ * la confirme, et elle commence par faire passer l'index à cette dimension (`switchToNew`, comme
+ * `reindexOutdatedChunks`). Sans ce passage, un extrait d'une autre dimension que le corpus est
+ * refusé avant d'être écrit (`PrimarySourcesEmbeddingSpace.test.ts`).
+ *
  * Vrai magasin, vrai hnswlib, brain.db temporaire.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +28,7 @@ import os from 'os';
 import path from 'path';
 import { sqliteAvailable } from '../../../__tests__/helpers/native-guards.js';
 import { PrimarySourcesVectorStore, type PrimarySourceChunk } from '../PrimarySourcesVectorStore.js';
+import { EmbeddingSpaceMismatchError } from '../embedding-space.js';
 
 const OLD = 1024;
 const NEW = 768;
@@ -82,6 +88,14 @@ function redo(store: PrimarySourcesVectorStore, i: number): void {
   );
 }
 
+/**
+ * Le début de la réindexation confirmée (Q29) : l'index passe à la nouvelle dimension, par tranches,
+ * avec les extraits déjà refaits s'il y en a.
+ */
+async function switchToNew(store: PrimarySourcesVectorStore): Promise<void> {
+  expect(await store.rebuildIndexesInSlices(4, NEW)).toBe(true);
+}
+
 /** Le premier extrait trouvé par la recherche dense seule, avec le vecteur de `new-i-0`. */
 function denseTop(store: PrimarySourcesVectorStore, i: number): string | undefined {
   return store.search(vec(NEW, 1000 + 10 * i), 3)[0]?.chunk.id;
@@ -106,13 +120,14 @@ afterEach(() => {
 });
 
 describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — modèle d’embeddings changé de dimension', () => {
-  it('pendant la passe : la question du chat ne reconstruit jamais d’un bloc, et chaque source refaite est trouvée par la recherche dense', () => {
+  it('pendant la passe : la question du chat ne reconstruit jamais d’un bloc, et chaque source refaite est trouvée par la recherche dense', async () => {
     const first = open();
     fillOld(first, 20);
     first.close();
 
     const store = open();
     const blockingRebuild = vi.spyOn(store, 'rebuildAllIndexes');
+    await switchToNew(store);
     for (let i = 1; i <= 6; i++) {
       redo(store, i);
       expect(denseTop(store, i)).toBe(`new-${i}-0`);
@@ -120,11 +135,12 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — modèle d’emb
     expect(blockingRebuild).not.toHaveBeenCalled();
   });
 
-  it('projet rouvert après une passe arrêtée : l’index relu garde sa dimension, et la suite de la passe s’y ajoute', () => {
+  it('projet rouvert après une passe arrêtée : l’index relu garde sa dimension, et la suite de la passe s’y ajoute', async () => {
     const first = open();
     fillOld(first, 20);
     first.close();
     const stopped = open();
+    await switchToNew(stopped);
     for (let i = 1; i <= 3; i++) redo(stopped, i);
     stopped.close();
 
@@ -142,12 +158,15 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — modèle d’emb
     fillOld(first, 20);
     first.close();
     const crashed = open();
+    // Le passage à la nouvelle dimension s'écrit sur disque, vide : c'est l'index que la relance
+    // relit, sans les sources refaites depuis.
+    await switchToNew(crashed);
     for (let i = 1; i <= 3; i++) redo(crashed, i);
     exitWithoutClosing(crashed);
 
     const relaunched = open();
     const check = relaunched.checkHnswIndex(NEW);
-    expect(check).toEqual({ missing: 9, stale: 60, needsRebuild: true, dimension: NEW });
+    expect(check).toEqual({ missing: 9, stale: 0, needsRebuild: true, dimension: NEW });
 
     expect(await relaunched.rebuildIndexesInSlices(4, check.dimension)).toBe(true);
     expect(relaunched.getIndexStats()).toMatchObject({ hnswSize: 9, hnswDimension: NEW });
@@ -169,7 +188,11 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — modèle d’emb
   it('la reconstruction par tranches se fait à la dimension demandée, sans les extraits d’une autre', async () => {
     const store = open();
     fillOld(store, 10);
+    await switchToNew(store);
     for (let i = 1; i <= 2; i++) redo(store, i);
+    // De retour à l'ancienne dimension, celle du plus grand nombre d'extraits.
+    expect(await store.rebuildIndexesInSlices(4, OLD)).toBe(true);
+    expect(store.getIndexStats()).toMatchObject({ hnswSize: 24, hnswDimension: OLD });
 
     expect(await store.rebuildIndexesInSlices(4, NEW)).toBe(true);
 
@@ -224,7 +247,9 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — la recherche ne
     const store = open();
     const blockingRebuild = vi.spyOn(store, 'rebuildAllIndexes');
     const slices = vi.spyOn(store, 'rebuildIndexesInSlices');
-    expect(() => store.search(vec(NEW, 1), 3)).toThrow(/expected 1024, but got 768/);
+    // L'erreur des PDF (L04-7), typée, plus celle de hnswlib (L06-9).
+    expect(() => store.search(vec(NEW, 1), 3)).toThrow(EmbeddingSpaceMismatchError);
+    expect(() => store.search(vec(NEW, 1), 3)).toThrow(/expected 1024, got 768/);
     expect(blockingRebuild).not.toHaveBeenCalled();
     expect(slices).not.toHaveBeenCalled();
   });

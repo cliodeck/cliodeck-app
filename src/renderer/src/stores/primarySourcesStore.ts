@@ -76,7 +76,7 @@ export interface SyncOutcome {
 export type TranscriptionWriteSource = 'tesseract' | 'transkribus' | 'manual' | 'imported';
 
 /** Pourquoi une transcription écrite n'est pas encore citée par l'assistant. */
-export type NotIndexedReason = 'embedding-failed' | 'no-embedding-provider';
+export type NotIndexedReason = 'embedding-failed' | 'no-embedding-provider' | 'embedding-space-changed';
 
 /**
  * Ce qu'est devenue une transcription envoyée au main. `success` : elle est
@@ -597,7 +597,9 @@ export const usePrimarySourcesStore = create<PrimarySourcesState>((set, get) => 
       if (result.reindexError || result.reindexCode) {
         console.warn('Transcription écrite, pas encore indexée:', result.reindexError);
         const notIndexed: NotIndexedReason =
-          result.reindexCode === 'no-embedding-provider' ? 'no-embedding-provider' : 'embedding-failed';
+          result.reindexCode === 'no-embedding-provider' || result.reindexCode === 'embedding-space-changed'
+            ? result.reindexCode
+            : 'embedding-failed';
         return { success: true, notIndexed };
       }
       return { success: true };

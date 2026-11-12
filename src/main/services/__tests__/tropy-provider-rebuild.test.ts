@@ -52,6 +52,8 @@ vi.mock('../../../../backend/core/vector-store/PrimarySourcesVectorStore.js', ()
         'Monsieur Durand, demeurant rue des Remparts, est désigné comme meneur de la grève de mars.',
     });
     deleteChunks = () => undefined;
+    // Un corpus vide accepte toute dimension (L06-9) : le contrôle n'est pas l'objet de ce test.
+    checkEmbeddingDimension = () => null;
     // Les extraits d'une source s'écrivent d'un bloc, une fois tous embarqués (L06-7).
     replaceSourceChunks = (sourceId: string, items: Array<{ embedding: Float32Array }>) => {
       for (const { embedding } of items) saved.push({ sourceId, dimension: embedding.length });

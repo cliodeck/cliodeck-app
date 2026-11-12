@@ -75,6 +75,20 @@ export type TropySyncIssue =
     }
   | {
       /**
+       * Le modèle d'embeddings a changé depuis l'indexation des archives
+       * (L06-9) : il produit des vecteurs de `actual` dimensions, les
+       * extraits déjà indexés en ont `expected`. Les deux ne se mêlent pas
+       * dans la recherche : rien n'a été écrit, et `sources` sources
+       * attendent leurs extraits. La réindexation des archives est proposée
+       * dans le panneau (Q29) ; la synchro qui la suit les embarque.
+       */
+      code: 'embedding-space-changed';
+      sources: number;
+      expected: number;
+      actual: number;
+    }
+  | {
+      /**
        * Poppler est absent : les PDF n'ont pas pu passer à l'OCR. Les items
        * sont enregistrés, et leurs images, s'ils en ont, reconnues (#138) ;
        * leur transcription reste « à reprendre » (`ocrPending`), et la passe
