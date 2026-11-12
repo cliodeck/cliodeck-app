@@ -8,7 +8,11 @@
  * table in the plan ("Divergence qualité RAG après fusion 2.4 — Élevé").
  *
  * Metrics reported:
- *   - `recall@K` for K ∈ {1, 3, 5, 10}
+ *   - `recall@K` for K ∈ {1, 3, 5, 10} — rappel : pour chaque question, la
+ *     part de ses extraits pertinents rendus dans le top K, moyennée
+ *   - `hitRate@K` — taux de succès : la part des questions qui ont au moins un
+ *     pertinent dans le top K. C'est ce que `recall` publiait jusqu'en 2026-11
+ *     (S04-1-20) : un relevé antérieur se compare sur `hitRate`.
  *   - `mrr` (mean reciprocal rank of the first relevant hit)
  *   - latency percentiles (p50 / p95)
  *
@@ -52,13 +56,19 @@ export interface Retriever {
 }
 
 export interface BenchmarkResult {
+  /** Rappel : part des extraits pertinents d'une question rendus dans le top K, moyennée. */
   recall: Record<number, number>;
+  /** Taux de succès : part des questions qui ont au moins un pertinent dans le top K. */
+  hitRate: Record<number, number>;
   mrr: number;
   latencyMs: { p50: number; p95: number; mean: number };
   queryCount: number;
   perQuery: Array<{
     queryId: string;
     firstRelevantRank: number | null;
+    /** Extraits pertinents distincts parmi les `hitsConsidered` rendus. */
+    relevantFound: number;
+    relevantCount: number;
     hitsConsidered: number;
     latencyMs: number;
   }>;
@@ -90,7 +100,10 @@ export async function runBenchmark(
 
   await opts.retriever.index(opts.docs);
 
-  const recallHits: Record<number, number> = Object.fromEntries(
+  const successes: Record<number, number> = Object.fromEntries(
+    ks.map((k) => [k, 0])
+  );
+  const recallSums: Record<number, number> = Object.fromEntries(
     ks.map((k) => [k, 0])
   );
   let mrrSum = 0;
@@ -104,24 +117,37 @@ export async function runBenchmark(
     const latency = Date.now() - started;
     latencies.push(latency);
 
-    let firstRank: number | null = null;
+    // Rang (1 = premier) de chaque pertinent rendu, une fois chacun : un
+    // retriever qui rend deux fois le même extrait ne le compte pas double.
+    const foundRanks: number[] = [];
+    const seen = new Set<string>();
     for (let i = 0; i < hits.length; i++) {
-      if (relevantSet.has(hits[i].chunkId)) {
-        firstRank = i + 1;
-        break;
+      const id = hits[i].chunkId;
+      if (relevantSet.has(id) && !seen.has(id)) {
+        seen.add(id);
+        foundRanks.push(i + 1);
       }
     }
+    const firstRank = foundRanks.length > 0 ? foundRanks[0] : null;
 
     if (firstRank !== null) {
       mrrSum += 1 / firstRank;
       for (const k of ks) {
-        if (firstRank <= k) recallHits[k] += 1;
+        if (firstRank <= k) successes[k] += 1;
+      }
+    }
+    // Une question sans pertinent compte 0, comme pour le taux de succès.
+    if (relevantSet.size > 0) {
+      for (const k of ks) {
+        recallSums[k] += foundRanks.filter((rank) => rank <= k).length / relevantSet.size;
       }
     }
 
     perQuery.push({
       queryId: q.id,
       firstRelevantRank: firstRank,
+      relevantFound: foundRanks.length,
+      relevantCount: relevantSet.size,
       hitsConsidered: hits.length,
       latencyMs: latency,
     });
@@ -131,7 +157,11 @@ export async function runBenchmark(
 
   const queryCount = opts.queries.length || 1;
   const recall: Record<number, number> = {};
-  for (const k of ks) recall[k] = recallHits[k] / queryCount;
+  const hitRate: Record<number, number> = {};
+  for (const k of ks) {
+    recall[k] = recallSums[k] / queryCount;
+    hitRate[k] = successes[k] / queryCount;
+  }
 
   const sorted = latencies.slice().sort((a, b) => a - b);
   const mean =
@@ -139,6 +169,7 @@ export async function runBenchmark(
 
   return {
     recall,
+    hitRate,
     mrr: mrrSum / queryCount,
     latencyMs: {
       p50: percentile(sorted, 50),
@@ -160,16 +191,20 @@ export function diffResults(
   after: BenchmarkResult
 ): {
   recallDelta: Record<number, number>;
+  hitRateDelta: Record<number, number>;
   mrrDelta: number;
   meanLatencyDelta: number;
 } {
   const recallDelta: Record<number, number> = {};
+  const hitRateDelta: Record<number, number> = {};
   for (const k of Object.keys(before.recall)) {
     const kn = Number(k);
     recallDelta[kn] = (after.recall[kn] ?? 0) - before.recall[kn];
+    hitRateDelta[kn] = (after.hitRate[kn] ?? 0) - before.hitRate[kn];
   }
   return {
     recallDelta,
+    hitRateDelta,
     mrrDelta: after.mrr - before.mrr,
     meanLatencyDelta: after.latencyMs.mean - before.latencyMs.mean,
   };

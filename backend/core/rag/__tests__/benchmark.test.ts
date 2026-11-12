@@ -126,6 +126,77 @@ describe('RAG benchmark harness (2.4a)', () => {
     expect(Object.keys(diff.recallDelta).length).toBeGreaterThan(0);
   });
 
+  // S04-1-20 : `recall[K]` ne retenait que le rang du premier pertinent, donc
+  // publiait le taux de succès. Trois pertinents, un seul rendu : le rappel
+  // est d'un tiers, le taux de succès de 1.
+  it('recall@K compte la part des pertinents retrouvés ; hitRate@K garde l’ancienne mesure', async () => {
+    const onlyFirst: Retriever = {
+      async index() {},
+      async search() {
+        return [
+          { chunkId: 'c1', score: 3 },
+          { chunkId: 'x1', score: 2 },
+          { chunkId: 'x2', score: 1 },
+        ];
+      },
+    };
+    const result = await runBenchmark({
+      docs,
+      queries: [{ id: 'q', text: 'peu importe', relevant: ['c1', 'c2', 'c3'] }],
+      retriever: onlyFirst,
+    });
+    expect(result.recall[10]).toBeCloseTo(1 / 3, 10);
+    expect(result.recall[1]).toBeCloseTo(1 / 3, 10);
+    expect(result.hitRate[10]).toBe(1);
+    expect(result.hitRate[1]).toBe(1);
+    expect(result.perQuery[0].relevantFound).toBe(1);
+    expect(result.perQuery[0].relevantCount).toBe(3);
+  });
+
+  it('recall@K est la moyenne des rappels par question, au rang K', async () => {
+    // q1 : deux pertinents, l'un au rang 1, l'autre au rang 4.
+    // q2 : un pertinent, jamais rendu.
+    const ranked: Retriever = {
+      async index() {},
+      async search(text) {
+        if (text === 'q1') {
+          return ['a', 'n1', 'n2', 'b'].map((chunkId, i) => ({ chunkId, score: 10 - i }));
+        }
+        return [{ chunkId: 'n1', score: 1 }];
+      },
+    };
+    const result = await runBenchmark({
+      docs,
+      queries: [
+        { id: 'q1', text: 'q1', relevant: ['a', 'b'] },
+        { id: 'q2', text: 'q2', relevant: ['z'] },
+      ],
+      retriever: ranked,
+    });
+    // Rang 1 et 3 : q1 = 1/2, q2 = 0 → 1/4. Rang 5 : q1 = 1 → 1/2.
+    expect(result.recall[1]).toBeCloseTo(0.25, 10);
+    expect(result.recall[3]).toBeCloseTo(0.25, 10);
+    expect(result.recall[5]).toBeCloseTo(0.5, 10);
+    expect(result.hitRate[1]).toBe(0.5);
+    expect(result.hitRate[5]).toBe(0.5);
+  });
+
+  it('diffResults donne l’écart du rappel et celui du taux de succès', async () => {
+    const before = await runBenchmark({
+      docs,
+      queries: queries.slice(0, 2),
+      retriever: overlapRetriever(),
+    });
+    const after = await runBenchmark({
+      docs,
+      queries,
+      retriever: overlapRetriever(),
+    });
+    const diff = diffResults(before, after);
+    expect(diff.hitRateDelta[10]).toBeCloseTo(after.hitRate[10] - before.hitRate[10], 10);
+    expect(diff.recallDelta[10]).toBeCloseTo(after.recall[10] - before.recall[10], 10);
+  });
+
   it('calls close() on the retriever when provided', async () => {
     let closed = false;
     const r = overlapRetriever();
