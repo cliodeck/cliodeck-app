@@ -9,7 +9,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Network } from 'lucide-react';
-import { useChatStore } from '../../stores/chatStore';
+import { useChatStore, type BrainstormMessage } from '../../stores/chatStore';
 
 interface GraphNode {
   id: string;
@@ -32,24 +32,34 @@ interface SubgraphData {
   edges: GraphEdge[];
 }
 
-export const ContextGraph: React.FC = () => {
+/**
+ * Les documents cités dans la session, triés et sans doublon, en JSON. Une chaîne : le sélecteur ne
+ * rend le composant, et l'effet ne rappelle le main, que quand cet ensemble change — jamais à chaque
+ * jeton, qui remplace pourtant le tableau des messages (S16-1-9). Le parent, `AssistantChat`, se rend
+ * lui à chaque jeton : d'où le `React.memo` du composant, sans props.
+ */
+function citedDocIdsKey(messages: BrainstormMessage[]): string {
+  const docIds = new Set<string>();
+  for (const msg of messages) {
+    if (msg.role === 'assistant' && msg.sources) {
+      for (const src of msg.sources) {
+        if (src.documentId) docIds.add(src.documentId);
+      }
+    }
+  }
+  return JSON.stringify(Array.from(docIds).sort());
+}
+
+export const ContextGraph = React.memo(function ContextGraph() {
   const { t } = useTranslation();
-  const messages = useChatStore((s) => s.messages);
+  const docIdsKey = useChatStore((s) => citedDocIdsKey(s.messages));
   const [graph, setGraph] = useState<SubgraphData | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Collect unique document IDs from all sources across the session
   useEffect(() => {
-    const docIds = new Set<string>();
-    for (const msg of messages) {
-      if (msg.role === 'assistant' && msg.sources) {
-        for (const src of msg.sources) {
-          if (src.documentId) docIds.add(src.documentId);
-        }
-      }
-    }
+    const docIds = JSON.parse(docIdsKey) as string[];
 
-    if (docIds.size < 2) {
+    if (docIds.length < 2) {
       setGraph(null);
       return;
     }
@@ -58,7 +68,7 @@ export const ContextGraph: React.FC = () => {
     setLoading(true);
 
     window.electron.corpus
-      .getSubgraph(Array.from(docIds))
+      .getSubgraph(docIds)
       .then((result: { success: boolean; graph?: SubgraphData }) => {
         if (!cancelled && result.success && result.graph) {
           setGraph(result.graph);
@@ -70,7 +80,7 @@ export const ContextGraph: React.FC = () => {
       });
 
     return () => { cancelled = true; };
-  }, [messages]);
+  }, [docIdsKey]);
 
   if (!graph || graph.nodes.length < 2) return null;
 
@@ -175,4 +185,4 @@ export const ContextGraph: React.FC = () => {
       </div>
     </details>
   );
-};
+});
