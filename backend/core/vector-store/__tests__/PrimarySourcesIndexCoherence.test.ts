@@ -322,13 +322,19 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — index écrit su
   it('app tombée après deleteChunks, avant l’écriture de l’index : à la relance, les étiquettes des extraits supprimés ne servent plus', () => {
     const first = open();
     // 2 200 extraits servis, loin de la question : 200 points morts restent sous les 10 % de
-    // `checkHnswIndex`, et rien ne se reconstruit à la relance.
+    // `checkHnswIndex`, et rien ne se reconstruit à la relance. Un poids propre à chaque point :
+    // avec quelques vecteurs répétés, les distances égales ne bornent plus la recherche de
+    // construction de hnswlib, et l'insertion des 2 200 points prenait 3 s au lieu d'un demi.
     addSource(first, 'fill-1', 'Remplissage');
     first.replaceSourceChunks(
       'fill-1',
       Array.from({ length: 2200 }, (_, i) => ({
         chunk: chunk('fill-1', `f-${i}`, `remplissage ${i}`, i),
-        embedding: vector({ [100 + (i % 600)]: 1, [700 + Math.floor(i / 600)]: 0.5 }),
+        embedding: vector({
+          [100 + (i % 300)]: 1,
+          [400 + ((i * 7) % 300)]: 0.3,
+          [700 + Math.floor(i / 600)]: 0.5 + i / 10000,
+        }),
       }))
     );
     addSource(first, 'src-1', 'Registre');
@@ -369,5 +375,7 @@ describe.skipIf(!sqliteAvailable)('PrimarySourcesVectorStore — index écrit su
     const meta = readMeta();
     expect(meta.currentSize).toBe(2202);
     expect(meta.labelMap.map(([, chunkId]) => chunkId)).not.toContain('old-0');
-  });
+    // 2 400 points dans le vrai hnswlib : une demi-seconde sur le Mac, trois à quatre fois plus en
+    // CI. Le délai de Vitest (5 s) ne doit pas décider du résultat.
+  }, 30_000);
 });
