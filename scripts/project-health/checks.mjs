@@ -209,9 +209,30 @@ export function runHealthChecks(projectPath, db) {
         try {
           const m = JSON.parse(readFileSync(meta, 'utf8'));
           const ids = new Set((m.chunkIdMap ?? []).map((e) => e[1]));
-          const known = new Set(db.prepare('SELECT id FROM pdf_chunks WHERE embedding IS NOT NULL').all().map((r) => r.id));
+          // Une base où deux modèles d'embeddings ont écrit (L04-7) : l'app garde l'index dans la
+          // dimension majoritaire (à égalité, la plus grande), et laisse les extraits de l'autre hors
+          // de l'index, voulu et sans marque J8. Ils ne sont pas « absents de l'index » : ils sont
+          // comptés à part, et seuls ceux de la dimension de l'index se comparent à lui.
+          const indexDimension = Number.isInteger(m.dimension) && m.dimension > 0 ? m.dimension : undefined;
+          const byDimension = db
+            .prepare(
+              `SELECT length(embedding) AS bytes, COUNT(*) AS n FROM pdf_chunks
+               WHERE embedding IS NOT NULL AND length(embedding) > 0
+               GROUP BY bytes ORDER BY n DESC, bytes DESC`,
+            )
+            .all()
+            .map((r) => ({ dimension: Number(r.bytes) / 4, n: Number(r.n) }));
+          const others = indexDimension === undefined ? [] : byDimension.filter((d) => d.dimension !== indexDimension);
+          const counted = (list) => list.map((d) => `${d.n} extrait(s) en ${d.dimension}`).join(', ');
+          const known = new Set(
+            (indexDimension === undefined
+              ? db.prepare('SELECT id FROM pdf_chunks WHERE embedding IS NOT NULL').all()
+              : db.prepare('SELECT id FROM pdf_chunks WHERE embedding IS NOT NULL AND length(embedding) = ?').all(indexDimension * 4)
+            ).map((r) => r.id),
+          );
           const stale = [...ids].filter((id) => !known.has(id)).length;
           const absent = [...known].filter((id) => !ids.has(id)).length;
+          const majority = byDimension[0]?.dimension;
           // La marque « reconstruction due » (J8) : l'app sait l'index en retard et, à
           // l'ouverture, propose de le reconstruire au lieu de le faire d'office. L'écart
           // reste (les réponses y perdent des extraits), mais il est expliqué.
@@ -219,7 +240,14 @@ export function runHealthChecks(projectPath, db) {
             ? db.prepare('SELECT marked_at FROM pdf_index_state WHERE id = 1 AND rebuild_due = 1').get()
             : undefined;
           const gap = `index HNSW : ${stale} vecteur(s) d’extraits disparus, ${absent} extrait(s) absent(s) de l’index`;
-          if (!stale && !absent) add('pdf', 'ok', `index HNSW aligné sur la base (${ids.size} vecteurs)`);
+          if (indexDimension !== undefined && majority !== undefined && majority !== indexDimension) {
+            add(
+              'pdf',
+              'ecart',
+              `index HNSW dans une dimension minoritaire (${indexDimension}, ${ids.size} vecteurs) : ${counted(others)}`,
+              'Index construit par une version antérieure, dans la dimension d’un extrait pris au hasard. L’ouverture du projet le refait d’office dans la dimension majoritaire, depuis les vecteurs déjà calculés. Les extraits de l’autre dimension resteront ensuite hors de l’index jusqu’à « Purger la base » (panneau Projet, section « Actions ») puis « Indexer tous les PDFs » dans la Bibliographie.',
+            );
+          } else if (!stale && !absent) add('pdf', 'ok', `index HNSW aligné sur la base (${ids.size} vecteurs)`);
           else if (mark) {
             const since = mark.marked_at ? ` depuis le ${String(mark.marked_at).slice(0, 10)}` : '';
             add(
@@ -229,6 +257,14 @@ export function runHealthChecks(projectPath, db) {
               'Le projet a été fermé avant la reconstruction, ou « Plus tard » a été choisi. Le bandeau du panneau Bibliographie (et la barre d’état) la propose à chaque ouverture : « Reconstruire » remet l’index d’aplomb à partir des vecteurs déjà calculés, sans rien envoyer au fournisseur d’embeddings.',
             );
           } else add('pdf', 'ecart', gap, 'Attendu juste après une suppression ou un dédoublonnage : l’index se reconstruit une fois l’indexation terminée. Persistant après relance, sans reconstruction proposée à l’ouverture = anomalie.');
+          if (others.length && majority === indexDimension) {
+            add(
+              'pdf',
+              'ecart',
+              `${counted(others)} d’un autre modèle d’embeddings, hors de l’index HNSW (index en ${indexDimension})`,
+              'Le modèle d’embeddings a changé sans que tous les PDF soient réindexés. L’index garde la dimension majoritaire : ces extraits se trouvent par les mots, pas par le sens, et aucune reconstruction ne les y remettra. Pour les y remettre : « Purger la base » (panneau Projet, section « Actions »), puis « Indexer tous les PDFs » dans la Bibliographie, avec le modèle d’embeddings voulu.',
+            );
+          }
         } catch {
           add('pdf', 'ecart', 'hnsw.index.meta.json illisible');
         }

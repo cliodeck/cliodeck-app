@@ -1,5 +1,6 @@
 import { VectorStore, type IndexRebuildReason } from './VectorStore';
 import { HNSWVectorStore } from './HNSWVectorStore';
+import { EmbeddingSpaceMismatchError } from './embedding-space';
 import { BM25Index } from '../search/BM25Index';
 import { HybridSearch } from '../search/HybridSearch';
 import type { SearchResult, DocumentChunk } from '../../types/pdf-document';
@@ -20,6 +21,7 @@ import type { RebuildProgressEvent } from '../../types/rebuild-progress';
  * Memory overhead: ~650 MB for 50k chunks
  */
 export class EnhancedVectorStore {
+  private readonly projectPath: string;
   private vectorStore: VectorStore;
   private hnswStore: HNSWVectorStore;
   private bm25Index: BM25Index;
@@ -69,13 +71,15 @@ export class EnhancedVectorStore {
 
   constructor(projectPath: string) {
     console.log('🚀 Initializing Enhanced Vector Store...');
+    this.projectPath = projectPath;
 
     // Initialize base vector store (SQLite)
     this.vectorStore = new VectorStore(projectPath);
 
-    // Detect embedding dimension from existing data
+    // La dimension majoritaire des extraits de SQLite. Sans extrait, 768 : le premier vecteur
+    // indexé impose la sienne (`adoptEmbeddingDimension`).
     const embeddingDimension = this.vectorStore.getEmbeddingDimension();
-    const dimension = embeddingDimension || 768; // Default to 768 if no embeddings exist
+    const dimension = embeddingDimension || 768;
 
     if (embeddingDimension) {
       console.log(`📏 Detected embedding dimension: ${dimension}`);
@@ -145,6 +149,21 @@ export class EnhancedVectorStore {
     // index vide se refait au préchauffage s'il y a des extraits (`needsRebuild`) : reste un index non
     // vide, que rien ne refait d'office. Il est proposé à l'historien, pas reconstruit sans lui.
     this.proposeRebuild = this.hnswStore.getSize() > 0 && this.rebuildMarked();
+
+    // Une base où deux modèles ont écrit : la reconstruction ci-dessus a compté ses extraits hors
+    // index ; sinon, ils se comptent ici, à chaque ouverture, sans rien faire repartir.
+    if (!needsRebuild) {
+      try {
+        const dimension = this.hnswDimension();
+        const outside = this.vectorStore
+          .embeddingDimensions()
+          .filter((entry) => entry.dimension !== dimension)
+          .reduce((count, entry) => count + entry.chunks, 0);
+        this.warnChunksOutsideIndex(outside);
+      } catch (error: unknown) {
+        console.warn('⚠️  Embedding dimensions unreadable:', error);
+      }
+    }
 
     const duration = Date.now() - startTime;
     console.log(`✅ Indexes loaded in ${duration}ms`);
@@ -238,6 +257,63 @@ export class EnhancedVectorStore {
     }
   }
 
+  /** La dimension de l'index HNSW, fixée à sa construction. */
+  private hnswDimension(): number {
+    return this.hnswStore.getStats().dimension;
+  }
+
+  /**
+   * Un index HNSW neuf et vide, à cette dimension, à la place de l'actuel, dont les fichiers quittent
+   * le disque. `HNSWVectorStore` fixe sa dimension à la construction : un index vidé gardait la
+   * sienne, et sautait de nouveau chaque vecteur d'un autre modèle.
+   */
+  private async recreateHnsw(dimension: number): Promise<void> {
+    const hnswStore = new HNSWVectorStore(this.projectPath, dimension);
+    await hnswStore.clear();
+    this.hnswStore = hnswStore;
+    this.hybridSearch.setHNSWStore(hnswStore);
+    console.log(`📏 HNSW index recreated with dimension ${dimension}`);
+  }
+
+  /**
+   * Le refus d'`adoptEmbeddingDimension`, sans rien adopter ni toucher à HNSW : l'indexeur l'applique
+   * dès le premier vecteur d'un PDF, avant d'embarquer les suivants pour rien. Rend la dimension du
+   * corpus, null s'il est vide.
+   */
+  checkEmbeddingDimension(dimension: number): number | null {
+    return this.vectorStore.checkEmbeddingDimension(dimension);
+  }
+
+  /**
+   * La dimension des vecteurs qu'une indexation va écrire, contrôlée avant toute écriture (L04-7).
+   * Un corpus sans extrait embarqué l'adopte : HNSW est refait vide à cette dimension (projet neuf
+   * avec un modèle qui n'est pas en 768, base purgée). HNSW sautait sinon chaque vecteur avec un
+   * avertissement : le PDF passait pour indexé, et la recherche levait jusqu'à la réouverture du
+   * projet. Un corpus d'une autre dimension refuse le PDF (`EmbeddingSpaceMismatchError`).
+   */
+  async adoptEmbeddingDimension(dimension: number): Promise<void> {
+    const corpus = this.vectorStore.checkEmbeddingDimension(dimension);
+    if (dimension === this.hnswDimension()) return;
+    await this.recreateHnsw(dimension);
+    // Des extraits de cette dimension étaient déjà en base, hors d'un index fait dans une autre : la
+    // reconstruction que programme toute indexation les y remettra.
+    if (corpus !== null) this.markStale('chunks-missing');
+  }
+
+  /**
+   * Les extraits d'une autre dimension que l'index, dans une base où deux modèles ont écrit : hors de
+   * HNSW jusqu'à une purge suivie d'une réindexation, trouvables par les mots seulement (BM25). Comptés
+   * au journal, une fois, au lieu d'un avertissement par extrait. Ils ne posent pas la marque de J8 :
+   * aucune reconstruction ne les remettrait dans l'index, et elle reviendrait à chaque ouverture.
+   */
+  private warnChunksOutsideIndex(count: number): void {
+    if (count === 0) return;
+    console.warn(
+      `⚠️  ${count} chunk(s) of another embedding dimension stay out of HNSW (index: ${this.hnswDimension()}); ` +
+        'purge and reindex the PDFs to search them by meaning'
+    );
+  }
+
   /**
    * Add a chunk with embedding to all indexes
    */
@@ -327,6 +403,16 @@ export class EnhancedVectorStore {
     const hnswReady = hnswSize > 0;
 
     if (hnswReady) {
+      // Une question d'une autre dimension que l'index (modèle d'embeddings changé, PDF pas
+      // réindexés) : la même erreur typée que la recherche linéaire, avant que hnswlib ne lève.
+      const dimension = this.hnswDimension();
+      if (queryEmbedding.length !== dimension) {
+        throw new EmbeddingSpaceMismatchError(
+          { kind: 'dimension', expected: dimension, actual: queryEmbedding.length },
+          `Query embedding dimension mismatch: expected ${dimension}, got ${queryEmbedding.length}`
+        );
+      }
+
       // Use HNSW or hybrid search
       console.log(`🚀 Using HNSW search (${hnswSize} indexed chunks)`);
       results = await this.hybridSearch.search(
@@ -397,8 +483,14 @@ export class EnhancedVectorStore {
       this.rebuildProgress = { current: 0, total: 100, status: 'Initializing...' };
       this.notifyProgress('running');
 
-      // Clear existing indexes
-      await this.hnswStore.clear();
+      // Clear existing indexes. HNSW à la dimension majoritaire des extraits (L04-7) : celle d'une
+      // base que deux modèles ont remplie, ou celle du modèle adopté depuis l'ouverture.
+      const majority = this.vectorStore.embeddingDimensions()[0]?.dimension;
+      if (majority !== undefined && majority !== this.hnswDimension()) {
+        await this.recreateHnsw(majority);
+      } else {
+        await this.hnswStore.clear();
+      }
       this.bm25Index.clear();
 
       // Update progress: Loading chunks
@@ -427,8 +519,12 @@ export class EnhancedVectorStore {
       };
       this.notifyProgress('running');
 
-      // Add to HNSW (takes ~70% of time)
-      await this.hnswStore.addChunks(chunks);
+      // Add to HNSW (takes ~70% of time). Les extraits d'une autre dimension n'y entrent pas : ils
+      // restent dans BM25, et dans le journal.
+      const dimension = this.hnswDimension();
+      const indexable = chunks.filter((c) => c.embedding.length === dimension);
+      this.warnChunksOutsideIndex(chunks.length - indexable.length);
+      await this.hnswStore.addChunks(indexable);
 
       // Update progress: Building BM25
       this.rebuildProgress = {

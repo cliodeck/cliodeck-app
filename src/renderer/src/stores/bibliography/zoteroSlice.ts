@@ -1,7 +1,7 @@
 import type { TFunction } from 'i18next';
 import type { Citation, NotAttached, ZoteroSliceState, BibliographySliceCreator } from './types';
 import { isPdfPath } from '../../../../../backend/core/bibliography/pdf-attachment';
-import { idleBatchIndexing } from './indexingSlice';
+import { idleBatchIndexing, isEmbeddingDimensionRefusal, pdfIndexFailure } from './indexingSlice';
 import { refusedAsProjectChanged, stillIn, stillShown } from '../../services/still-in-project';
 import i18n from '../../i18n';
 
@@ -14,6 +14,30 @@ export class AttachmentNotSavedError extends Error {
     this.name = 'AttachmentNotSavedError';
     this.notAttached = notAttached;
   }
+}
+
+/**
+ * Téléchargé dans `PDFs/` et rattaché à sa référence (le rattachement est écrit), puis refusé ou
+ * manqué par l'indexation : ce n'est pas un échec du téléchargement. Dit « Erreur de
+ * téléchargement », il faisait relancer un téléchargement réussi (L04-7). Le message est la cause
+ * de l'échec de l'indexation, déjà traduite quand le main a rendu un code.
+ */
+export class DownloadedNotIndexedError extends Error {
+  readonly title: string;
+  readonly filePath: string;
+
+  constructor(title: string, filePath: string, reason: string) {
+    super(reason);
+    this.name = 'DownloadedNotIndexedError';
+    this.title = title;
+    this.filePath = filePath;
+  }
+}
+
+/** Où est le PDF, qu'il est rattaché, et pourquoi il n'est pas indexé. */
+export function describeNotIndexed(t: TFunction, error: DownloadedNotIndexedError): string {
+  const file = error.filePath.split(/[\\/]/).pop() || error.filePath;
+  return t('bibliography.pdfDownloadedNotIndexed', { title: error.title, file, reason: error.message });
 }
 
 /** Où est le PDF, qu'il n'est pas rattaché, et pourquoi. */
@@ -226,10 +250,11 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
       }
 
       if (!indexResult.success) {
+        const message = pdfIndexFailure(indexResult, 'Failed to index PDF');
         window.dispatchEvent(new CustomEvent('bibliography:indexing-end', {
-          detail: { citationId, success: false, error: indexResult.error }
+          detail: { citationId, success: false, error: message }
         }));
-        throw new Error(indexResult.error || 'Failed to index PDF');
+        throw new DownloadedNotIndexedError(citation.title, filePath, message);
       }
 
       // Add to indexed set
@@ -314,6 +339,30 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
           },
         });
         return { downloaded, skipped, errors, stopped: notAttached, remaining: citationsNeedingPDFs.length - index - 1 };
+      };
+      /**
+       * Arrêté sur le PDF d'indice `index`, téléchargé et rattaché, mais refusé par l'index : ses
+       * embeddings n'ont pas la dimension du corpus (L04-7). Les suivants le seraient de même ; ils
+       * ne partent pas, et le refus se dit une fois.
+       */
+      const stopOnDimension = (index: number) => {
+        set({
+          batchIndexing: {
+            isIndexing: false,
+            current: index + 1,
+            total: citationsNeedingPDFs.length,
+            skipped,
+            indexed: downloaded,
+            errors,
+          },
+        });
+        return {
+          downloaded,
+          skipped,
+          errors,
+          stoppedOnDimension: true as const,
+          remaining: citationsNeedingPDFs.length - index - 1,
+        };
       };
       if (!(await stillIn(projectPath))) return interrupt();
 
@@ -459,7 +508,8 @@ export const createZoteroSlice: BibliographySliceCreator<ZoteroSliceState> = (se
               batchIndexing: { ...state.batchIndexing, indexed: downloaded }
             }));
           } else {
-            errors.push(`${citation.title}: ${indexResult.error || 'Failed to index'}`);
+            errors.push(`${citation.title}: ${pdfIndexFailure(indexResult, 'Failed to index')}`);
+            if (isEmbeddingDimensionRefusal(indexResult)) return stopOnDimension(i);
           }
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);

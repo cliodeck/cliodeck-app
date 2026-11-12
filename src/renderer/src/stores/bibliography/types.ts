@@ -99,6 +99,16 @@ export interface ProjectChangedOutcome {
 }
 
 /**
+ * Le lot s'est arrêté au premier PDF refusé parce que ses embeddings n'ont pas la dimension du
+ * corpus (L04-7) : le modèle d'embeddings a changé, et chaque PDF suivant aurait été refusé de même,
+ * après son extraction. `remaining` compte ceux qui ne sont pas partis.
+ */
+export interface DimensionStopOutcome {
+  stoppedOnDimension?: true;
+  remaining?: number;
+}
+
+/**
  * Le `.bib` attendu du projet ne s'est pas lu, ou pas en entier : le panneau le dit en bandeau,
  * au lieu de se montrer vide ou de taire ce qui manque (S07-1-11, S07-1-2). `partial` : le fichier
  * s'est lu, mais des entrées ou les métadonnées des PDF Zotero ne l'ont pas été.
@@ -170,7 +180,9 @@ export interface IndexingSliceState {
   indexPDFFromCitation: (citationId: string) => Promise<{ alreadyIndexed: boolean } & ProjectChangedOutcome>;
   reindexPDFFromCitation: (citationId: string) => Promise<ProjectChangedOutcome>;
   /** Indexe les PDF des références du projet `projectPath`, tant qu'il reste le projet ouvert. */
-  indexAllPDFs: (projectPath: string) => Promise<{ indexed: number; skipped: number; errors: string[] } & ProjectChangedOutcome>;
+  indexAllPDFs: (
+    projectPath: string
+  ) => Promise<{ indexed: number; skipped: number; errors: string[] } & ProjectChangedOutcome & DimensionStopOutcome>;
   refreshIndexedPDFs: () => Promise<void>;
   isFileIndexed: (filePath: string) => boolean;
   isBibtexKeyIndexed: (bibtexKey: string) => boolean;
@@ -192,7 +204,9 @@ export interface ZoteroSliceState {
   /** `stopped` : arrêté sur un PDF que des métadonnées illisibles empêchent de rattacher. */
   downloadAllMissingPDFs: (
     projectPath: string
-  ) => Promise<{ downloaded: number; skipped: number; errors: string[]; stopped?: NotAttached } & ProjectChangedOutcome>;
+  ) => Promise<
+    { downloaded: number; skipped: number; errors: string[]; stopped?: NotAttached } & ProjectChangedOutcome & DimensionStopOutcome
+  >;
 }
 
 export interface ReadingNotesSliceState {

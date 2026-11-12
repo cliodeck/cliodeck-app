@@ -286,3 +286,94 @@ describe('« Télécharger tous les PDFs manquants depuis Zotero » : métadonn�
     expect(message).toContain('Le PDF de « Article a1 » a été téléchargé dans PDFs/ (ATTa1.pdf)');
   });
 });
+
+/**
+ * Le modèle d'embeddings a changé depuis l'indexation du corpus (L04-7) : chaque PDF du lot serait
+ * refusé de même, après son extraction. Le lot s'arrête au premier refus, dit ce qui reste, et ne
+ * répète pas dix fois le même paragraphe.
+ */
+describe('modèle d’embeddings changé : le lot s’arrête au premier PDF refusé, et le refus se dit une fois (L04-7)', () => {
+  const REFUSAL = {
+    success: false,
+    error: 'Embedding dimension mismatch: expected 768, got 1024',
+    code: 'embedding_dimension_mismatch',
+    expected: 768,
+    actual: 1024,
+  };
+  const STOP_REST = 'Les suivants auraient été refusés de même par l\'index des PDF.';
+
+  /** Le refus, une fois, après le titre du PDF refusé ; jamais le texte anglais du main. */
+  function expectRefusalOnce(message: string, title: string): void {
+    expect(message).toContain(`• ${title}: Ce PDF n'a pas été indexé`);
+    expect(message.match(/« Purger la base »/g)).toHaveLength(1);
+    expect(message).not.toContain('Embedding dimension mismatch');
+  }
+
+  it('« Indexer tous les PDFs »', async () => {
+    pdfIndex.mockResolvedValue(REFUSAL);
+    await mountIn([withPdf('a1'), withPdf('a2'), withPdf('a3')]);
+    await launch('Indexer tous les PDFs');
+
+    expect(pdfIndex).toHaveBeenCalledTimes(1);
+    expect(dialogs().queue).toHaveLength(1);
+    const message = dialogs().alertMessage;
+    expect(message).toContain(`« Indexer tous les PDFs » arrêté : 0 PDF(s) traité(s), 1 erreur(s), 2 non traité(s). ${STOP_REST}`);
+    expect(message).not.toContain('Indexation terminée');
+    expectRefusalOnce(message, 'Article a1');
+  });
+
+  it('« Télécharger tous les PDFs manquants depuis Zotero » : le PDF refusé reste téléchargé et rattaché, les suivants ne partent pas', async () => {
+    pdfIndex.mockResolvedValue(REFUSAL);
+    await mountIn([fromZotero('a1'), fromZotero('a2'), fromZotero('a3')]);
+    await launch('Télécharger tous les PDFs manquants depuis Zotero');
+
+    expect(downloadPDF).toHaveBeenCalledTimes(1);
+    expect(updateAttachment).toHaveBeenCalledTimes(1);
+    expect(pdfIndex).toHaveBeenCalledTimes(1);
+    const message = dialogs().alertMessage;
+    expect(message).toContain(
+      `« Télécharger tous les PDFs manquants depuis Zotero » arrêté : 0 PDF(s) traité(s), 1 erreur(s), 2 non traité(s). ${STOP_REST}`
+    );
+    expect(message).not.toContain('Téléchargement terminé');
+    expectRefusalOnce(message, 'Article a1');
+  });
+
+  it('« Tout ré-indexer »', async () => {
+    const citations = [withPdf('a1'), withPdf('a2'), withPdf('a3')];
+    h.modified = citations.map((c) => ({
+      citationId: c.id,
+      zoteroKey: c.zoteroKey,
+      attachmentKey: c.zoteroAttachments![0].key,
+      citationTitle: c.title,
+      filePath: c.file!,
+      reason: 'md5-changed',
+    }));
+    pdfIndex.mockResolvedValue(REFUSAL);
+    await mountIn(citations);
+    await act(async () => {
+      fireEvent.click(screen.getByText('Tout ré-indexer'));
+    });
+    await act(async () => {
+      dialogs().resolveConfirm(true);
+    });
+
+    expect(pdfIndex).toHaveBeenCalledTimes(1);
+    const message = dialogs().alertMessage;
+    expect(message).toContain(`« Tout ré-indexer » arrêté : 0 PDF(s) traité(s), 1 erreur(s), 2 non traité(s). ${STOP_REST}`);
+    expect(message).not.toContain('Ré-indexation terminée');
+    expectRefusalOnce(message, 'Article a1');
+    expect(h.acknowledged).toEqual([]);
+  });
+
+  it('refusé au dernier PDF : le bilan ordinaire, rien ne dit qu’il y en avait d’autres', async () => {
+    pdfIndex.mockResolvedValueOnce({ success: true }).mockResolvedValueOnce(REFUSAL);
+    await mountIn([withPdf('a1'), withPdf('a2')]);
+    await launch('Indexer tous les PDFs');
+
+    expect(pdfIndex).toHaveBeenCalledTimes(2);
+    const message = dialogs().alertMessage;
+    expect(message).toContain('Indexation terminée: 1 indexés, 0 ignorés, 1 erreurs');
+    expect(message).not.toContain('arrêté');
+    expectRefusalOnce(message, 'Article a2');
+  });
+});
