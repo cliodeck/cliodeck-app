@@ -16,12 +16,21 @@ export interface FakeOllama {
   port: number;
   /** Avec `hangChat` : les demandes de chat reçues, et celles que l'app a coupées sans attendre la réponse. */
   chatRequests(): number;
+  /** Les textes que l'app a demandé d'embarquer avec ce modèle d'embeddings. */
+  embeddedTexts(model: string): string[];
   chatAborted(): number;
   close(): Promise<void>;
 }
 
 /** Celle de nomic-embed-text : les index du projet refusent un vecteur d'une autre taille. */
 const EMBEDDING_DIMENSION = 768;
+
+/**
+ * Un second modèle d'embeddings, d'une autre dimension, pour un changement de modèle (L06-9) :
+ * l'app le connaît (`OLLAMA_EMBEDDING_DIMS`) et en attend 1024. Tout autre modèle répond en 768.
+ */
+export const OTHER_EMBEDDING_MODEL = 'mxbai-embed-large';
+const OTHER_EMBEDDING_DIMENSION = 1024;
 
 /**
  * `onlyItsModel` : le seul modèle « installé » répond ; les autres reçoivent la réponse d'Ollama à un
@@ -38,6 +47,7 @@ export async function startFakeOllama(
   const MODEL = 'faux:latest';
   let chatRequests = 0;
   let chatAborted = 0;
+  const embedded = new Map<string, string[]>();
   const server: Server = createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => {
@@ -56,9 +66,12 @@ export async function startFakeOllama(
         case '/api/show':
           return json({ capabilities: ['completion'], model_info: { 'faux.context_length': 8192 } });
         case '/api/embed': {
-          const { input } = JSON.parse(body) as { input: unknown };
+          const { input, model } = JSON.parse(body) as { input: unknown; model?: string };
           const count = Array.isArray(input) ? input.length : 1;
-          return json({ embeddings: Array.from({ length: count }, () => Array(EMBEDDING_DIMENSION).fill(0.1)) });
+          const texts = (Array.isArray(input) ? input : [input]).map(String);
+          embedded.set(model ?? '', [...(embedded.get(model ?? '') ?? []), ...texts]);
+          const dimension = model?.split(':')[0] === OTHER_EMBEDDING_MODEL ? OTHER_EMBEDDING_DIMENSION : EMBEDDING_DIMENSION;
+          return json({ embeddings: Array.from({ length: count }, () => Array(dimension).fill(0.1)) });
         }
         case '/api/chat': {
           const { model } = JSON.parse(body) as { model: string };
@@ -108,6 +121,7 @@ export async function startFakeOllama(
     userDataDir,
     port,
     chatRequests: () => chatRequests,
+    embeddedTexts: (model: string) => embedded.get(model) ?? [],
     chatAborted: () => chatAborted,
     close: () =>
       new Promise((resolve) => {
