@@ -9,6 +9,7 @@ import { useUsageJournalStore } from '../../stores/usageJournalStore';
 import { useTropyReindexStatus } from '../../stores/tropyReindexStore';
 import { describeReindexStatus, reindexStatusLabel } from '../PrimarySources/reindex-status';
 import { usePdfIndexRebuildDue } from '../../stores/pdfIndexStore';
+import { useTropyReembedProposal } from '../../stores/tropyReembedStore';
 import './StatusBar.css';
 
 interface MCPClientSummary {
@@ -56,6 +57,10 @@ export const StatusBar: React.FC = () => {
   // Index des PDF à reconstruire (J8) : proposé à la réouverture, dans le panneau
   // Bibliographie, que l'écran ne montre pas forcément.
   const pdfIndex = usePdfIndexRebuildDue();
+
+  // Sources primaires à réindexer après un changement de modèle d'embeddings (Q29) : proposé dans
+  // le panneau Sources primaires, que l'écran ne montre pas forcément.
+  const tropyReembed = useTropyReembedProposal();
 
   // Usage journal: substantial sessions of the day not yet covered by a
   // decision. Shared store with the Cmd/Ctrl+J modal, so annotating there
@@ -249,6 +254,18 @@ export const StatusBar: React.FC = () => {
             onClick={() => window.dispatchEvent(new CustomEvent('switch-panel', { detail: 'bibliography' }))}
           >
             {t('pdfIndexRebuild.status')}
+          </button>
+        )}
+
+        {/* Sources primaires à réindexer : ouvre le panneau, où le bandeau le propose */}
+        {tropyReembed.proposal && (
+          <button
+            type="button"
+            className="status-bar__item status-bar__item--warning status-bar__button"
+            title={t('primarySources.reembed.statusTooltip')}
+            onClick={() => window.dispatchEvent(new CustomEvent('switch-panel', { detail: 'primary-sources' }))}
+          >
+            {t('primarySources.reembed.status')}
           </button>
         )}
 

@@ -153,6 +153,73 @@
   color: var(--color-accent);
 }
 
+/* Réindexation proposée après un changement de modèle d'embeddings (Q29) : une proposition, pas une panne. */
+.tropy-reembed-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.tropy-reembed-notice > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--color-warning);
+}
+
+.tropy-reembed-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.tropy-reembed-notice-text p {
+  margin: 0 0 6px;
+}
+
+.tropy-reembed-notice-title {
+  font-weight: 600;
+}
+
+.tropy-reembed-notice-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tropy-reembed-notice-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tropy-reembed-notice-button:hover {
+  background-color: color-mix(in srgb, var(--color-accent) 10%, var(--bg-panel));
+}
+
+.tropy-reembed-notice-close {
+  flex-shrink: 0;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.tropy-reembed-notice-close:hover {
+  color: var(--text-primary);
+}
+
 .tropy-project-info .project-name {
   font-weight: 500;
   color: var(--text-primary);

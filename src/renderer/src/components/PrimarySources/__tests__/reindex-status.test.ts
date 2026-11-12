@@ -78,3 +78,58 @@ describe('réindexation complète : le message autour de la reconstruction de l�
     }
   });
 });
+
+/**
+ * La réindexation qu'un changement de modèle d'embeddings fait proposer (L06-9, Q29) n'est pas celle
+ * d'une mise à jour : elle n'a lieu qu'une fois confirmée, les anciens extraits ne servent plus la
+ * recherche par le sens, et, interrompue, elle ne reprend pas seule. Les messages de H7 disaient
+ * l'inverse (« une seule fois, après une mise à jour », « l'assistant consulte les anciens
+ * extraits », « elle reprendra … là où elle s'est arrêtée »).
+ */
+describe('réindexation pour un nouveau modèle : ses propres messages (Q29)', () => {
+  const cause = 'model-change' as const;
+
+  it('en cours : ni « après une mise à jour », ni « anciens extraits » ; transcriptions gardées, et l’interruption dite', async () => {
+    const t = await translator('fr');
+    const text = describeReindexStatus(t, { phase: 'running', cause, done: 2, total: 3, chunks: 40648, waitingForSync: false }, 'fr') ?? '';
+
+    expect(text).toContain('nouveau modèle de recherche sémantique');
+    expect(text).toContain('2 / 3 source(s)');
+    expect(text).toContain(`${(40648).toLocaleString('fr')} extrait(s) à refaire`);
+    expect(text).toContain('Les transcriptions sont gardées');
+    expect(text).toContain("l'OCR n'est pas refait");
+    expect(text).toContain('proposée de nouveau à la prochaine ouverture');
+    expect(text).not.toContain('mise à jour');
+    expect(text).not.toContain('anciens extraits');
+  });
+
+  it('arrêtée : les sources restantes, et la proposition qui revient, jamais « elle reprendra là où elle s’est arrêtée »', async () => {
+    const t = await translator('fr');
+    for (const reason of ['no-embedding-provider', 'embedding-failed'] as const) {
+      const text = describeReindexStatus(t, { phase: 'stopped', cause, reason, total: 3, remaining: 2 }, 'fr') ?? '';
+      expect(text).toContain('nouveau modèle');
+      expect(text).toContain('2 source(s) restent à réindexer');
+      expect(text).toContain('proposée de nouveau');
+      expect(text).not.toContain('là où elle s');
+    }
+  });
+
+  it('finie, et les trois langues', async () => {
+    for (const lng of ['fr', 'en', 'de'] as const) {
+      const t = await translator(lng);
+      const texts = [
+        describeReindexStatus(t, { phase: 'running', cause, done: 1, total: 3, chunks: 9, waitingForSync: true }, lng),
+        describeReindexStatus(t, { phase: 'running', cause, done: 3, total: 3, chunks: 9, waitingForSync: false }, lng),
+        describeReindexStatus(t, { phase: 'stopped', cause, reason: 'embedding-failed', total: 3, remaining: 2 }, lng),
+        describeReindexStatus(t, { phase: 'stopped', cause, reason: 'no-embedding-provider', total: 3, remaining: 2 }, lng),
+        describeReindexStatus(t, { phase: 'done', cause, total: 3 }, lng),
+      ];
+      for (const text of texts) {
+        expect(text).toBeTruthy();
+        expect(text).not.toMatch(/primarySources\.|\{\{/);
+      }
+      // Pas le texte de la réindexation d'une mise à jour.
+      expect(texts[4]).not.toBe(describeReindexStatus(t, { phase: 'done', total: 3 }, lng));
+    }
+  });
+});

@@ -83,6 +83,10 @@ const INVENTORY: Record<string, Scope> = {
     scope: 'project',
     why: 'index des PDF à reconstruire, lu dans le brain.db du projet, et son bandeau fermé : il revient à la réouverture (J8)',
   },
+  'tropyReembedStore.ts': {
+    scope: 'project',
+    why: 'sources primaires à réindexer après un changement de modèle, lues dans le brain.db du projet, et leur bandeau fermé : il revient à la réouverture (Q29)',
+  },
   'ideaStore.ts': {
     scope: 'project',
     why: 'idées du projet, sélection, état de son fichier ; un chargement en vol devient caduc (S16-1-18)',
