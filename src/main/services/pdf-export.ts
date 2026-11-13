@@ -111,6 +111,104 @@ const getSystemFonts = (): { mainFont: string; sansFont: string; monoFont: strin
   }
 };
 
+/**
+ * Ce que pandoc écrit et que seul SON gabarit par défaut définit (J19). Sans ce préambule, tout
+ * tableau échouait sur « Environment longtable undefined » (puis « No counter 'none' defined »),
+ * toute image sur « Undefined control sequence \pandocbounded », tout texte barré sur `\st`,
+ * toute liste de tâches sur `\square` ; le souligné, les formules alignées et le code dans une
+ * note de même.
+ *
+ * Recopié de pandoc 3.13 : `amsmath,amssymb` du gabarit (`pandoc --print-default-template
+ * latex`), `\VerbatimFootnotes` du partiel `after-header-includes.latex`, le reste du partiel
+ * `common.latex` (`pandoc --print-default-data-file templates/common.latex`), avec ses
+ * conditions — un document sans tableau ne charge ni longtable ni caption. N'en restent que les
+ * branches de xelatex hors beamer : xelatex est le seul moteur de l'export, et les présentations
+ * compilent avec le gabarit beamer de pandoc lui-même.
+ *
+ * Inclure le partiel (`$common.latex()$`) au lieu de le recopier ne tient pas : il redéfinit les
+ * macros de coloration et `CSLReferences` de ces gabarits (« Command \VerbBar already defined »),
+ * met les paragraphes sans alinéa (parskip) et n'existe qu'à partir de pandoc 3.5. Une version
+ * suivante de pandoc peut écrire une macro de plus : `pdf-export-latex.test.ts` compile chaque
+ * construction avec le pandoc installé.
+ */
+const PANDOC_OUTPUT_PREAMBLE = `% Ce que pandoc ecrit et que seul son gabarit par defaut definit : recopie
+% de pandoc 3.13 (default.latex, partiels common.latex et after-header-includes.latex),
+% branches xelatex hors beamer.
+\\usepackage{amsmath,amssymb}
+$if(verbatim-in-note)$
+\\usepackage{fancyvrb}
+\\VerbatimFootnotes % allow verbatim text in footnotes
+$endif$
+$if(tables)$
+\\usepackage{longtable,booktabs,array}
+\\usepackage{caption}
+\\captionsetup[table]{skip=6pt}
+\\newcounter{none} % for unnumbered tables
+$if(multirow)$
+\\usepackage{multirow}
+$endif$
+\\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \\paragraph or \\subparagraph
+\\usepackage{etoolbox}
+\\makeatletter
+\\patchcmd\\longtable{\\par}{\\if@noskipsec\\mbox{}\\fi\\par}{}{}
+\\makeatother
+$endif$
+$if(graphics)$
+\\usepackage{graphicx}
+\\makeatletter
+\\newsavebox\\pandoc@box
+\\newcommand*\\pandocbounded[1]{% scales image to fit in text height/width
+  \\sbox\\pandoc@box{#1}%
+  \\Gscale@div\\@tempa{\\textheight}{\\dimexpr\\ht\\pandoc@box+\\dp\\pandoc@box\\relax}%
+  \\Gscale@div\\@tempb{\\linewidth}{\\wd\\pandoc@box}%
+  \\ifdim\\@tempb\\p@<\\@tempa\\p@\\let\\@tempa\\@tempb\\fi% select the smaller of both
+  \\ifdim\\@tempa\\p@<\\p@\\scalebox{\\@tempa}{\\usebox\\pandoc@box}%
+  \\else\\usebox{\\pandoc@box}%
+  \\fi%
+}
+% Set default figure placement to htbp
+\\def\\fps@figure{htbp}
+\\makeatother
+$endif$
+$if(svg)$
+\\usepackage{svg}
+$endif$
+$if(strikeout)$
+\\usepackage{soul}
+$endif$`;
+
+/**
+ * Citations liées (J19). Avec `link-citations: true` dans l'en-tête YAML du document, pandoc
+ * écrit `\citeproc{ref-cle}{texte}`, que seul le bloc `csl-refs` de `common.latex` définit :
+ * « Undefined control sequence \citeproc » sinon. Par `\cite`, le texte devient un lien vers le
+ * `\bibitem[\citeproctext]{ref-cle}` que pandoc écrit toujours dans `CSLReferences`.
+ *
+ * Recopié de pandoc 3.13, sans son `\citeproctext` : celui des gabarits, robuste, reste en place
+ * (`\citeproc` le redéfinit dans un groupe). Sans `link-citations`, pandoc n'écrit pas `\cite`, et
+ * `CSLReferences` efface déjà les étiquettes de `\bibitem` : le rendu ne change pas (mesuré :
+ * pages identiques à l'octet près, article et livre).
+ *
+ * Une seule différence avec pandoc : une clé sans notice (`@inconnu2020`) garde le texte que
+ * pandoc écrit pour elle (« inconnu2020? »), au lieu du « ? » de `\cite` (« ( ?) », avec le
+ * gabarit de pandoc aussi) : l'historien voit quelle citation manque. Une clé connue n'a son
+ * `b@ref-cle` qu'à partir de la deuxième passe de xelatex, que pandoc relance tant que LaTeX le
+ * demande (« Label(s) may have changed ») : les citations connues restent des liens (mesuré :
+ * mêmes liens, pages identiques à l'octet près).
+ */
+const PANDOC_CITEPROC_LINKS = `% Citations liees (link-citations) : recopie de pandoc 3.13 (common.latex, bloc csl-refs),
+% sauf pour une cle sans notice : pandoc en ecrit le nom (inconnu2020?), que \\cite
+% remplacerait par un simple point d'interrogation.
+\\makeatletter
+\\NewDocumentCommand\\citeproc{mm}{%
+  \\@ifundefined{b@#1}{#2}{\\begingroup\\def\\citeproctext{#2}\\cite{#1}\\endgroup}}
+ % allow citations to break across lines
+ \\let\\@cite@ofmt\\@firstofone
+ % avoid brackets around text for \\cite:
+ \\def\\@biblabel#1{}
+ \\def\\@cite#1#2{{#1\\if@tempswa , #2\\fi}}
+\\makeatother`;
+
 const getLatexTemplate = (projectType: string): string => {
   // Get platform-appropriate system fonts
   const { mainFont, sansFont, monoFont } = getSystemFonts();
@@ -148,6 +246,8 @@ const getLatexTemplate = (projectType: string): string => {
 % echoue a la compilation (« Environment Shaded undefined »).
 $highlighting-macros$
 
+${PANDOC_OUTPUT_PREAMBLE}
+
 % CSLReferences environment and commands for pandoc citeproc
 \\newlength{\\cslhangindent}
 \\setlength{\\cslhangindent}{1.5em}
@@ -172,6 +272,7 @@ $highlighting-macros$
 \\DeclareRobustCommand{\\citeprocvolume}{}
 \\DeclareRobustCommand{\\citeprocissue}{}
 \\DeclareRobustCommand{\\citeprocpages}{}
+${PANDOC_CITEPROC_LINKS}
 
 % Header/Footer
 \\pagestyle{fancy}
@@ -225,9 +326,22 @@ $body$
 % Notes de fin (reglage noteStyle) : le paquet endnotes accumule les notes
 % jusqu'au prochain \\theendnotes, que l'assembleur place apres chaque
 % chapitre ou en fin d'ouvrage.
+% Une note dans un tableau ou dans une legende, pandoc l'ecrit en deux temps :
+% \\footnotemark{} dans la cellule, \\footnotetext{...} apres, avec des
+% \\addtocounter{footnote}{-1} entre plusieurs. Les trois passent aux notes de
+% fin, et le compteur footnote devient celui des notes de fin : sans cela, ces
+% notes sortaient en bas de page, numerotees a part (J19). La classe book
+% remet footnote a zero a chaque chapitre : plus maintenant, puisque c'est le
+% compteur des notes de fin, que seul l'assembleur remet a zero (per-chapter).
 $if(endnotes)$
 \\usepackage{endnotes}
 \\let\\footnote\\endnote
+\\let\\footnotemark\\endnotemark
+\\let\\footnotetext\\endnotetext
+\\makeatletter
+\\let\\c@footnote\\c@endnote
+\\makeatother
+\\counterwithout{footnote}{chapter}
 \\renewcommand{\\notesname}{Notes}
 $endif$
 
@@ -248,6 +362,8 @@ $endif$
 % par defaut. Sans cette variable, tout document contenant un bloc de code
 % echoue a la compilation (« Environment Shaded undefined »).
 $highlighting-macros$
+
+${PANDOC_OUTPUT_PREAMBLE}
 
 % CSLReferences environment and commands for pandoc citeproc
 \\newlength{\\cslhangindent}
@@ -273,6 +389,7 @@ $highlighting-macros$
 \\DeclareRobustCommand{\\citeprocvolume}{}
 \\DeclareRobustCommand{\\citeprocissue}{}
 \\DeclareRobustCommand{\\citeprocpages}{}
+${PANDOC_CITEPROC_LINKS}
 
 % Header/Footer
 \\pagestyle{fancy}
