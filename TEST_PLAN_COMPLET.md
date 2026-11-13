@@ -531,7 +531,7 @@
 | **OpenAI** | [ ] 🔍 | 15 min | Clé API, modèle: gpt-4o | Connection OK |
 | **Anthropic** | [ ] 🔍 | 15 min | Clé API, modèle: claude-3-sonnet | Connection OK |
 | **Mistral** | [ ] 🔍 | 15 min | Clé API, modèle: mistral-large | Connection OK |
-| **Gemini** | [ ] 🔍 | 15 min | Clé API, modèle: gemini-2.0-flash | Connection OK |
+| **Gemini** | [ ] 🔍 | 15 min | Clé API, modèle: gemini-3.6-flash (ou champ vide) | Connection OK |
 | **OpenAI-Compatible (LM Studio)** | [ ] 🔍 | 15 min | `http://localhost:1234`, clé API: empty | Connection OK |
 | **OpenAI-Compatible (vLLM)** | [ ] 🔍 | 15 min | URL serveur, clé API | Connection OK |
 

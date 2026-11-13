@@ -58,7 +58,7 @@ const ALLOWED = new Set([
   // Vocabulaire YAML du format de recettes : c'est la syntaxe, pas de la prose.
   'key', 'description', 'with', 'key: value',
   // Formats de clés d'API et noms de modèles.
-  'sk-ant-…', 'sk-…', 'AIza…', 'o1-mini', 'gemma2:2b',
+  'sk-ant-…', 'sk-…', 'AIza…', 'gemma2:2b',
 ]);
 
 function isVisibleProse(raw: string): boolean {

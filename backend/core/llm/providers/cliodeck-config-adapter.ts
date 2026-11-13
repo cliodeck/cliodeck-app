@@ -36,6 +36,14 @@ const OLLAMA_EMBEDDING_DIMS: Record<string, number> = {
   'all-minilm': 384,
 };
 
+/**
+ * Modèle Gemini d'un champ laissé vide. `gemini-2.0-flash` est fermé depuis le 1er juin 2026 ; son
+ * remplaçant, selon la page des dépréciations de l'API Gemini (lue le 2026-11-13), est
+ * `gemini-3.6-flash`, stable, sans date de fermeture annoncée (S05-2-0). Une seule copie : le registre
+ * et la fenêtre du compacteur (`resolveActiveChatModel`) la lisent tous deux.
+ */
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
+
 export interface AdapterOptions {
   dimensionOverride?: number;
 }
@@ -183,7 +191,7 @@ export function clioDeckConfigToRegistryConfig(
       return {
         llm: {
           provider: 'gemini',
-          model: cfg.geminiModel || 'gemini-2.0-flash',
+          model: cfg.geminiModel || DEFAULT_GEMINI_MODEL,
           apiKey: cfg.geminiAPIKey,
         },
         embedding,
@@ -211,7 +219,7 @@ export function resolveActiveChatModel(cfg: ClioDeckLLMConfig): string {
     case 'mistral':
       return cfg.mistralModel || 'mistral-large-latest';
     case 'gemini':
-      return cfg.geminiModel || 'gemini-2.0-flash';
+      return cfg.geminiModel || DEFAULT_GEMINI_MODEL;
     case 'ollama':
     default:
       // En `embedded`, le modèle actif est le GGUF chargé : c'est sa fenêtre

@@ -189,8 +189,8 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
                 <div className="config-description">
                   <small>
-                    {t('llm.model.examples')} <code>gpt-4o</code>, <code>gpt-4o-mini</code>,{' '}
-                    <code>gpt-4-turbo</code>, <code>o1-mini</code>
+                    {t('llm.model.examples')} <code>gpt-4o-mini</code>, <code>gpt-4o</code>,{' '}
+                    <code>gpt-6-luna</code>
                   </small>
                 </div>
               </div>
@@ -260,13 +260,12 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                   value={config.geminiModel ?? ''}
                   onChange={(e) => handleFieldChange('geminiModel', e.target.value)}
                   className="config-input"
-                  placeholder="gemini-2.0-flash"
+                  placeholder="gemini-3.6-flash"
                 />
                 <div className="config-description">
                   <small>
-                    {t('llm.model.examples')} <code>gemini-2.0-flash</code>,{' '}
-                    <code>gemini-2.0-flash-lite</code>,{' '}
-                    <code>gemini-1.5-pro</code>, <code>gemini-1.5-flash</code>.
+                    {t('llm.model.examples')} <code>gemini-3.6-flash</code>,{' '}
+                    <code>gemini-3.8-flash</code>, <code>gemini-3.5-flash-lite</code>.
                   </small>
                 </div>
               </div>

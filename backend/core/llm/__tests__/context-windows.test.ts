@@ -46,6 +46,22 @@ describe('getContextWindow', () => {
     expect(getContextWindow('codestral-latest')).toBe(256_000);
   });
 
+  // Limite d'entrée de chaque fiche de modèle (aistudio.google.com/docs/models/<id>, lues le
+  // 2026-11-13) : « Input token limit 1,048,576 ». La règle `/gemini/` de repli en donnait 32 000.
+  it('matches Gemini 3 models (1 048 576 input tokens)', () => {
+    expect(getContextWindow('gemini-3.6-flash')).toBe(1_048_576);
+    expect(getContextWindow('gemini-3.8-flash')).toBe(1_048_576);
+    expect(getContextWindow('gemini-3.5-flash-lite')).toBe(1_048_576);
+    expect(getContextWindow('gemini-3.1-pro-preview')).toBe(1_048_576);
+  });
+
+  // « 1,050,000 context window » (developers.openai.com/api/docs/models/gpt-6-luna, lue le
+  // 2026-11-13) ; la page des modèles donne « 1.05M » à toute la famille. Sans entrée : 8 192.
+  it('matches OpenAI GPT-6 family', () => {
+    expect(getContextWindow('gpt-6-luna')).toBe(1_050_000);
+    expect(getContextWindow('gpt-6.1-terra')).toBe(1_050_000);
+  });
+
   it('matches Gemini models', () => {
     expect(getContextWindow('gemini-2.0-flash')).toBe(1_000_000);
     expect(getContextWindow('gemini-1.5-pro')).toBe(2_000_000);

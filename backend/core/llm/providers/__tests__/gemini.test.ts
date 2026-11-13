@@ -5,14 +5,16 @@ import {
   runLLMProviderContract,
 } from './contract.js';
 import { GeminiEmbeddingProvider, GeminiProvider } from '../gemini.js';
+import { DEFAULT_GEMINI_MODEL } from '../cliodeck-config-adapter.js';
 import { runChatTurn } from '../../../../../src/main/services/chat-engine.js';
 
+// Avec `GEMINI_API_KEY`, le contrat part vers Google : le modèle par défaut, pour qu'il soit servi.
 runLLMProviderContract(
   'gemini',
   () =>
     new GeminiProvider({
       apiKey: process.env.GEMINI_API_KEY ?? '',
-      model: 'gemini-2.0-flash',
+      model: DEFAULT_GEMINI_MODEL,
     })
 );
 
