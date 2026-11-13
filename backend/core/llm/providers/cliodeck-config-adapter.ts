@@ -36,6 +36,23 @@ const OLLAMA_EMBEDDING_DIMS: Record<string, number> = {
   'all-minilm': 384,
 };
 
+/**
+ * Modèle Gemini d'un champ laissé vide. `gemini-2.0-flash` est fermé depuis le 1er juin 2026 ; son
+ * remplaçant, selon la page des dépréciations de l'API Gemini (lue le 2026-11-13), est
+ * `gemini-3.6-flash`, stable, sans date de fermeture annoncée (S05-2-0). Une seule copie : le registre
+ * et la fenêtre du compacteur (`resolveActiveChatModel`) la lisent tous deux.
+ */
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
+
+/**
+ * Modèle OpenAI d'un champ laissé vide, lu par le registre et par `resolveActiveChatModel`.
+ * `gpt-4o-mini` ferme le 14 janvier 2027 (page des dépréciations d'OpenAI, lue le 2026-11-13), et
+ * son remplaçant désigné, `gpt-6-luna`, n'accepte les outils en Chat Completions qu'avec
+ * `reasoning_effort: "none"` : le changer demande d'abord de décider ce que le fournisseur fait des
+ * outils MCP pour la famille GPT-6. À faire avant cette date.
+ */
+export const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+
 export interface AdapterOptions {
   dimensionOverride?: number;
 }
@@ -152,7 +169,7 @@ export function clioDeckConfigToRegistryConfig(
       return {
         llm: {
           provider: 'openai-compatible',
-          model: cfg.openaiModel || 'gpt-4o-mini',
+          model: cfg.openaiModel || DEFAULT_OPENAI_MODEL,
           apiKey: cfg.openaiAPIKey,
           baseUrl: 'https://api.openai.com/v1',
         },
@@ -183,7 +200,7 @@ export function clioDeckConfigToRegistryConfig(
       return {
         llm: {
           provider: 'gemini',
-          model: cfg.geminiModel || 'gemini-2.0-flash',
+          model: cfg.geminiModel || DEFAULT_GEMINI_MODEL,
           apiKey: cfg.geminiAPIKey,
         },
         embedding,
@@ -207,11 +224,11 @@ export function resolveActiveChatModel(cfg: ClioDeckLLMConfig): string {
     case 'claude':
       return cfg.claudeModel || 'claude-sonnet-4-6';
     case 'openai':
-      return cfg.openaiModel || 'gpt-4o-mini';
+      return cfg.openaiModel || DEFAULT_OPENAI_MODEL;
     case 'mistral':
       return cfg.mistralModel || 'mistral-large-latest';
     case 'gemini':
-      return cfg.geminiModel || 'gemini-2.0-flash';
+      return cfg.geminiModel || DEFAULT_GEMINI_MODEL;
     case 'ollama':
     default:
       // En `embedded`, le modèle actif est le GGUF chargé : c'est sa fenêtre

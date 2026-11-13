@@ -3,10 +3,12 @@ import {
   applyChatModelOverride,
   clioDeckConfigToRegistryConfig,
   createRegistryFromClioDeckConfig,
+  DEFAULT_OPENAI_MODEL,
   isLocalOllamaGeneration,
   resolveActiveChatModel,
 } from '../cliodeck-config-adapter.js';
 import { cloudEmbeddingTarget } from '../cloud-embedding-target.js';
+import { getContextWindow } from '../../context-windows.js';
 import type { LLMConfig } from '../../../../types/config.js';
 
 const base: LLMConfig = {
@@ -82,6 +84,43 @@ describe('ClioDeck LLMConfig → Registry adapter (3.2)', () => {
     expect(r.llm.provider).toBe('gemini');
     expect(r.llm.model).toBe('gemini-2.0-flash');
     expect(r.llm.apiKey).toBe('AIza-test');
+  });
+
+  /**
+   * `gemini-2.0-flash` est fermé depuis le 1er juin 2026 : backend Gemini, champ du modèle vide,
+   * chaque tour finissait en erreur (S05-2-0, volet génération). Le remplaçant est celui que la page
+   * des dépréciations de l'API Gemini donne pour lui (lue le 2026-11-13). Le compacteur lit la
+   * fenêtre de ce même modèle (`resolveActiveChatModel`), avec la même valeur par défaut.
+   */
+  it('gemini sans modèle saisi : un modèle servi, le même pour le registre et le compacteur', () => {
+    const cfg: LLMConfig = { ...base, backend: 'gemini', geminiAPIKey: 'AIza-test' };
+    const r = clioDeckConfigToRegistryConfig(cfg);
+    expect(r.llm.model).toBe('gemini-3.6-flash');
+    expect(resolveActiveChatModel(cfg)).toBe(r.llm.model);
+    expect(resolveActiveChatModel({ ...cfg, geminiModel: '' })).toBe('gemini-3.6-flash');
+    // Sans entrée pour la famille, la table rendait 32 000 jetons (règle `/gemini/` de repli) : le
+    // compacteur, qui se déclenche à 70 % de la fenêtre du tour, aurait résumé bien trop tôt.
+    expect(getContextWindow(resolveActiveChatModel(cfg))).toBe(1_048_576);
+  });
+
+  it('un modèle Gemini saisi par l’utilisateur n’est jamais réécrit', () => {
+    const r = clioDeckConfigToRegistryConfig({
+      ...base,
+      backend: 'gemini',
+      geminiAPIKey: 'AIza-test',
+      geminiModel: 'gemini-2.5-flash-lite',
+    });
+    expect(r.llm.model).toBe('gemini-2.5-flash-lite');
+  });
+
+  // Le défaut OpenAI n'a qu'une copie, comme celui de Gemini : le jour où il change (`gpt-4o-mini`
+  // ferme le 14 janvier 2027), le registre et la fenêtre du compacteur changent ensemble.
+  it('openai sans modèle saisi : le même défaut pour le registre et le compacteur', () => {
+    const cfg: LLMConfig = { ...base, backend: 'openai', openaiAPIKey: 'sk-test' };
+    const r = clioDeckConfigToRegistryConfig(cfg);
+    expect(r.llm.model).toBe(DEFAULT_OPENAI_MODEL);
+    expect(resolveActiveChatModel(cfg)).toBe(DEFAULT_OPENAI_MODEL);
+    expect(getContextWindow(resolveActiveChatModel(cfg))).toBe(128_000);
   });
 
   it('keeps embeddings on ollama by default even when backend is cloud', () => {

@@ -42,9 +42,52 @@ export interface GeminiEmbeddingConfig {
   baseUrl?: string;
 }
 
+/**
+ * Modèles Gemini qui réfléchissent : 2.5, 3, 4 et suivants, et les alias `gemini-…-latest`, qui
+ * désignent la dernière version d'une variante (page des modèles, lue le 2026-11-13). Gemini 2.0 et
+ * 1.5 ne réfléchissent pas.
+ */
+export function isGeminiThinkingModel(model: string): boolean {
+  return /^gemini-(?:2\.5|[3-9]|[1-9]\d)/i.test(model) || /^gemini-[a-z-]+-latest$/i.test(model);
+}
+
+/**
+ * Réserve de réflexion ajoutée au budget de réponse d'un modèle qui réfléchit. `maxOutputTokens`
+ * compte les jetons de pensée (« including thought tokens »), et une limite atteinte pendant la
+ * réflexion rend « truncated or empty output » avec `MAX_TOKENS`, que `collectCompletion` prend
+ * pour un succès : une étape de recette à 800 jetons rendait un texte vide, sans erreur. Google ne
+ * donne pas de chiffre ; 32 768 est le plus grand budget de réflexion que documente la page
+ * « Thinking » (Gemini 2.5 Pro, lue le 2026-11-13). Le budget demandé reste celui du texte visible.
+ */
+export const GEMINI_THINKING_TOKEN_RESERVE = 32_768;
+
+/**
+ * Limite de sortie par requête des modèles qui réfléchissent : « Output token limit 65,536 » sur la
+ * fiche de gemini-3.6-flash, « 64K » pour Gemini 4, et Gemini 4 Hydrogen « returns up to 65,536
+ * tokens » (pages lues le 2026-11-13). La réserve ne la dépasse pas.
+ */
+export const GEMINI_THINKING_MAX_OUTPUT_TOKENS = 65_536;
+
+/** Le `maxOutputTokens` envoyé pour un budget demandé (`undefined` : rien n'est envoyé). */
+function maxOutputTokensFor(model: string, maxTokens: number | undefined): number | undefined {
+  if (maxTokens === undefined || !isGeminiThinkingModel(model)) return maxTokens;
+  return Math.min(maxTokens + GEMINI_THINKING_TOKEN_RESERVE, GEMINI_THINKING_MAX_OUTPUT_TOKENS);
+}
+
+/**
+ * Signatures de pensée gardées par une instance, au plus. Google ne valide que le tour en cours
+ * (« Only current turn is required ») : quelques dizaines suffisent, la borne évite seulement que la
+ * table croisse sans fin sur une longue session.
+ */
+const MAX_KEPT_THOUGHT_SIGNATURES = 256;
+
 type GeminiPart =
   | { text: string }
-  | { functionCall: { name: string; args: Record<string, unknown> } }
+  | {
+      functionCall: { name: string; args: Record<string, unknown> };
+      /** Signature de pensée reçue avec cet appel, rendue telle quelle (Gemini 3 et 4). */
+      thoughtSignature?: string;
+    }
   | {
       functionResponse: {
         name: string;
@@ -74,8 +117,15 @@ function now(): string {
  * exactly one systemInstruction; multiple system turns are concatenated.
  * Consecutive same-role messages are merged into a single content (Gemini
  * rejects two consecutive 'user' or 'model' turns).
+ *
+ * `signatureFor` rend la signature de pensée reçue avec un appel d'outil, par son identifiant : elle
+ * revient « in the exact part where it was received », sans quoi Gemini 3 et 4 refusent la requête
+ * (HTTP 400). Un appel sans signature (Gemini 2.5, appels parallèles après le premier) part sans.
  */
-function toGeminiPayload(messages: ChatMessage[]): {
+function toGeminiPayload(
+  messages: ChatMessage[],
+  signatureFor: (callId: string) => string | undefined = () => undefined
+): {
   systemInstruction?: { parts: GeminiPart[] };
   contents: GeminiContent[];
 } {
@@ -126,8 +176,10 @@ function toGeminiPayload(messages: ChatMessage[]): {
         } catch {
           parsed = {};
         }
+        const thoughtSignature = signatureFor(tc.id);
         pushPart('model', {
           functionCall: { name: tc.name, args: parsed },
+          ...(thoughtSignature ? { thoughtSignature } : {}),
         });
       }
       continue;
@@ -171,6 +223,14 @@ export class GeminiProvider implements LLMProvider {
   private readonly baseUrl: string;
   readonly model: string;
   private readonly apiKey: string;
+  /**
+   * Numéro du dernier appel d'outil reçu, sur toute la vie de l'instance : les identifiants
+   * synthétiques ne se répètent pas d'un flux à l'autre, pour que la signature d'un appel ne revienne
+   * pas sur un autre (deux étapes d'un même tour donnaient toutes deux `gemini-fc-1`).
+   */
+  private callSeq = 0;
+  /** Signature de pensée reçue avec chaque appel d'outil, par identifiant synthétique. */
+  private readonly thoughtSignatures = new Map<string, string>();
 
   constructor(cfg: GeminiProviderConfig) {
     this.baseUrl = (cfg.baseUrl ?? DEFAULT_BASE).replace(/\/$/, '');
@@ -230,7 +290,9 @@ export class GeminiProvider implements LLMProvider {
     opts: ChatOptions = {}
   ): AsyncIterable<ChatChunk> {
     const model = opts.model ?? this.model;
-    const { systemInstruction, contents } = toGeminiPayload(messages);
+    const { systemInstruction, contents } = toGeminiPayload(messages, (id) =>
+      this.thoughtSignatures.get(id)
+    );
     const tools: GeminiTool[] | undefined = opts.tools?.length
       ? [
           {
@@ -250,7 +312,7 @@ export class GeminiProvider implements LLMProvider {
         temperature: opts.temperature,
         topP: opts.topP,
         topK: opts.topK,
-        maxOutputTokens: opts.maxTokens,
+        maxOutputTokens: maxOutputTokensFor(model, opts.maxTokens),
         stopSequences: opts.stop,
       },
     };
@@ -304,7 +366,6 @@ export class GeminiProvider implements LLMProvider {
     let buf = '';
     let usage: ChatChunk['usage'] | undefined;
     let finishReason: ChatChunk['finishReason'] = 'stop';
-    let callCounter = 0;
 
     try {
       while (true) {
@@ -332,6 +393,7 @@ export class GeminiProvider implements LLMProvider {
                       name?: string;
                       args?: Record<string, unknown>;
                     };
+                    thoughtSignature?: string;
                   }>;
                 };
                 finishReason?: string;
@@ -365,7 +427,10 @@ export class GeminiProvider implements LLMProvider {
               } else if (part.functionCall?.name) {
                 // Gemini doesn't emit a call id; synthesise a stable one
                 // so downstream code can route the matching response.
-                const id = `gemini-fc-${++callCounter}`;
+                const id = `gemini-fc-${++this.callSeq}`;
+                // Gemini 3 et 4 : la signature du premier appel de chaque étape doit revenir dans
+                // la requête suivante du tour, sur cette même part.
+                if (part.thoughtSignature) this.keepThoughtSignature(id, part.thoughtSignature);
                 yield {
                   delta: '',
                   toolCall: {
@@ -424,6 +489,15 @@ export class GeminiProvider implements LLMProvider {
 
   async dispose(): Promise<void> {
     this.status = { state: 'stopped' };
+    this.thoughtSignatures.clear();
+  }
+
+  private keepThoughtSignature(id: string, signature: string): void {
+    this.thoughtSignatures.set(id, signature);
+    if (this.thoughtSignatures.size > MAX_KEPT_THOUGHT_SIGNATURES) {
+      const oldest = this.thoughtSignatures.keys().next().value;
+      if (oldest !== undefined) this.thoughtSignatures.delete(oldest);
+    }
   }
 }
 

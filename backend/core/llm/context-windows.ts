@@ -41,6 +41,9 @@ const TABLE: readonly Entry[] = [
   { pattern: /claude-3/i, window: 200_000 },
 
   // OpenAI / OpenAI-compatible
+  // GPT-6 : « 1,050,000 context window » (fiche de gpt-6-luna, « 1.05M » pour toute la famille sur
+  // la page des modèles d'OpenAI, lues le 2026-11-13).
+  { pattern: /gpt-6/i, window: 1_050_000 },
   { pattern: /gpt-5/i, window: 256_000 },
   { pattern: /gpt-4\.1/i, window: 1_000_000 },
   { pattern: /gpt-4o/i, window: 128_000 },
@@ -59,6 +62,13 @@ const TABLE: readonly Entry[] = [
   { pattern: /mistral/i, window: 32_000 },
 
   // Google Gemini
+  // Gemini 4 (carbon, hydrogen, argon), stable : « Context window (unified input and output token
+  // limit) 1,048,576 » sur la fiche de chaque modèle (lues le 2026-11-13).
+  { pattern: /gemini-4/i, window: 1_048_576 },
+  // Gemini 3 (3.1 Pro, 3.5 Flash-Lite, 3.6 et 3.8 Flash) : « Input token limit 1,048,576 » sur la
+  // fiche de chaque modèle (lues le 2026-11-13). Sans cette entrée, la règle `/gemini/` de repli
+  // donnait 32 000 et le compacteur résumait bien trop tôt.
+  { pattern: /gemini-3/i, window: 1_048_576 },
   { pattern: /gemini-2\.5/i, window: 1_000_000 },
   { pattern: /gemini-2/i, window: 1_000_000 },
   { pattern: /gemini-1\.5-pro/i, window: 2_000_000 },

@@ -42,6 +42,29 @@ function authHeaders(apiKey?: string): Record<string, string> {
   return h;
 }
 
+/**
+ * Modèles de raisonnement d'OpenAI : la série o et les familles gpt-5 et suivantes (S05-2-2). Ils
+ * refusent `temperature` et `top_p` (GPT-6 : « When reasoning effort is not `none`, remove
+ * `temperature`, `top_p` », et ClioDeck ne demande pas `none`), et `max_tokens`, remplacé par
+ * `max_completion_tokens` ; le rôle `developer` y remplace `system` (« With o1 models and newer »).
+ * Les séries 7 à 9 sont comprises d'avance : un modèle qui accepterait la température répond sans
+ * elle, un modèle de raisonnement qui la reçoit refuse le tour. Ancré au début du nom : les modèles
+ * de Mistral et des serveurs locaux ne sont pas visés.
+ */
+export function isOpenAIReasoningModel(model: string): boolean {
+  return /^(?:o\d|gpt-[5-9])/i.test(model);
+}
+
+/**
+ * Réserve de raisonnement ajoutée au budget d'un modèle de raisonnement. Pour eux,
+ * `max_completion_tokens` compte le texte visible et les jetons de raisonnement, et la limite peut
+ * tomber « before any visible output tokens are produced » : une étape de recette à 800 jetons
+ * rendait alors un texte vide, sans erreur. Le guide du raisonnement d'OpenAI (lu le 2026-11-13)
+ * recommande « reserving at least 25,000 tokens for reasoning and outputs ». Le budget demandé par
+ * l'appelant reste celui du texte visible.
+ */
+export const OPENAI_REASONING_TOKEN_RESERVE = 25_000;
+
 export class OpenAICompatibleProvider implements LLMProvider {
   readonly id: string = 'openai-compatible';
   readonly name: string = 'OpenAI-compatible';
@@ -93,11 +116,13 @@ export class OpenAICompatibleProvider implements LLMProvider {
     messages: ChatMessage[],
     opts: ChatOptions = {}
   ): AsyncIterable<ChatChunk> {
+    const model = opts.model ?? this.model;
+    const reasoning = isOpenAIReasoningModel(model);
     const body = {
-      model: opts.model ?? this.model,
+      model,
       messages: messages.map((m) => {
         const base: Record<string, unknown> = {
-          role: m.role,
+          role: reasoning && m.role === 'system' ? 'developer' : m.role,
           content: m.content,
         };
         if (m.name) base.name = m.name;
@@ -113,9 +138,14 @@ export class OpenAICompatibleProvider implements LLMProvider {
         }
         return base;
       }),
-      temperature: opts.temperature,
-      top_p: opts.topP,
-      max_tokens: opts.maxTokens,
+      ...(reasoning
+        ? {
+            max_completion_tokens:
+              opts.maxTokens === undefined
+                ? undefined
+                : opts.maxTokens + OPENAI_REASONING_TOKEN_RESERVE,
+          }
+        : { temperature: opts.temperature, top_p: opts.topP, max_tokens: opts.maxTokens }),
       stop: opts.stop,
       stream: true,
       ...(opts.tools
