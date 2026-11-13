@@ -175,6 +175,13 @@ class TropyService {
   private syncWaiters: Array<() => void> = [];
   /** La source que la réindexation complète embarque : une synchro attend qu'elle soit écrite. */
   private reindexStep: Promise<unknown> = Promise.resolve();
+  /**
+   * Abandonné au démontage du projet ouvert (`teardown`) : les requêtes d'embedding de ses synchros,
+   * réindexations et recherches sont coupées avec lui. Sans délai côté Ollama, une requête sans
+   * réponse restait ouverte jusqu'au redémarrage de l'app (J9). Une passe le prend à son départ, avec
+   * son magasin.
+   */
+  private lifetime = new AbortController();
 
   /**
    * Initialise le service Tropy pour un projet
@@ -268,8 +275,9 @@ class TropyService {
    */
   private async teardown(): Promise<void> {
     this.stopWatching();
-    const { ocrPipeline, tropySync, vectorStore } = this;
+    const { ocrPipeline, tropySync, vectorStore, lifetime } = this;
     const registries = [this.registry, this.llmRegistry];
+    this.lifetime = new AbortController();
     this.vectorStore = null;
     this.reindexStatus = { phase: 'idle' };
     this.reembedPending = null;
@@ -287,6 +295,9 @@ class TropyService {
     this.chunker = null;
     this.qualityScorer = null;
     this.deduplicator = null;
+
+    // Tout est détaché : une passe que la coupure réveille ne retrouve plus son magasin.
+    lifetime.abort();
 
     const release = async (what: string, run: () => unknown): Promise<void> => {
       try {
@@ -352,15 +363,16 @@ class TropyService {
 
   /**
    * Embed a single text via the typed provider; returns the Float32Array
-   * shape PrimarySourcesVectorStore expects.
+   * shape PrimarySourcesVectorStore expects. `signal` : celui du projet de la passe, pris à son
+   * départ (`lifetime`), joint pour une recherche à celui de son appelant (J9).
    */
-  private async embedOne(text: string): Promise<Float32Array> {
+  private async embedOne(text: string, signal: AbortSignal): Promise<Float32Array> {
     if (!this.embedding) {
       throw new Error(
         'tropy-service: embedding provider not configured (call init() first)'
       );
     }
-    const [vec] = await this.embedding.embed([text]);
+    const [vec] = await this.embedding.embed([text], { signal });
     return Float32Array.from(vec);
   }
 
@@ -565,6 +577,8 @@ class TropyService {
     if (!this.vectorStore) {
       return { sourcesProcessed: 0, chunksCreated: 0 };
     }
+    // Le magasin de la passe : fermé en route, elle s'arrête (J9).
+    const store = this.vectorStore;
 
     // Récupérer toutes les sources
     const allSources = this.vectorStore.getAllSources();
@@ -634,6 +648,9 @@ class TropyService {
         chunksCreated += outcome.chunks;
         sourcesProcessed++;
       } catch (error) {
+        // Projet fermé pendant l'embarquement, sa requête coupée : un abandon, pas une panne. Les
+        // sources restantes attendent la prochaine synchro, qui reprend celles sans extrait (J9).
+        if (this.vectorStore !== store) break;
         // Le modèle d'embeddings a changé depuis l'indexation des archives (L06-9) : rien n'a été
         // écrit, et chaque source suivante serait embarquée pour être refusée de même. Elles
         // attendent la réindexation des archives, proposée dans le panneau (Q29).
@@ -952,9 +969,11 @@ class TropyService {
    */
   async search(
     query: string,
-    options?: { topK?: number; threshold?: number }
+    options?: { topK?: number; threshold?: number; signal?: AbortSignal }
   ): Promise<Array<PrimarySourceSearchResult & { source?: any }>> {
     console.log(`📜 [TROPY-SERVICE] Search called with query: "${query}"`);
+    // Coupée par la fermeture du projet, ou par l'appelant (« Arrêter » le tour du chat) (J9).
+    const signal = options?.signal ? AbortSignal.any([this.lifetime.signal, options.signal]) : this.lifetime.signal;
 
     if (!this.vectorStore) {
       console.warn('⚠️ [TROPY-SERVICE] VectorStore not initialized');
@@ -986,7 +1005,7 @@ class TropyService {
     console.log(`📜 [TROPY-SERVICE] Expanded query: "${expandedQuery}"`);
 
     // Generate embedding for the expanded query. Sans fournisseur, `embedOne` lève.
-    const queryEmbedding = await this.embedOne(expandedQuery);
+    const queryEmbedding = await this.embedOne(expandedQuery, signal);
     console.log(`📜 [TROPY-SERVICE] Query embedding generated, dimension: ${queryEmbedding.length}`);
 
     // Search using hybrid search (HNSW + BM25) - pass both embedding and text
@@ -1040,6 +1059,7 @@ class TropyService {
     // Échelle du cosinus, comme `search()` — plus de conversion vers le RRF.
     const threshold = options?.threshold ?? configManager.getRAGConfig().similarityThreshold;
     const useEntities = options?.useEntities ?? true;
+    const signal = this.lifetime.signal;
 
     try {
       if (!this.embedding) {
@@ -1058,7 +1078,7 @@ class TropyService {
 
       // Generate query embedding (with query prefix for embedded models)
       const expandedQuery = await this.expandQueryMultilingual(query);
-      const queryEmbedding = await this.embedOne(expandedQuery);
+      const queryEmbedding = await this.embedOne(expandedQuery, signal);
 
       // If not using entities, fallback to hybrid search
       if (!useEntities || !this.nerService) {
@@ -1379,11 +1399,12 @@ class TropyService {
     if (!store) {
       throw new Error('tropy-service: vector store not initialized');
     }
+    const signal = this.lifetime.signal;
 
     const text = this.indexableText(source);
     const items: Array<{ chunk: PrimarySourceChunk; embedding: Float32Array }> = [];
     for (const chunk of this.prepareSourceChunks(source, text)) {
-      const embedding = await this.embedOne(chunk.content);
+      const embedding = await this.embedOne(chunk.content, signal);
       // Dès le premier vecteur, le refus d'un corpus d'une autre dimension (L06-9) : la source
       // s'embarquait sinon en entier, pour être refusée à l'écriture (`replaceSourceChunks`).
       if (items.length === 0) store.checkEmbeddingDimension(embedding.length, source.id);
@@ -1852,9 +1873,10 @@ class TropyService {
    * ou `EmbeddingSpaceMismatchError` pour un vecteur d'une autre dimension.
    */
   private async probeProvider(projectPath: string, source: IndexableSource, dimension: number): Promise<void> {
+    const signal = this.lifetime.signal;
     const text = this.prepareSourceChunks(source, this.indexableText(source))[0]?.content ?? this.indexableText(source);
     const vector = await runWithJournalContext({ workspaceRoot: projectPath }, () =>
-      runBatch('tropy', () => this.embedOne(text))
+      runBatch('tropy', () => this.embedOne(text, signal))
     );
     if (vector.length !== dimension) {
       throw new EmbeddingSpaceMismatchError({ kind: 'dimension', expected: dimension, actual: vector.length });

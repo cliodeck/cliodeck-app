@@ -162,10 +162,13 @@ export interface ChatEngineRetriever<TSource> {
    * Search the corpus for context chunks relevant to the last user turn.
    * Return both a formatted system-prompt string to prepend and the raw
    * source objects to surface to the UI. Throw (or return empty) to skip.
+   * `signal` : celui du tour (« Arrêter », délai d'inactivité, fermeture du projet), à passer
+   * jusqu'à l'embedding de la question (J9).
    */
   search(
     lastUser: string,
-    options?: ChatEngineRetrievalOptions
+    options?: ChatEngineRetrievalOptions,
+    signal?: AbortSignal
   ): Promise<ChatEngineRetrieverResult<TSource> | null>;
 }
 
@@ -318,7 +321,8 @@ export async function runChatTurn<TSource = unknown>(
       try {
         const result = await args.retriever.search(
           lastUser.content,
-          args.retrievalOptions
+          args.retrievalOptions,
+          args.signal
         );
         if (result) {
           // After the leading system messages (mode text, hints), before
@@ -352,29 +356,40 @@ export async function runChatTurn<TSource = unknown>(
           }
         }
       } catch (e) {
-        const firstTurn = messages.findIndex((m) => m.role !== 'system');
-        const at = firstTurn === -1 ? messages.length : firstTurn;
-        messages = [...messages.slice(0, at), {
-          role: 'system',
-          content: RETRIEVAL_FAILED_TEXT[args.promptLanguage ?? 'en'],
-        }, ...messages.slice(at)];
-        const searchDurationMs = Date.now() - retrievalStartedAt;
-        const sourceType = args.retrievalOptions?.sourceType;
-        retrievalExplanation = {
-          search: {
-            query: lastUser.content, totalResults: 0, searchDurationMs,
-            cacheHit: false,
-            sourceType: sourceType === 'primary' || sourceType === 'secondary' ? sourceType : 'both',
-            documents: [], retrievalStatus: 'failed',
-          },
-          timing: { searchMs: searchDurationMs },
-        };
-        console.warn(
-          '[chat-engine] retrieval skipped:',
-          e instanceof Error ? e.message : e
-        );
+        // Arrêtée avec le tour, la recherche n'a pas échoué : le tour finit annulé, juste après (J9).
+        if (!args.signal?.aborted) {
+          const firstTurn = messages.findIndex((m) => m.role !== 'system');
+          const at = firstTurn === -1 ? messages.length : firstTurn;
+          messages = [...messages.slice(0, at), {
+            role: 'system',
+            content: RETRIEVAL_FAILED_TEXT[args.promptLanguage ?? 'en'],
+          }, ...messages.slice(at)];
+          const searchDurationMs = Date.now() - retrievalStartedAt;
+          const sourceType = args.retrievalOptions?.sourceType;
+          retrievalExplanation = {
+            search: {
+              query: lastUser.content, totalResults: 0, searchDurationMs,
+              cacheHit: false,
+              sourceType: sourceType === 'primary' || sourceType === 'secondary' ? sourceType : 'both',
+              documents: [], retrievalStatus: 'failed',
+            },
+            timing: { searchMs: searchDurationMs },
+          };
+          console.warn(
+            '[chat-engine] retrieval skipped:',
+            e instanceof Error ? e.message : e
+          );
+        }
       }
     }
+  }
+
+  // « Arrêter » (ou le délai d'inactivité, ou la fermeture du projet) pendant la recherche : le tour
+  // finit annulé, sans demander au modèle une réponse que plus personne n'attend (J9).
+  if (args.signal?.aborted) {
+    safeStatus({ phase: 'done' });
+    hooks.onDone?.({ delta: '', done: true, finishReason: 'cancelled' });
+    return;
   }
 
   // Compute an approximation of the prompt byte-size after retrieval

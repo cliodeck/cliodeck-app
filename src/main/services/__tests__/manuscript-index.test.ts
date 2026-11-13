@@ -76,6 +76,45 @@ function heldEmbedder(): HeldEmbedder {
   });
 }
 
+interface SilentEmbedder extends FakeEmbedder {
+  /** Résolue quand la première demande est partie. */
+  entered: Promise<void>;
+  /** Le signal reçu par chaque demande. */
+  signals: Array<AbortSignal | undefined>;
+  /** Libère une demande que rien n'a coupée (le défaut) : seulement pour finir le test. */
+  release: () => void;
+}
+
+/**
+ * Un fournisseur qui se comporte comme `fetch` devant un Ollama figé (J9) : sa première demande ne
+ * répond jamais, et rejette par la raison de son signal quand il s'avorte.
+ */
+function silentEmbedder(): SilentEmbedder {
+  const provider = fakeEmbedder();
+  const embed = provider.embed.bind(provider);
+  let enter = (): void => undefined;
+  let release = (): void => undefined;
+  const entered = new Promise<void>((resolve) => (enter = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const signals: Array<AbortSignal | undefined> = [];
+  return Object.assign(provider, {
+    entered,
+    signals,
+    release,
+    async embed(texts: string[], opts?: { signal?: AbortSignal }): Promise<number[][]> {
+      signals.push(opts?.signal);
+      if (signals.length === 1) {
+        enter();
+        await new Promise<void>((resolve, reject) => {
+          void released.then(resolve);
+          opts?.signal?.addEventListener('abort', () => reject(opts.signal?.reason), { once: true });
+        });
+      }
+      return embed(texts);
+    },
+  });
+}
+
 function writeArticle(root: string, body: string): void {
   fs.writeFileSync(
     path.join(root, 'project.json'),
@@ -557,6 +596,30 @@ describe.skipIf(!sqliteAvailable)('manuscriptIndexService', () => {
       expect(indexOf(tmp).chapters).toEqual(ALL_A);
       expect(indexOf(tmp).hits('revu')).toBe(0);
       expect(indexOf(other).chapters).toEqual(['chapters/01.md']);
+    });
+
+    /**
+     * L'embedding d'un chapitre ne revient pas (Ollama qui charge un modèle sans fin) et l'historien
+     * ferme le projet : la passe s'arrêtait à son retour, mais sa requête restait ouverte jusqu'au
+     * redémarrage de l'app (J9). La fermeture la coupe.
+     */
+    it('fermeture du projet pendant l’embedding d’un chapitre : la requête est coupée, la passe s’arrête', async () => {
+      writeProject(tmp, BOOK_A);
+      manuscriptIndexService.configure(tmp);
+      const embedder = silentEmbedder();
+
+      const pass = manuscriptIndexService.index(embedder);
+      await embedder.entered;
+      manuscriptIndexService.clear();
+      try {
+        await vi.waitFor(() => expect(embedder.signals[0]?.aborted).toBe(true), { timeout: 1_000 });
+      } finally {
+        embedder.release();
+      }
+      const report = await pass;
+
+      expect(report.abandoned).toBe('project-changed');
+      expect(report.failures).toEqual([]);
     });
 
     it('la section des réglages de B ne montre pas le compte rendu de la passe de A', async () => {

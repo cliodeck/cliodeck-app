@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { runChatTurn, type ChatEngineRetriever } from '../chat-engine.js';
 import type {
   ChatChunk,
@@ -604,5 +604,65 @@ describe('chat-engine — un tour sans réponse ne repart pas au fournisseur', (
       },
       { role: 'tool', toolCallId: 'c1', content: '{"hits":1}' },
     ]);
+  });
+});
+
+/**
+ * « Arrêter » pendant la recherche (J9). Le tour avait un signal (L08-3), mais la recherche ne le
+ * recevait pas : l'embedding de la question, sans réponse (Ollama qui charge un modèle), retenait le
+ * tour jusqu'au redémarrage, sa requête ouverte. Arrêté pendant la recherche, le tour finit annulé :
+ * pas de consigne « la recherche a échoué », pas de panneau en échec, pas d'appel au modèle.
+ */
+describe('chat-engine — « Arrêter » pendant la recherche (J9)', () => {
+  it('le signal du tour atteint la recherche ; arrêté, le tour finit annulé, sans échec ni appel au modèle', async () => {
+    const controller = new AbortController();
+    let searching = false;
+    let seenSignal: AbortSignal | undefined;
+    // Sans signal, la recherche n'a pas de fin : elle se libère à la fin du test.
+    let release = (): void => undefined;
+    const retriever: ChatEngineRetriever<unknown> = {
+      search: (_lastUser, _options, signal?: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          searching = true;
+          seenSignal = signal;
+          release = () => reject(new Error('recherche jamais arrêtée'));
+          // Comme la recherche réelle : elle rejette par la raison du signal.
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
+    };
+    let providerCalls = 0;
+    const provider = makeFakeProvider([]);
+    provider.chat = async function* () {
+      providerCalls += 1;
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    const done: ChatChunk[] = [];
+    const errors: Array<{ code: string; message: string }> = [];
+    const explanations: RAGExplanation[] = [];
+
+    const turn = runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'Qui était le préfet en 1934 ?' }],
+      signal: controller.signal,
+      retriever,
+      hooks: {
+        onDone: (chunk) => done.push(chunk),
+        onError: (err) => errors.push(err),
+        onExplanation: (value) => explanations.push(value),
+      },
+    });
+    await vi.waitFor(() => expect(searching).toBe(true));
+    controller.abort();
+    try {
+      await vi.waitFor(() => expect(seenSignal?.aborted).toBe(true), { timeout: 1_000 });
+    } finally {
+      release();
+    }
+    await turn;
+
+    expect(done).toEqual([{ delta: '', done: true, finishReason: 'cancelled' }]);
+    expect(errors).toEqual([]);
+    expect(explanations.map((e) => e.search.retrievalStatus)).not.toContain('failed');
+    expect(providerCalls).toBe(0);
   });
 });

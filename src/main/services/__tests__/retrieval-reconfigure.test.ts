@@ -23,6 +23,10 @@ const state = vi.hoisted(() => ({
   /** Une requête qui commence par « lente » attend cette promesse. */
   gate: Promise.resolve(),
   onHold: (): void => undefined,
+  /** Les autres textes retenus de même, le temps d'un test (le préchauffage, un PDF à indexer). */
+  holdAlso: null as ((text: string) => boolean) | null,
+  /** Le signal reçu par chaque demande retenue : la fermeture doit l'avoir coupé (J9). */
+  heldSignals: [] as Array<AbortSignal | undefined>,
 }));
 
 vi.mock('electron', () => ({
@@ -50,8 +54,9 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', () 
       id: 'faux-embed',
       model: 'faux',
       dimension: 4,
-      embed: async (texts: string[]) => {
-        if (texts.some((t) => t.startsWith('lente'))) {
+      embed: async (texts: string[], opts?: { signal?: AbortSignal }) => {
+        if (texts.some((t) => t.startsWith('lente') || (state.holdAlso?.(t) ?? false))) {
+          state.heldSignals.push(opts?.signal);
           state.onHold();
           await state.gate;
         }
@@ -71,6 +76,7 @@ vi.mock('../reading-notes-index-service.js', () => ({
 vi.mock('../pdf-extract-isolated.js', () => ({ extractPdfIsolated: vi.fn() }));
 
 const { pdfService } = await import('../pdf-service.js');
+const { extractPdfIsolated } = await import('../pdf-extract-isolated.js');
 // `SEARCH_DRAIN_MS` : le délai borné de `drainSearches`, au-delà duquel la fermeture n'attend plus.
 const { retrievalService, SEARCH_DRAIN_MS } = await import('../retrieval-service.js');
 
@@ -155,6 +161,8 @@ afterEach(async () => {
   await closeProject();
   vi.restoreAllMocks();
   state.gate = Promise.resolve();
+  state.holdAlso = null;
+  state.heldSignals.length = 0;
   fs.rmSync(projectA, { recursive: true, force: true });
   fs.rmSync(projectB, { recursive: true, force: true });
 });
@@ -313,5 +321,97 @@ describe.skipIf(!sqliteAvailable)('une recherche et la fermeture de son magasin 
     seed('Document de B');
     expect(titles(await pdfService.search(quickQuery(), { sourceType: 'secondary' }))).toEqual(['Document de B']);
     expect(warnings()).not.toContain('database connection is not open');
+  });
+});
+
+/**
+ * Une requête d'embedding ne survit pas au projet (J9). Une fermeture attend encore, au plus son délai,
+ * la recherche ou l'indexation en vol ; au-delà, elle ferme le magasin, et coupe la requête que l'une
+ * ou l'autre attendait. Sans signal, elle restait ouverte jusqu'au redémarrage (Ollama : aucun délai).
+ * Le simulacre ne rejette pas sur le signal : on vérifie qu'il l'a reçu, et que la fermeture l'a coupé.
+ */
+describe.skipIf(!sqliteAvailable)('la fermeture coupe les requêtes d’embedding du projet (J9)', () => {
+
+  /** Ferme le projet en laissant tomber le délai de `drainMs` : ce qui court encore est abandonné. */
+  async function closePastDeadline(drainMs: number): Promise<void> {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const closing = closeProject();
+      await vi.advanceTimersByTimeAsync(drainMs);
+      await closing;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it('une recherche dont l’embedding ne revient pas : la fermeture coupe sa requête', async () => {
+    const slow = holdNextSlowQuery();
+    const outcome = settle(pdfService.search(slowQuery(), { sourceType: 'secondary' }));
+    await slow.started;
+    try {
+      await closePastDeadline(SEARCH_DRAIN_MS);
+      expect(state.heldSignals).toHaveLength(1);
+      expect(state.heldSignals[0]?.aborted).toBe(true);
+    } finally {
+      slow.release();
+    }
+    expect((await outcome).error).toMatchObject({ code: 'project-changed' });
+  });
+
+  it('une indexation de PDF dont l’embedding ne revient pas : la fermeture coupe sa requête', async () => {
+    // Une prose variée : le filtre de qualité écarte un texte trop répétitif, et il n'y aurait rien
+    // à embarquer.
+    const text = [
+      'Le registre lentissime des délibérations municipales de Nantes consigne la grève des dockers de mars 1907.',
+      'Le maire y rapporte les démarches du syndicat auprès des négociants du quai de la Fosse.',
+      'Plusieurs conseillers demandent que la salle Colbert reste ouverte aux réunions ouvrières.',
+      'Le commissaire central signale au préfet des cortèges nocturnes vers les chantiers navals.',
+      'Une souscription publique est ouverte pour secourir les familles privées de salaire.',
+      'La chambre de commerce proteste contre les retards accumulés dans le déchargement des cargaisons.',
+      'Les charretiers rejoignent le mouvement après le refus patronal d’augmenter les tarifs.',
+      'Un arbitrage est proposé par le juge de paix, puis rejeté par l’assemblée générale.',
+      'La presse locale publie chaque matin le compte rendu des négociations interrompues.',
+      'Le conseil vote enfin une subvention aux soupes populaires installées près de la gare.',
+    ].join(' ');
+    vi.mocked(extractPdfIsolated).mockResolvedValue({
+      ok: true,
+      pages: [{ pageNumber: 1, text }],
+      metadata: {},
+      title: 'Registre des délibérations',
+    } as Awaited<ReturnType<typeof extractPdfIsolated>>);
+    state.holdAlso = (t) => t.includes('lentissime');
+    const slow = holdNextSlowQuery();
+    const indexing = settle(
+      pdfService.indexPDF(path.join(projectA, 'registre.pdf'), 'Registre_1907', undefined, {
+        title: 'Registre des délibérations',
+        author: 'Ville de Nantes',
+        year: '1907',
+      })
+    );
+    await slow.started;
+    try {
+      // La fermeture attend une indexation 30 s au plus (`drainInFlightIndexing`).
+      await closePastDeadline(30_000);
+      expect(state.heldSignals.length).toBeGreaterThan(0);
+      expect(state.heldSignals.every((signal) => signal?.aborted)).toBe(true);
+    } finally {
+      slow.release();
+    }
+    await indexing;
+  });
+
+  it('le préchauffage du modèle d’embeddings, sans réponse : la fermeture coupe sa requête', async () => {
+    await closeProject();
+    state.holdAlso = (t) => t === 'warmup query';
+    const slow = holdNextSlowQuery();
+    await pdfService.init(projectB);
+    await slow.started;
+    try {
+      await closeProject();
+      expect(state.heldSignals).toHaveLength(1);
+      expect(state.heldSignals[0]?.aborted).toBe(true);
+    } finally {
+      slow.release();
+    }
   });
 });

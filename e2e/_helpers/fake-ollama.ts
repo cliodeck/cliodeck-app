@@ -18,6 +18,11 @@ export interface FakeOllama {
   chatRequests(): number;
   /** Les textes que l'app a demandé d'embarquer avec ce modèle d'embeddings. */
   embeddedTexts(model: string): string[];
+  /**
+   * Avec `hangEmbed` : chaque demande d'embedding reçue, ses textes, et si l'app l'a coupée sans
+   * attendre la réponse (`aborted`).
+   */
+  embedRequests(): Array<{ texts: string[]; aborted: boolean }>;
   chatAborted(): number;
   /**
    * Avec `heldChat` : finit la demande de chat n° `index` (à partir de 0). Rend `false` si l'app l'a
@@ -54,6 +59,9 @@ const OTHER_EMBEDDING_DIMENSION = 1024;
  *
  * `chatError` : après `answer`, une ligne `{"error": chatError}` ferme le flux sans ligne `done`,
  * comme le runner d'Ollama qui tombe en pleine réponse (L09-7).
+ *
+ * `hangEmbed` : `/api/embed` ne répond jamais, comme un modèle d'embeddings qui se charge sans fin ;
+ * seule l'app peut couper la demande (J9). Sans l'option, il répond tout de suite, comme avant.
  */
 export async function startFakeOllama(
   answer: string,
@@ -64,6 +72,7 @@ export async function startFakeOllama(
     port?: number;
     doneReason?: 'stop' | 'length';
     chatError?: string;
+    hangEmbed?: boolean;
   } = {},
 ): Promise<FakeOllama> {
   const MODEL = 'faux:latest';
@@ -75,6 +84,7 @@ export async function startFakeOllama(
   const line = (content: string, done: boolean): string =>
     `${JSON.stringify({ model: MODEL, message: { role: 'assistant', content }, done, ...(done && { done_reason: 'stop' }) })}\n`;
   const embedded = new Map<string, string[]>();
+  const embedRequests: Array<{ texts: string[]; aborted: boolean }> = [];
   const server: Server = createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => {
@@ -97,6 +107,14 @@ export async function startFakeOllama(
           const count = Array.isArray(input) ? input.length : 1;
           const texts = (Array.isArray(input) ? input : [input]).map(String);
           embedded.set(model ?? '', [...(embedded.get(model ?? '') ?? []), ...texts]);
+          if (options.hangEmbed) {
+            const request = { texts, aborted: false };
+            embedRequests.push(request);
+            res.on('close', () => {
+              if (!res.writableEnded) request.aborted = true;
+            });
+            return undefined;
+          }
           const dimension = model?.split(':')[0] === OTHER_EMBEDDING_MODEL ? OTHER_EMBEDDING_DIMENSION : EMBEDDING_DIMENSION;
           return json({ embeddings: Array.from({ length: count }, () => Array(dimension).fill(0.1)) });
         }
@@ -167,6 +185,7 @@ export async function startFakeOllama(
     port,
     chatRequests: () => chatRequests,
     embeddedTexts: (model: string) => embedded.get(model) ?? [],
+    embedRequests: () => embedRequests.map((r) => ({ ...r })),
     chatAborted: () => chatAborted,
     releaseChat: (index: number) => {
       const res = held[index];

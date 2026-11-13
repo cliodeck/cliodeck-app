@@ -181,8 +181,8 @@ class InstrumentedEmbedding implements EmbeddingProvider {
    * journal ; ne pas exposer `resolve` laissait un cache rangé par modèle lire la clé du dernier
    * choix, pas celle du modèle qui produira le vecteur.
    */
-  async resolve(): Promise<EmbeddingProvider> {
-    const chosen = await resolveEmbeddingProvider(this.inner);
+  async resolve(opts: { signal?: AbortSignal } = {}): Promise<EmbeddingProvider> {
+    const chosen = await resolveEmbeddingProvider(this.inner, opts.signal);
     return chosen === this.inner ? this : new InstrumentedEmbedding(chosen, this.providerId, this.baseUrl);
   }
 

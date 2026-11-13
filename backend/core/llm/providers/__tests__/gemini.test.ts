@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
+  CLOSED_PORT_URL,
   runEmbeddingProviderContract,
   runLLMProviderContract,
 } from './contract.js';
@@ -15,6 +16,8 @@ runLLMProviderContract(
     })
 );
 
+// Le contrôle de santé des embeddings envoie un vrai `embed`, même sans clé : sans `GEMINI_API_KEY`,
+// un port fermé, pour que rien ne parte vers Google (voir `contract.ts`).
 runEmbeddingProviderContract(
   'gemini-embedding',
   () =>
@@ -22,6 +25,7 @@ runEmbeddingProviderContract(
       apiKey: process.env.GEMINI_API_KEY ?? '',
       model: 'text-embedding-004',
       dimension: 768,
+      baseUrl: process.env.GEMINI_API_KEY ? undefined : CLOSED_PORT_URL,
     })
 );
 

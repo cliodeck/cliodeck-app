@@ -467,3 +467,134 @@ describe.skipIf(!sqliteAvailable)('ObsidianVaultIndexer — panne pendant l’in
     expect(tables()).toMatchObject({ notes: 1, chunks: 0 });
   });
 });
+
+/**
+ * J9 : l'indexation du coffre était le seul appelant d'`embed` lié à un projet sans signal. Ollama
+ * figé (un modèle d'embeddings qui charge sans fin), la fermeture du projet laissait sa requête
+ * ouverte jusqu'au redémarrage de l'app, et la passe gardait le brain.db du projet quitté.
+ *
+ * Le fournisseur se comporte comme `fetch` : avec un signal, une demande retenue ne répond pas et
+ * rejette par sa raison quand il s'avorte ; sans signal, il répond aussitôt — le défaut indexait
+ * alors tout le coffre, sans rien couper.
+ */
+describe.skipIf(!sqliteAvailable)('ObsidianVaultIndexer — passe abandonnée (J9)', () => {
+  interface Call {
+    texts: string[];
+    signal: AbortSignal | undefined;
+  }
+
+  function openStore(): ObsidianVaultStore {
+    store = new ObsidianVaultStore({
+      dbPath: path.join(vault, '.cliodeck', 'brain.db'),
+      dimension: DIMENSION,
+    });
+    return store;
+  }
+
+  function writeThreeNotes(): void {
+    writeNote('A.md', '# Vichy\nLe régime de Vichy et la collaboration.');
+    writeNote('B.md', '# Londres\nAppel du 18 juin 1940.');
+    writeNote('C.md', '# Alger\nLe Comité français de libération nationale.');
+  }
+
+  /** Retient la première demande qui porte un signal, jusqu'à ce qu'il s'avorte. */
+  function heldUntilAborted(calls: Call[]): EmbeddingProvider {
+    const embedder = fakeEmbedder();
+    const answer = embedder.embed;
+    embedder.embed = (texts, opts) => {
+      const signal = opts?.signal;
+      calls.push({ texts, signal });
+      if (!signal || calls.length > 1) return answer(texts);
+      return new Promise<number[][]>((_resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    };
+    return embedder;
+  }
+
+  it('abort() pendant l’embedding d’une note : la requête est coupée, la passe s’arrête sans rien écrire', async () => {
+    writeThreeNotes();
+    const reader = new ObsidianVaultReader(vault);
+    openStore();
+    const calls: Call[] = [];
+    const stages: string[] = [];
+    const controller = new AbortController();
+
+    const pass = new ObsidianVaultIndexer(reader, store!, heldUntilAborted(calls))
+      .indexAll({ signal: controller.signal, onProgress: (p) => stages.push(p.stage) })
+      .then(
+        (report) => ({ report }),
+        (error: unknown) => ({ error })
+      );
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    controller.abort();
+
+    expect(await pass).toMatchObject({ error: { name: 'AbortError' } });
+    expect(calls[0].signal?.aborted).toBe(true);
+    // Les notes suivantes ne partent pas chez le fournisseur.
+    expect(calls).toHaveLength(1);
+    expect(store!.stats()).toMatchObject({ noteCount: 0, chunkCount: 0 });
+    expect(stages).not.toContain('complete');
+  });
+
+  it('un embedding rendu après l’abandon n’est pas écrit', async () => {
+    writeThreeNotes();
+    const reader = new ObsidianVaultReader(vault);
+    openStore();
+    const controller = new AbortController();
+    // Un fournisseur qui ignore le signal, comme une passe llama.cpp déjà lancée : il finit quand même.
+    let calls = 0;
+    const embedder = fakeEmbedder();
+    const answer = embedder.embed;
+    embedder.embed = async (texts) => {
+      calls += 1;
+      if (calls === 1) controller.abort();
+      return answer(texts);
+    };
+
+    await expect(
+      new ObsidianVaultIndexer(reader, store!, embedder).indexAll({ signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(calls).toBe(1);
+    expect(store!.stats()).toMatchObject({ noteCount: 0, chunkCount: 0 });
+  });
+
+  it('signal déjà abandonné : aucune demande, rien d’écrit', async () => {
+    writeThreeNotes();
+    const reader = new ObsidianVaultReader(vault);
+    openStore();
+    const calls: Call[] = [];
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      new ObsidianVaultIndexer(reader, store!, heldUntilAborted(calls)).indexAll({ signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(calls).toEqual([]);
+    expect(store!.stats()).toMatchObject({ noteCount: 0, chunkCount: 0 });
+  });
+
+  it('témoin : sans abandon, la passe embarque chaque note avec le signal reçu', async () => {
+    writeThreeNotes();
+    const reader = new ObsidianVaultReader(vault);
+    openStore();
+    const calls: Call[] = [];
+    const embedder = fakeEmbedder();
+    const answer = embedder.embed;
+    embedder.embed = (texts, opts) => {
+      calls.push({ texts, signal: opts?.signal });
+      return answer(texts);
+    };
+    const controller = new AbortController();
+
+    const report = await new ObsidianVaultIndexer(reader, store!, embedder).indexAll({ signal: controller.signal });
+
+    expect(report.stats).toMatchObject({ indexedCount: 3, failedCount: 0 });
+    expect(calls).toHaveLength(3);
+    expect(calls.every((c) => c.signal === controller.signal)).toBe(true);
+  });
+});

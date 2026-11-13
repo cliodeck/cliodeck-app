@@ -59,6 +59,14 @@ class PDFService {
   private inFlightIndexing = new Set<Promise<unknown>>();
 
   /**
+   * Celui du magasin installé, né avec lui. Abandonné quand le magasin est rendu (`close`, reprise de
+   * `init`), une fois les indexations en vol attendues : les requêtes d'embedding qui l'alimentaient
+   * encore — une indexation restée au-delà du délai, le préchauffage — sont coupées avec lui. Sans
+   * délai côté Ollama, elles restaient ouvertes jusqu'au redémarrage de l'app (J9).
+   */
+  private storeRelease = new AbortController();
+
+  /**
    * Reconstruction des fournisseurs en cours (`refreshProviders`). L'attente des indexations ne porte
    * que sur celles déjà en vol : une indexation lancée pendant cette attente prenait l'ancien indexeur,
    * dont le registre libère le fournisseur juste après. `indexPDF` attend donc la fin de la
@@ -109,12 +117,14 @@ class PDFService {
     // (S01-1-9). Plus rien ne pointe sur elle : si l'ouverture du nouveau échoue, les lectures disent
     // « not initialized » et une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
     const previous = this.vectorStore;
+    const released = this.storeRelease;
     this.vectorStore = null;
     this.pdfIndexer = null;
     if (previous) {
       await this.drainBeforeClose();
       previous.close();
     }
+    released.abort();
 
     // Une ouverture abandonnée par la séquence (délai tombé, autre service en panne) continue
     // pendant qu'un autre projet s'ouvre sur ce même service : après chaque attente, elle s'arrête
@@ -147,6 +157,8 @@ class PDFService {
 
       await this.removeDuplicateDocuments(store, projectPath);
       if (abandoned()) throw new ProjectChangedError();
+      // Le signal de ce magasin naît avec lui : l'indexeur et le préchauffage le prennent ci-dessous.
+      this.storeRelease = new AbortController();
       this.vectorStore = store;
 
       // Post-init: configure search modes on the enhanced store. Any
@@ -190,7 +202,7 @@ class PDFService {
       // Le projet quitté entre-temps : sa reconstruction n'a plus lieu d'être, et son échec
       // s'afficherait sur l'écran du suivant.
       const storeForRebuild = store;
-      void this.warmupEmbeddingModel().then(() => {
+      void this.warmupEmbeddingModel(this.storeRelease.signal).then(() => {
         if (abandoned()) return undefined;
         return PdfVectorStore.maybeRebuild(storeForRebuild);
       });
@@ -255,6 +267,7 @@ class PDFService {
       embeddingProvider: this.embedding,
       ragConfig,
       summarizerConfig,
+      signal: this.storeRelease.signal,
     });
     this.appliedRagConfig = JSON.stringify(ragConfig);
   }
@@ -276,16 +289,19 @@ class PDFService {
   }
 
   /**
-   * Warmup embedding model to reduce first-query latency
+   * Warmup embedding model to reduce first-query latency. `signal` : celui du magasin qui s'ouvre ;
+   * la fermeture du projet coupe un préchauffage resté sans réponse (J9).
    */
-  private async warmupEmbeddingModel(): Promise<void> {
+  private async warmupEmbeddingModel(signal: AbortSignal): Promise<void> {
     if (!this.embedding) return;
 
     console.log('🔥 [WARMUP] Pre-loading embedding model...');
     try {
-      await this.embedding.embed(['warmup query']);
+      await this.embedding.embed(['warmup query'], { signal });
       console.log('✅ [WARMUP] Embedding model ready');
     } catch (_e: unknown) {
+      // Coupé par la fermeture du projet : rien n'a échoué.
+      if (signal.aborted) return;
       console.warn('⚠️  [WARMUP] Failed - first query may be slower');
     }
   }
@@ -1040,7 +1056,9 @@ class PDFService {
     // le drain ne retrouve ni ce magasin ni ces registres, et ne ferme pas une seconde fois ce
     // qu'on ferme ici ; une reconstruction des fournisseurs ne bâtit pas d'indexeur dessus.
     const store = this.vectorStore;
+    const released = this.storeRelease;
     const registries = [this.registry, this.llmRegistry];
+    this.storeRelease = new AbortController();
     this.vectorStore = null;
     this.pdfIndexer = null;
     this.currentProjectPath = null;
@@ -1060,6 +1078,7 @@ class PDFService {
       await this.drainBeforeClose();
       store.close();
     }
+    released.abort();
 
     // Libérer les ressources des registres typés (HTTP agents, native handles).
     if (registries.some((r) => r !== null)) {

@@ -92,7 +92,7 @@ const queryEmbeddingCache = new QueryEmbeddingCache(2000, 10);
 /**
  * Ce qu'une fermeture de magasin attend au plus des recherches en vol (`drainSearches`). L'embedding
  * d'une requête prend moins d'une seconde ; un modèle qui se charge peut dépasser ce délai, et la
- * recherche s'arrête alors proprement (`project-changed`).
+ * recherche s'arrête alors proprement (`project-changed`), sa requête d'embedding coupée (J9).
  */
 export const SEARCH_DRAIN_MS = 5_000;
 
@@ -104,7 +104,15 @@ interface SearchCapture {
   readonly store: VectorStore | EnhancedVectorStore;
   /** Le numéro du magasin à l'entrée de la recherche (`storeGeneration`). */
   readonly generation: number;
-  /** Lève `ProjectChangedError` si le magasin a été rendu depuis l'entrée de la recherche. */
+  /**
+   * Ce que reçoit chaque embedding de la recherche (J9) : abandonné quand le magasin est rendu, ou
+   * quand l'appelant arrête (« Arrêter » coupe le tour du chat).
+   */
+  readonly signal: AbortSignal;
+  /**
+   * Lève `ProjectChangedError` si le magasin a été rendu depuis l'entrée de la recherche, puis la
+   * raison du signal de l'appelant s'il a arrêté : une recherche arrêtée n'est pas une panne.
+   */
   assertCurrent(): void;
   /**
    * Par texte embarqué, ce qu'a trouvé la première consultation du cache dans cette recherche : `true`
@@ -387,6 +395,11 @@ export interface RetrievalQuery {
   manuscriptSlots?: number;
   /** Même chose pour les notes de lecture, l'autre corpus à la voix de l'auteur. */
   readingNoteSlots?: number;
+  /**
+   * Celui de l'appelant : le tour du chat (« Arrêter »), une recette. Abandonné, l'embedding de la
+   * requête est coupé, et la recherche rejette par sa raison au lieu de rendre des corpus en échec (J9).
+   */
+  signal?: AbortSignal;
 }
 
 // Dictionnaire de termes académiques FR→EN pour query expansion.
@@ -457,6 +470,17 @@ class RetrievalService {
    * répondre avec celui du projet suivant.
    */
   private storeGeneration = 0;
+  /**
+   * Abandonné quand le magasin de `storeGeneration` est rendu (`releaseStore`) : la requête
+   * d'embedding d'une recherche restée en vol au-delà du délai d'une fermeture est coupée avec lui.
+   * Elle restait ouverte jusqu'au redémarrage : la connexion à Ollama n'a pas de délai (J9).
+   */
+  private storeRelease = new AbortController();
+  /**
+   * Abandonné quand le fournisseur d'embeddings est libéré (fermeture du projet, changement de
+   * réglages) : le préchauffage du dictionnaire, qui embarque avec lui, s'arrête (J9).
+   */
+  private registryRelease = new AbortController();
 
   /**
    * Wire the service to the project-scoped dependencies. Called by
@@ -473,7 +497,7 @@ class RetrievalService {
     vectorStore: VectorStore | EnhancedVectorStore;
     workspaceRoot?: string;
   }): void {
-    this.storeGeneration++;
+    this.releaseStore();
     this.vectorStore = deps.vectorStore;
     this.workspaceRoot = deps.workspaceRoot ?? null;
 
@@ -517,6 +541,8 @@ class RetrievalService {
     const prev = this.registry;
     this.registry = null;
     this.embedding = null;
+    this.registryRelease.abort();
+    this.registryRelease = new AbortController();
     if (prev) {
       await prev.dispose().catch(() => undefined);
     }
@@ -567,10 +593,10 @@ class RetrievalService {
    * quand même (pas d'attente sans sortie) : celles qui restent s'arrêtent à leur prochaine attente sur
    * `project-changed`, sans lire le magasin fermé. Ne lève pas.
    *
-   * Seules celles du magasin courant sont attendues. Une recherche d'un magasin déjà rendu (restée
-   * au-delà du délai d'une fermeture précédente, sur un embedding qui ne revient pas : la requête n'a
-   * pas de délai) ne lit plus aucun magasin : l'attendre retardait chaque bascule de 5 s jusqu'au
-   * redémarrage.
+   * Seules celles du magasin courant sont attendues. Une recherche d'un magasin déjà rendu ne lit
+   * plus aucun magasin : l'attendre retardait chaque bascule de 5 s. Et le magasin rendu, la requête
+   * d'embedding qu'elle attendait encore est coupée (`releaseStore`) : sans délai côté Ollama, elle
+   * restait ouverte jusqu'au redémarrage (J9).
    */
   async drainSearches(timeoutMs = SEARCH_DRAIN_MS): Promise<void> {
     this.vectorStore = null;
@@ -595,11 +621,22 @@ class RetrievalService {
         );
       }
     }
+    this.releaseStore();
+  }
+
+  /**
+   * Le magasin est rendu : les recherches qui l'avaient pris s'arrêtent à leur prochaine attente
+   * (`project-changed`), et leur requête d'embedding est coupée tout de suite (J9). Le numéro change
+   * avant la coupure : une recherche que la coupure réveille se voit déjà hors de son magasin.
+   */
+  private releaseStore(): void {
     this.storeGeneration++;
+    this.storeRelease.abort();
+    this.storeRelease = new AbortController();
   }
 
   clear(): void {
-    this.storeGeneration++;
+    this.releaseStore();
     this.vectorStore = null;
     void this.disposePreviousRegistry();
     // Embedding cache persists across clear() — see constructor comment.
@@ -618,15 +655,16 @@ class RetrievalService {
   /**
    * Le fournisseur qui fera l'embedding. En mode « auto », le repli choisit au moment de l'appel :
    * on le fait choisir d'abord, pour que la clé du cache et le vecteur viennent du même modèle.
+   * `signal` : abandonné pendant le sondage d'Ollama, le choix rejette sans attendre sa réponse (J9).
    */
-  private async resolveEmbedding(): Promise<EmbeddingProvider> {
+  private async resolveEmbedding(signal?: AbortSignal): Promise<EmbeddingProvider> {
     if (!this.embedding) {
       throw new Error(
         'retrieval-service: embedding provider not configured (call configure() first)'
       );
     }
     // Le repli arrive enveloppé par le décorateur du journal : `resolveEmbeddingProvider` le traverse.
-    return resolveEmbeddingProvider(this.embedding);
+    return resolveEmbeddingProvider(this.embedding, signal);
   }
 
   private static providerKey(provider: EmbeddingProvider): string {
@@ -640,12 +678,18 @@ class RetrievalService {
    * Embed a single query through the typed provider. Returns a Float32Array
    * (the rest of the pipeline — HNSW, BM25 — expects this shape).
    */
-  private static async embedQuery(provider: EmbeddingProvider, text: string): Promise<Float32Array> {
-    const [vec] = await provider.embed([text]);
+  private static async embedQuery(
+    provider: EmbeddingProvider,
+    text: string,
+    signal: AbortSignal
+  ): Promise<Float32Array> {
+    const [vec] = await provider.embed([text], { signal });
     return Float32Array.from(vec);
   }
 
   private async warmupDictionaryEmbeddings(): Promise<void> {
+    // Le fournisseur de ce préchauffage libéré, il s'arrête : sa requête est coupée (J9).
+    const signal = this.registryRelease.signal;
     try {
       const terms: string[] = [];
       for (const [fr, ens] of Object.entries(ACADEMIC_TERMS_FR_TO_EN)) {
@@ -653,7 +697,7 @@ class RetrievalService {
       }
       let provider: EmbeddingProvider;
       try {
-        provider = await this.resolveEmbedding();
+        provider = await this.resolveEmbedding(signal);
       } catch {
         return;
       }
@@ -661,7 +705,7 @@ class RetrievalService {
       for (const term of terms) {
         if (queryEmbeddingCache.has(term, providerId)) continue;
         try {
-          const emb = await RetrievalService.embedQuery(provider, term);
+          const emb = await RetrievalService.embedQuery(provider, term, signal);
           queryEmbeddingCache.set(term, emb, providerId);
         } catch {
           // Warmup is best-effort: a provider may be unavailable at boot.
@@ -760,14 +804,20 @@ class RetrievalService {
     return this.vectorStore;
   }
 
-  /** Le magasin pris à l'entrée d'une recherche, et le numéro qu'il avait alors. */
-  private captureStore(store: VectorStore | EnhancedVectorStore): SearchCapture {
+  /**
+   * Le magasin pris à l'entrée d'une recherche, le numéro qu'il avait alors, et le signal de ses
+   * embeddings : celui du magasin, joint à celui de l'appelant (J9).
+   */
+  private captureStore(store: VectorStore | EnhancedVectorStore, callerSignal?: AbortSignal): SearchCapture {
     const generation = this.storeGeneration;
+    const released = this.storeRelease.signal;
     return {
       store,
       generation,
+      signal: callerSignal ? AbortSignal.any([released, callerSignal]) : released,
       assertCurrent: () => {
         if (this.storeGeneration !== generation) throw new ProjectChangedError();
+        callerSignal?.throwIfAborted();
       },
       cacheLookups: new Map(),
     };
@@ -778,12 +828,12 @@ class RetrievalService {
    * vérifie avant (S04-1-14).
    */
   private async getQueryEmbedding(query: string, captured: SearchCapture): Promise<Float32Array> {
-    const provider = await this.resolveEmbedding();
+    const provider = await this.resolveEmbedding(captured.signal);
     const providerId = RetrievalService.providerKey(provider);
     let embedding = queryEmbeddingCache.get(query, providerId);
     if (!captured.cacheLookups.has(query)) captured.cacheLookups.set(query, embedding !== undefined);
     if (!embedding) {
-      embedding = await RetrievalService.embedQuery(provider, query);
+      embedding = await RetrievalService.embedQuery(provider, query, captured.signal);
       queryEmbeddingCache.set(query, embedding, providerId);
     }
     captured.assertCurrent();
@@ -798,7 +848,7 @@ class RetrievalService {
    */
   async searchWithStats(q: RetrievalQuery): Promise<RetrievalSearchWithStatsResult> {
     const t0 = Date.now();
-    const captured = this.captureStore(this.ensureReady());
+    const captured = this.captureStore(this.ensureReady(), q.signal);
     const { hits, manuscriptHits, readingNoteHits, outcomes, securityEvents } =
       await this.trackSearch(q, captured);
     const searchMs = Date.now() - t0;
@@ -891,7 +941,7 @@ class RetrievalService {
   }
 
   async search(q: RetrievalQuery): Promise<RetrievalSearchResult> {
-    return this.trackSearch(q, this.captureStore(this.ensureReady()));
+    return this.trackSearch(q, this.captureStore(this.ensureReady(), q.signal));
   }
 
   private trackSearch(q: RetrievalQuery, captured: SearchCapture): Promise<RetrievalSearchResult> {
@@ -947,11 +997,14 @@ class RetrievalService {
             : undefined,
       },
       (corpus, error) => {
+        // Coupé par l'arrêt ou la fermeture, un corpus n'est pas en panne (J9).
+        if (captured.signal.aborted) return;
         console.warn(`⚠️ [PDF-SERVICE] ${corpus} corpus search failed:`, error);
       }
     );
     // Le magasin a été rendu pendant la recherche (fermeture, bascule) : rien de ce qu'elle a trouvé
-    // ne sert, et un corpus interrogé après coup a pu répondre avec le projet suivant.
+    // ne sert, et un corpus interrogé après coup a pu répondre avec le projet suivant. Arrêtée par
+    // son appelant, elle rejette par la raison de l'arrêt : ses corpus coupés ne sont pas en panne.
     captured.assertCurrent();
 
     if (DEBUG) {
@@ -1077,7 +1130,7 @@ class RetrievalService {
           );
         },
       },
-      { corpus: 'primary', search: (query, o) => this.searchPrimary(query, o) },
+      { corpus: 'primary', search: (query, o) => this.searchPrimary(query, o, captured) },
       { corpus: 'vault', search: (query, o) => this.searchVault(query, o, captured) },
       { corpus: 'manuscript', search: (query, o) => this.searchManuscript(query, o, captured) },
       { corpus: 'readingNotes', search: (query, o) => this.searchReadingNotes(query, o, captured) },
@@ -1197,9 +1250,10 @@ class RetrievalService {
 
   private async searchPrimary(
     query: string,
-    options: { topK: number; threshold: number }
+    options: { topK: number; threshold: number },
+    captured: SearchCapture
   ): Promise<PrimaryMappedSearchResult[]> {
-    const primaryResults = await tropyService.search(query, options);
+    const primaryResults = await tropyService.search(query, { ...options, signal: captured.signal });
     return primaryResults.map(
       (
         r: PrimarySourceSearchResult & { source?: PrimarySourceDocument }

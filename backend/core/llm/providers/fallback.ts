@@ -25,6 +25,7 @@ import type {
   ProviderCapabilities,
   ProviderStatus,
 } from './base.js';
+import { collectCompletion } from './collect.js';
 
 /** Durée de validité d'un sondage du primaire. */
 const PROBE_TTL_MS = 15_000;
@@ -33,6 +34,29 @@ function usable(status: ProviderStatus): boolean {
   // `degraded` reste utilisable (modèle absent côté Ollama, par exemple) :
   // seul un échec franc justifie de basculer.
   return status.state === 'ready' || status.state === 'degraded';
+}
+
+/**
+ * `promise`, ou le rejet par la raison de `signal` dès qu'il s'avorte. Seule l'attente de l'appelant
+ * est coupée : ce que `promise` attend continue (J9).
+ */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      }
+    );
+  });
 }
 
 class Picker<T extends { healthCheck(): Promise<ProviderStatus> }> {
@@ -45,7 +69,17 @@ class Picker<T extends { healthCheck(): Promise<ProviderStatus> }> {
     private readonly clock: () => number = () => Date.now()
   ) {}
 
-  async pick(): Promise<T> {
+  /**
+   * `signal` abandonné : rejette par sa raison, sans sonder s'il l'était déjà. `healthCheck` n'a pas
+   * de signal au contrat : un sondage parti va à son terme (borné par le délai d'en-têtes par défaut
+   * d'undici, 300 s), et son choix reste en cache pour l'appel suivant (J9).
+   */
+  async pick(signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
+    return untilAborted(this.choose(), signal);
+  }
+
+  private async choose(): Promise<T> {
     const nowMs = this.clock();
     if (this.lastChoice && nowMs - this.lastProbeAt < PROBE_TTL_MS) {
       return this.lastChoice;
@@ -112,17 +146,37 @@ export class FallbackLLMProvider implements LLMProvider {
     return chosen.healthCheck();
   }
 
+  /**
+   * Abandonné pendant le sondage du primaire (« Arrêter », fermeture du projet) : terminal
+   * `cancelled` tout de suite, sans attendre la réponse du sondage ni rien demander au modèle (J9).
+   * `pick` ne rejette que sur l'abandon : un sondage qui échoue désigne le repli.
+   */
   async *chat(
     messages: ChatMessage[],
     opts: ChatOptions = {}
   ): AsyncIterable<ChatChunk> {
-    const chosen = await this.picker.pick();
+    let chosen: LLMProvider;
+    try {
+      chosen = await this.picker.pick(opts.signal);
+    } catch (error) {
+      if (!opts.signal?.aborted) throw error;
+      yield { delta: '', done: true, finishReason: 'cancelled' };
+      return;
+    }
     yield* chosen.chat(messages, opts);
   }
 
+  /**
+   * Comme le `complete()` de chaque fournisseur : le `chat()` ci-dessus, consommé par
+   * `collectCompletion`. Abandonné pendant le sondage, il lève donc `ProviderCallError` en
+   * `cancelled`, pas en panne.
+   */
   async complete(prompt: string, opts: CompleteOptions = {}): Promise<string> {
-    const chosen = await this.picker.pick();
-    return chosen.complete(prompt, opts);
+    const { text } = await collectCompletion(
+      this,
+      this.chat([{ role: 'user', content: prompt }], opts)
+    );
+    return text;
   }
 
   async dispose(): Promise<void> {
@@ -170,17 +224,22 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
   /**
    * Le fournisseur qui servira l'appel suivant (sondage compris). Un cache rangé par modèle doit lire
    * sa clé sur lui : `model` et `dimension` ne disent que le dernier choix, ou le primaire avant tout
-   * sondage, et `embed` peut basculer entre les deux.
+   * sondage, et `embed` peut basculer entre les deux. `signal` abandonné pendant le sondage : rejet
+   * par sa raison, sans attendre la réponse d'Ollama.
    */
-  resolve(): Promise<EmbeddingProvider> {
-    return this.picker.pick();
+  resolve(opts: { signal?: AbortSignal } = {}): Promise<EmbeddingProvider> {
+    return this.picker.pick(opts.signal);
   }
 
+  /**
+   * Abandonné pendant le sondage du primaire, rejette tout de suite par la raison du signal, et
+   * aucune demande d'embedding ne part (J9).
+   */
   async embed(
     texts: string[],
     opts: { signal?: AbortSignal } = {}
   ): Promise<number[][]> {
-    const chosen = await this.picker.pick();
+    const chosen = await this.picker.pick(opts.signal);
     return chosen.embed(texts, opts);
   }
 
@@ -195,10 +254,17 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
  * du journal d'usage (`instrumentEmbedding`), qui enveloppe toujours le repli dans le vrai registre :
  * un `instanceof FallbackEmbeddingProvider` ne le voit jamais.
  */
-export function resolveEmbeddingProvider(provider: EmbeddingProvider): Promise<EmbeddingProvider> {
+export function resolveEmbeddingProvider(
+  provider: EmbeddingProvider,
+  signal?: AbortSignal
+): Promise<EmbeddingProvider> {
   const candidate = provider as EmbeddingProvider & { resolve?: unknown };
   if (typeof candidate.resolve === 'function') {
-    return (candidate as EmbeddingProvider & { resolve(): Promise<EmbeddingProvider> }).resolve();
+    return (
+      candidate as EmbeddingProvider & {
+        resolve(opts?: { signal?: AbortSignal }): Promise<EmbeddingProvider>;
+      }
+    ).resolve({ signal });
   }
   return Promise.resolve(provider);
 }

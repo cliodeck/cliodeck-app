@@ -283,12 +283,19 @@ export class EmbeddedEmbeddingProvider
     return this.status;
   }
 
+  /**
+   * Une passe llama.cpp — le chargement du modèle, le calcul d'un embedding — ne s'interrompt pas :
+   * un abandon prend effet à la fin de la passe en cours, qui ne rend pas son vecteur, et la promesse
+   * rejette alors par la raison du signal, comme `fetch` (J9). La génération : L09-10.
+   */
   async embed(
     texts: string[],
     opts: { signal?: AbortSignal } = {}
   ): Promise<number[][]> {
     if (texts.length === 0) return [];
+    opts.signal?.throwIfAborted();
     const ready = await this.ensureLoaded();
+    opts.signal?.throwIfAborted();
     if (!ready) {
       throw new Error(
         this.status.lastError?.message ?? 'Embedded embedding model unavailable'
@@ -297,8 +304,8 @@ export class EmbeddedEmbeddingProvider
 
     const out: number[][] = [];
     for (const text of texts) {
-      if (opts.signal?.aborted) throw new Error('Embedding cancelled');
       const vec = await this.client.generateEmbedding(text);
+      opts.signal?.throwIfAborted();
       out.push(Array.from(vec));
     }
     return out;

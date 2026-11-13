@@ -9,9 +9,31 @@
  * tolerant: tests requiring a live backend are skipped when `healthCheck()`
  * returns a non-`ready` state, instead of failing — so CI stays green without
  * external services. Parity-level assertions belong to 1.2bis (mock-replay).
+ *
+ * Backend vivant : seulement sur demande explicite (J9). Par défaut, chaque fabrique vise un port
+ * fermé, et `healthCheck()` échoue tout de suite : les tests « live » se sautent. Viser
+ * `127.0.0.1:11434` faisait envoyer à chaque `npx vitest run` un contrôle de santé, puis un chat et
+ * un embed, à l'Ollama de la machine — celui de l'auteur, avec ses modèles.
+ *   - Ollama : `CLIODECK_LIVE_OLLAMA=1` (adresse : `CLIODECK_LIVE_OLLAMA_URL`, sinon
+ *     `http://127.0.0.1:11434`). Voir `ollamaContractUrl`.
+ *   - Fournisseurs en ligne : leur clé dans l'environnement (`MISTRAL_API_KEY`, `GEMINI_API_KEY`,
+ *     `ANTHROPIC_API_KEY`). Sans elle, un port fermé, ou l'absence de clé, que le contrôle de santé
+ *     refuse avant tout envoi.
  */
 
 import { describe, it, expect } from 'vitest';
+
+/** Un port où personne n'écoute, celui des tests e2e (`e2e/_helpers/closed-ollama.cjs`). */
+export const CLOSED_PORT_URL = 'http://127.0.0.1:9';
+
+/**
+ * L'Ollama que visent les tests de contrat : un port fermé, sauf `CLIODECK_LIVE_OLLAMA=1`. Jamais le
+ * défaut du fournisseur (`127.0.0.1:11434`), qui est l'Ollama de la machine.
+ */
+export function ollamaContractUrl(): string {
+  if (process.env.CLIODECK_LIVE_OLLAMA !== '1') return CLOSED_PORT_URL;
+  return process.env.CLIODECK_LIVE_OLLAMA_URL || 'http://127.0.0.1:11434';
+}
 import type {
   LLMProvider,
   EmbeddingProvider,
