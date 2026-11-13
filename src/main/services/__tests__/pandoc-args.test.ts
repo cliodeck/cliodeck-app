@@ -7,11 +7,16 @@
  * sont celles qui changent réellement le document produit.
  */
 import { describe, expect, it } from 'vitest';
+import { delimiter, join } from 'path';
 import type { BookSettings } from '../../../../backend/types/book.js';
 import {
   buildBeamerCustomizations,
   buildPandocArgs,
   computeSecnumdepth,
+  missingImagesWarnings,
+  pandocImageFailure,
+  pandocMissingResources,
+  projectResourcePaths,
   resolveBibliographyMode,
   resolveBookSettings,
   type PandocArgsInput,
@@ -118,6 +123,86 @@ describe('buildPandocArgs — socle commun', () => {
     expect(args.slice(1, 3)).toEqual(['-o', '/out/livre.pdf']);
     expect(args).toContain('--pdf-engine=xelatex');
     expect(args).toContain('--from=markdown+autolink_bare_uris');
+  });
+});
+
+/**
+ * L07-2 : pandoc tourne dans le dossier temporaire de l'export. Sans `--resource-path`, une image
+ * relative au projet (`images/plan.png`), que l'éditeur affiche, n'était pas trouvée : remplacée
+ * par sa légende, et l'export se disait réussi.
+ */
+describe('buildPandocArgs — dossiers des images', () => {
+  const dirs = ['/Users/h/Mon projet', '/Users/h/Mon projet/chapters'];
+
+  it.each(['article', 'book', 'presentation'] as const)(
+    '%s : --resource-path joint les dossiers par path.delimiter, en un seul argument',
+    (projectType) => {
+      const args = buildPandocArgs({ ...BASE, projectType, resourcePaths: dirs });
+      expect(args).toContain(`--resource-path=${dirs.join(delimiter)}`);
+    }
+  );
+
+  it('sans dossier donné, aucun --resource-path', () => {
+    expect(buildPandocArgs(BASE).some((a) => a.startsWith('--resource-path'))).toBe(false);
+  });
+
+  it('les dossiers du projet : sa racine, puis chapters/ (images relatives à un chapitre)', () => {
+    expect(projectResourcePaths('/Users/h/Mon projet')).toEqual([
+      '/Users/h/Mon projet',
+      join('/Users/h/Mon projet', 'chapters'),
+    ]);
+  });
+});
+
+/** Ce que pandoc écrit sur sa sortie d'erreur, relevé sur pandoc 3.13 (L07-2). */
+describe('avertissements de pandoc sur les images', () => {
+  it('relève chaque ressource introuvable, une seule fois', () => {
+    const stderr = [
+      '[WARNING] Could not fetch resource images/plan.png: replacing image with description',
+      '[WARNING] Could not fetch resource chapters/images/carte été.png: replacing image with description',
+      '[WARNING] Could not fetch resource images/plan.png: replacing image with description',
+      '[WARNING] Citeproc: citation inconnu2020 not found',
+    ].join('\n');
+    expect(pandocMissingResources(stderr)).toEqual([
+      'images/plan.png',
+      'chapters/images/carte été.png',
+    ]);
+    expect(pandocMissingResources('')).toEqual([]);
+  });
+
+  it('une seule réserve pour toutes les images introuvables, avec leur nombre', () => {
+    expect(missingImagesWarnings(['images/a.png', 'images/b.png'])).toEqual([
+      { code: 'export.imagesNotFound', params: { files: 'images/a.png, images/b.png', count: 2 } },
+    ]);
+    expect(missingImagesWarnings([])).toEqual([]);
+  });
+
+  it('une image SVG sans rsvg-convert : le code le dit, avec le chemin de l’image dans le projet', () => {
+    const stderr =
+      '[WARNING] Could not convert image /var/folders/x/T/cliodeck-export-1/media-5db82535f1365f20/images/schema.svg: check that rsvg-convert is in path.\n' +
+      '  rsvg-convert: createProcess: posix_spawnp: does not exist (No such file or directory)\n' +
+      'Error producing PDF.\n' +
+      "! Package svg Error: File `schema_svg-tex.pdf' is missing.\n";
+    expect(pandocImageFailure(stderr)).toEqual({
+      code: 'export.imageNeedsRsvgConvert',
+      params: { file: 'images/schema.svg' },
+    });
+  });
+
+  it('une image d’un format que pandoc ne convertit pas (WebP)', () => {
+    const stderr =
+      '[WARNING] Could not convert image /tmp/w/media-a47481f6018129fa/images/photo.webp: Cannot load file\n' +
+      '  Jpeg Invalid marker used\n' +
+      'Error producing PDF.\n' +
+      '! LaTeX Error: Cannot determine size of graphic in /tmp/w/media-a47481f6018129fa/images/photo.webp (no BoundingBox).\n';
+    expect(pandocImageFailure(stderr)).toEqual({
+      code: 'export.imageNotConverted',
+      params: { file: 'images/photo.webp' },
+    });
+  });
+
+  it('un autre échec n’est pas mis sur le compte d’une image', () => {
+    expect(pandocImageFailure('! LaTeX Error: Environment longtable undefined.')).toBeNull();
   });
 });
 

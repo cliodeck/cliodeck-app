@@ -27,6 +27,7 @@ import {
 } from 'child_process';
 import { access } from 'fs/promises';
 import { EXPORT_TIME_LIMIT_MS } from '../../../backend/types/export-limits.js';
+import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 
 /** Entre SIGTERM et SIGKILL. */
 const KILL_GRACE_MS = 5000;
@@ -46,12 +47,20 @@ export interface ExportLimits {
 
 export type ExportErrorCode = 'export_timed_out' | 'export_cancelled';
 
+/**
+ * L'export PDF échoue sur une image que pandoc n'a pas su convertir pour xelatex (L07-2) : codes
+ * relatifs à `messages.*`, avec l'image en `errorParams.file`.
+ */
+export type ExportImageErrorCode = 'export.imageNeedsRsvgConvert' | 'export.imageNotConverted';
+
 /** Le résultat des services d'export, tel que le renderer le reçoit. */
 export interface ExportResult {
   success: boolean;
   outputPath?: string;
   error?: string;
-  errorCode?: ExportErrorCode;
+  errorCode?: ExportErrorCode | ExportImageErrorCode;
+  /** Les paramètres du message d'un `errorCode` relatif à `messages.*`. */
+  errorParams?: Record<string, string | number>;
   /** Avec `export_timed_out` : le message ne doit pas écrire ce nombre en dur. */
   timeLimitMinutes?: number;
   /**
@@ -59,6 +68,11 @@ export interface ExportResult {
    * introuvable à ce chemin. Le document est écrit sans lui ; la modale le dit.
    */
   missingCsl?: string;
+  /**
+   * Le document est écrit, avec des réserves (une image introuvable, remplacée par sa légende).
+   * Le handler IPC les rend par `outcomeResponse(partial(…))` : la modale les dit et reste ouverte.
+   */
+  warnings?: OutcomeIssue[];
 }
 
 export class ExportTimedOutError extends Error {

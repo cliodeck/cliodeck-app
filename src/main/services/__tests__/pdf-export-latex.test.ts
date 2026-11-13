@@ -22,13 +22,18 @@
  * Compiler ne suffit pas toujours : le texte du PDF (pdftotext, gardé par sa présence) montre où
  * vont les notes d'un tableau dans un livre à notes de fin, et ce que devient une citation liée.
  *
- * Restent hors du banc, car d'autres PR les traitent. Ils échouaient déjà avant J19 :
- * - une image en chemin relatif au projet (`images/carte.png`) : pandoc tourne dans le dossier
- *   temporaire de l'export, sans `--resource-path`, et remplace l'image par sa légende sans
- *   erreur. L'export se dit réussi, sans l'image. C'est L07-2 : le banc donne un chemin absolu ;
+ * Une image en chemin relatif au projet (`images/relative.png`) y est depuis L07-2 : pandoc tourne
+ * dans le dossier temporaire de l'export, et sans `--resource-path` la remplaçait par sa légende,
+ * export « réussi ». Le projet du banc a une espace dans son chemin ; l'image relative est sous
+ * `images/` (article, présentation) ou sous `chapters/images/` (livre, relative à son chapitre),
+ * et l'export ne doit rien signaler (`warnings`). Le nombre d'images du PDF est vérifié par
+ * `pdf-export-paths.test.ts`.
+ *
+ * Restent hors du banc, car d'autres PR les traitent :
  * - une image SVG : pandoc la convertit par `rsvg-convert`, et sans lui écrit `\includesvg`, que le
  *   paquet svg ne compile qu'avec Inkscape (« Package svg Error: File `…_svg-tex.pdf' is
- *   missing »). Le risque est noté dans L07-2 ;
+ *   missing »). Depuis L07-2, l'échec se dit (`export.imageNeedsRsvgConvert`, dans
+ *   `pdf-export-paths.test.ts`) ; le convertir sans rsvg-convert reste à faire ;
  * - un passage dans une autre langue (`[hello]{lang=en}`) : pandoc écrit `\foreignlanguage`, et
  *   le gabarit ne charge que le français (« The language english is not loaded »). C'est L12-6 ;
  * - un passage de droite à gauche (`[texte]{dir=rtl}`) : pandoc écrit `\RL`, qu'aucun gabarit ne
@@ -76,7 +81,7 @@ const BIBLIOGRAPHY = `@book{dupont2020,
 
 interface Construction {
   name: string;
-  /** `image` : chemin absolu de l'image (un chemin relatif attend L07-2, voir plus haut). */
+  /** `image` : chemin absolu de l'image. */
   markdown: (image: string) => string;
   /**
    * Les chemins où la construction ne compile pas, avant comme après J19 : elle sort du banc pour
@@ -109,6 +114,12 @@ const CONSTRUCTIONS: readonly Construction[] = [
   {
     name: 'image avec légende',
     markdown: (image) => `![Légende de l’image](${image})\n`,
+  },
+  {
+    // Relative au fichier qui la contient, comme l'éditeur l'affiche : sous `images/` du projet
+    // pour un article ou une présentation, sous `chapters/images/` pour un chapitre (L07-2).
+    name: 'image en chemin relatif',
+    markdown: () => '![Légende de l’image relative](images/relative.png)\n',
   },
   {
     name: 'texte barré',
@@ -249,7 +260,11 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
       markdown: string | readonly string[],
       book: Partial<BookSettings> = {}
     ): Promise<{ result: ExportResult; outputPath: string }> {
-      const project = mkdtempSync(join(root, `${projectType}-`));
+      // Une espace dans le chemin du projet : `--resource-path` le passe en un seul argument.
+      const project = join(mkdtempSync(join(root, `${projectType}-`)), 'Mon projet');
+      const images = projectType === 'book' ? join(project, 'chapters', 'images') : join(project, 'images');
+      mkdirSync(images, { recursive: true });
+      writeFileSync(join(images, 'relative.png'), PIXEL_PNG);
       const outputPath = join(project, 'sortie.pdf');
       const common = {
         projectPath: project,
@@ -260,7 +275,6 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
 
       if (projectType === 'book') {
         const texts = typeof markdown === 'string' ? [markdown] : markdown;
-        mkdirSync(join(project, 'chapters'));
         texts.forEach((text, i) => writeFileSync(join(project, 'chapters', `c${i + 1}.md`), text));
         const result = await pdfExportService.exportToPDF({
           ...common,
@@ -294,6 +308,8 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
 
       expect(latexErrors(result)).toEqual([]);
       expect(result, result.error).toMatchObject({ success: true });
+      // Aucune image introuvable, relative comprise : pandoc l'aurait remplacée par sa légende.
+      expect(result.warnings).toBeUndefined();
       expect(readFileSync(outputPath).subarray(0, 5).toString('latin1')).toBe('%PDF-');
       return outputPath;
     }

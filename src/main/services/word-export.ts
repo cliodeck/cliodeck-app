@@ -1,5 +1,5 @@
-import { writeFile, readFile, mkdir, rm } from 'fs/promises';
-import { join, dirname, extname } from 'path';
+import { writeFile, readFile, mkdtemp, rm } from 'fs/promises';
+import { delimiter, join, dirname, extname, resolve as resolvePath } from 'path';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
@@ -34,7 +34,13 @@ import {
   type ExportLimits,
   type ExportResult,
 } from './export-time-limit.js';
-import { resolveBookSettings, referenceSectionTitle } from './pandoc-args.js';
+import {
+  missingImagesWarnings,
+  pandocMissingResources,
+  projectResourcePaths,
+  resolveBookSettings,
+  referenceSectionTitle,
+} from './pandoc-args.js';
 import { resolveProjectBibliography, resolveProjectCsl } from './export-project-files.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
@@ -201,8 +207,9 @@ export class WordExportService {
     onProgress: ((progress: WordExportProgress) => void) | undefined,
     clock: ExportClock
   ): Promise<WordExportResult> {
-    const tempDir = join(tmpdir(), `cliodeck-word-export-${Date.now()}`);
-    await mkdir(tempDir, { recursive: true });
+    // Un dossier propre à cet export : nommé par l'horloge, deux exports lancés dans la même
+    // milliseconde le partageaient, et le premier fini l'effaçait sous l'autre.
+    const tempDir = await mkdtemp(join(tmpdir(), 'cliodeck-word-export-'));
 
     try {
       onProgress?.({
@@ -238,11 +245,14 @@ export class WordExportService {
       await writeFile(inputPath, fullContent);
 
       // Build pandoc arguments
+      // `--resource-path` : pandoc tourne dans le dossier temporaire, et une image relative au
+      // projet (`images/plan.png`) y était introuvable, remplacée par sa légende (S12-1-1).
       const pandocArgs = [
         inputPath,
         '-o', outputPath,
         '--from', 'markdown',
         '--to', 'docx',
+        `--resource-path=${projectResourcePaths(options.projectPath).join(delimiter)}`,
       ];
 
       // Réglages d'ouvrage. La modale annonce qu'ils « pilotent l'assemblage
@@ -317,14 +327,17 @@ export class WordExportService {
           env: { ...process.env, PATH: extendedPath },
         });
 
-        let stderr = '';
+        // Décodé d'un bloc à la fermeture : morceau par morceau, un caractère accentué coupé
+        // entre deux morceaux devenait « �� » (S12-2-0).
+        const chunks: Buffer[] = [];
 
-        pandoc.stderr.on('data', (data) => {
-          stderr += data.toString();
+        pandoc.stderr.on('data', (data: Buffer) => {
+          chunks.push(data);
           console.log('📄 Pandoc output:', data.toString());
         });
 
         pandoc.on('close', (code) => {
+          const stderr = Buffer.concat(chunks).toString('utf8');
           if (code === 0) {
             resolve(stderr);
           } else {
@@ -345,10 +358,13 @@ export class WordExportService {
 
       console.log('✅ Word document exported successfully with pandoc:', outputPath);
       const unresolved = pandocUnresolvedCitations(pandocStderr);
+      // Une image introuvable, pandoc la remplace par sa légende et réussit : la réserve le dit.
+      const warnings = missingImagesWarnings(pandocMissingResources(pandocStderr));
       return {
         success: true,
         outputPath,
         ...(unresolved.length > 0 ? { unresolvedCitations: unresolved } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
       };
     } catch (error: unknown) {
       console.error('❌ Pandoc Word export failed:', error);
@@ -419,10 +435,12 @@ export class WordExportService {
         }
       }
 
-      // Determine output path
-      const outputPath =
-        options.outputPath ||
-        join(
+      // Chemin de sortie résolu contre le projet : un nom nu (« article.docx ») était écrit dans
+      // le dossier temporaire de pandoc, effacé avec lui, ou dans le dossier courant du processus
+      // sur le chemin natif (S12-1-28).
+      const outputPath = options.outputPath
+        ? resolvePath(options.projectPath, options.outputPath)
+        : join(
           dirname(options.projectPath),
           `${options.metadata?.title || 'output'}.docx`
         );

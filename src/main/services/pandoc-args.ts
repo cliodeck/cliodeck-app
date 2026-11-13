@@ -15,8 +15,11 @@
  * paramètre.
  */
 
+import { delimiter, join } from 'path';
 import type { BookSettings } from '../../../backend/types/book.js';
+import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 import { getLanguage } from '../i18n.js';
+import type { ExportImageErrorCode } from './export-time-limit.js';
 
 // MARK: - Types
 
@@ -64,6 +67,11 @@ export interface PandocArgsInput {
   cslAvailable: boolean;
   /** Fichier d'en-têtes beamer, si des personnalisations ont été écrites. */
   headerIncludesPath?: string;
+  /**
+   * Où pandoc cherche les images à chemin relatif (`--resource-path`) : il tourne dans le dossier
+   * temporaire de l'export, où rien du projet ne se trouve (`projectResourcePaths`).
+   */
+  resourcePaths?: string[];
 }
 
 export const DEFAULT_BOOK_SETTINGS: BookSettings = {
@@ -75,6 +83,16 @@ export const DEFAULT_BOOK_SETTINGS: BookSettings = {
 };
 
 // MARK: - Petites décisions pures
+
+/**
+ * Les dossiers où chercher une image à chemin relatif : le projet, puis `chapters/`. L'éditeur
+ * résout une image relative au fichier ouvert (`CodeMirrorEditor`) : `images/plan.png` sous le
+ * projet pour un article, sous `chapters/` pour un chapitre de livre, et `../images/plan.png`
+ * d'un chapitre retombe sous le projet par `chapters/`.
+ */
+export function projectResourcePaths(projectPath: string): string[] {
+  return [projectPath, join(projectPath, 'chapters')];
+}
 
 /** Réglages d'ouvrage complétés par les défauts. */
 export function resolveBookSettings(settings?: BookSettings): BookSettings {
@@ -326,6 +344,11 @@ export function buildPandocArgs(input: PandocArgsInput): string[] {
     '--pdf-engine-opt=-interaction=nonstopmode',
   ];
 
+  if (input.resourcePaths?.length) {
+    // Un seul argument : pas de shell, un projet dont le chemin contient une espace passe tel quel.
+    args.push(`--resource-path=${input.resourcePaths.join(delimiter)}`);
+  }
+
   if (input.projectType === 'presentation') {
     args.push(
       ...presentationArgs(input.beamerConfig ?? {}, input.headerIncludesPath)
@@ -367,4 +390,43 @@ export function referenceSectionTitle(): string {
     de: 'Literatur',
   };
   return titles[getLanguage()] ?? titles.fr;
+}
+
+// MARK: - Sortie d'erreur de pandoc
+
+/**
+ * Les ressources que pandoc n'a pas trouvées (« Could not fetch resource X: replacing image with
+ * description », pandoc 3.x ; d'anciennes versions mettent le chemin entre apostrophes). Pandoc
+ * remplace l'image par sa légende et réussit : c'est la seule trace qu'il en reste.
+ */
+export function pandocMissingResources(stderr: string): string[] {
+  const files = new Set<string>();
+  for (const m of stderr.matchAll(/Could not fetch resource '?(.+?)'?(?:: replacing image with description)?\r?$/gm)) {
+    files.add(m[1]);
+  }
+  return [...files];
+}
+
+/** Une seule réserve pour toutes les images introuvables : la modale la dit en une phrase. */
+export function missingImagesWarnings(files: readonly string[]): OutcomeIssue[] {
+  if (files.length === 0) return [];
+  return [{ code: 'export.imagesNotFound', params: { files: files.join(', '), count: files.length } }];
+}
+
+/**
+ * L'image qui fait échouer un export PDF, quand c'en est une : pandoc n'a pas su la convertir pour
+ * xelatex (« Could not convert image »), et la compilation tombe ensuite sur elle. Une image SVG
+ * demande `rsvg-convert` ; un format que ni pandoc ni xelatex ne lisent (WebP) ne passe pas.
+ *
+ * Pandoc nomme la copie qu'il a faite dans son dossier de travail (`…/media-<empreinte>/images/
+ * schema.svg`) : la partie qui suit l'empreinte est le chemin écrit dans le document.
+ */
+export function pandocImageFailure(
+  stderr: string
+): { code: ExportImageErrorCode; params: { file: string } } | null {
+  const m = stderr.match(/Could not convert image (.+?): (.*)$/m);
+  if (!m) return null;
+  const file = m[1].match(/[\\/]media-[0-9a-f]+[\\/](.+)$/)?.[1] ?? m[1];
+  const code = /rsvg-convert/.test(m[2]) ? 'export.imageNeedsRsvgConvert' : 'export.imageNotConverted';
+  return { code, params: { file } };
 }
