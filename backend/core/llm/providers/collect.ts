@@ -27,14 +27,18 @@ export class ProviderCallError extends Error {
  * Consomme un flux de `chat()` et rend le texte et l'usage. Lève `ProviderCallError` sur un
  * terminal `error` (cause lue dans `provider.getStatus()` au moment du chunk) ou `cancelled`.
  * Une fin par la limite de longueur n'est pas une panne : le texte est rendu.
+ * `onChunk` voit passer chaque chunk, raisonnement et terminal compris : le compacteur en fait un
+ * signe de vie pour le délai d'inactivité du tour (L09-9).
  */
 export async function collectCompletion(
   provider: Pick<LLMProvider, 'getStatus'>,
-  chunks: AsyncIterable<ChatChunk>
+  chunks: AsyncIterable<ChatChunk>,
+  onChunk?: (chunk: ChatChunk) => void
 ): Promise<{ text: string; usage?: ChatChunk['usage'] }> {
   let text = '';
   let usage: ChatChunk['usage'];
   for await (const chunk of chunks) {
+    onChunk?.(chunk);
     text += chunk.delta;
     if (chunk.usage) usage = chunk.usage;
     if (!chunk.done) continue;
