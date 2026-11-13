@@ -8,8 +8,9 @@
  * Le plafond de 4 extraits suppose le mode État de l'art et un français propre. Des indications
  * du projet (`context.md`) ou un texte d'OCR en laissent tenir moins : la coupe des consignes
  * effaçait alors les derniers extraits, que le panneau des sources montrait quand même. Ici, les
- * scénarios de la revue, sur le tokeniseur du petit Qwen 2.5 0,5B (pas le modèle de production :
- * les comptes de jetons de la famille Qwen 2.5 sont ceux de son tokeniseur, commun aux tailles).
+ * scénarios de la revue, sur le tokeniseur du Qwen 2.5 0,5B, le modèle de génération par défaut
+ * (les comptes de jetons valent aussi pour la variante 1,5B : le tokeniseur de la famille Qwen 2.5
+ * est commun aux tailles).
  * `CLIODECK_TEST_REPORT` : fichier où écrire les comptes mesurés.
  *
  * Le modèle est libéré à la fin (A16). Jamais `llama.dispose()`.

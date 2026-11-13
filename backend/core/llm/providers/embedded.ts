@@ -222,8 +222,16 @@ export class EmbeddedProvider extends EmbeddedBase implements LLMProvider {
         emitted = true;
         yield { delta };
       }
-      yield { delta: '', done: true, finishReason: 'stop' };
+      // Arrêté par le signal après un premier morceau, llama.cpp rend ce qu'il a produit et la
+      // génération finit sans lever : le tour est arrêté, pas fini (L09-10).
+      yield { delta: '', done: true, finishReason: opts.signal?.aborted ? 'cancelled' : 'stop' };
     } catch (e) {
+      // Arrêté avant son premier morceau, llama.cpp lève la raison du signal : un arrêt n'est pas une
+      // panne (J9), et le fournisseur reste prêt pour la question suivante.
+      if (opts.signal?.aborted) {
+        yield { delta: '', done: true, finishReason: 'cancelled' };
+        return;
+      }
       // Le flux a peut-être déjà produit du texte : on termine proprement
       // plutôt que de propager, comme l'exige le contrat.
       this.status = {
@@ -236,11 +244,7 @@ export class EmbeddedProvider extends EmbeddedBase implements LLMProvider {
           at: now(),
         },
       };
-      yield {
-        delta: '',
-        done: true,
-        finishReason: opts.signal?.aborted ? 'cancelled' : 'error',
-      };
+      yield { delta: '', done: true, finishReason: 'error' };
       if (!emitted) return;
     }
   }
@@ -300,7 +304,9 @@ export class EmbeddedEmbeddingProvider
   /**
    * Une passe llama.cpp — le chargement du modèle, le calcul d'un embedding — ne s'interrompt pas :
    * un abandon prend effet à la fin de la passe en cours, qui ne rend pas son vecteur, et la promesse
-   * rejette alors par la raison du signal, comme `fetch` (J9). La génération : L09-10.
+   * rejette alors par la raison du signal, comme `fetch` (J9). La génération, elle, s'arrête au jeton
+   * suivant pendant l'écriture, et à la fin de la lecture des consignes pendant celle-ci (L09-10,
+   * `EmbeddedLLMClient.generateChat`).
    */
   async embed(
     texts: string[],
