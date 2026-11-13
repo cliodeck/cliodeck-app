@@ -35,6 +35,29 @@ function usable(status: ProviderStatus): boolean {
   return status.state === 'ready' || status.state === 'degraded';
 }
 
+/**
+ * `promise`, ou le rejet par la raison de `signal` dès qu'il s'avorte. Seule l'attente de l'appelant
+ * est coupée : ce que `promise` attend continue (J9).
+ */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      }
+    );
+  });
+}
+
 class Picker<T extends { healthCheck(): Promise<ProviderStatus> }> {
   private lastProbeAt = 0;
   private lastChoice: T | null = null;
@@ -45,7 +68,17 @@ class Picker<T extends { healthCheck(): Promise<ProviderStatus> }> {
     private readonly clock: () => number = () => Date.now()
   ) {}
 
-  async pick(): Promise<T> {
+  /**
+   * `signal` abandonné : rejette par sa raison, sans sonder s'il l'était déjà. `healthCheck` n'a pas
+   * de signal au contrat : un sondage parti va à son terme (borné par le délai d'en-têtes par défaut
+   * d'undici, 300 s), et son choix reste en cache pour l'appel suivant (J9).
+   */
+  async pick(signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted();
+    return untilAborted(this.choose(), signal);
+  }
+
+  private async choose(): Promise<T> {
     const nowMs = this.clock();
     if (this.lastChoice && nowMs - this.lastProbeAt < PROBE_TTL_MS) {
       return this.lastChoice;
@@ -170,17 +203,22 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
   /**
    * Le fournisseur qui servira l'appel suivant (sondage compris). Un cache rangé par modèle doit lire
    * sa clé sur lui : `model` et `dimension` ne disent que le dernier choix, ou le primaire avant tout
-   * sondage, et `embed` peut basculer entre les deux.
+   * sondage, et `embed` peut basculer entre les deux. `signal` abandonné pendant le sondage : rejet
+   * par sa raison, sans attendre la réponse d'Ollama.
    */
-  resolve(): Promise<EmbeddingProvider> {
-    return this.picker.pick();
+  resolve(opts: { signal?: AbortSignal } = {}): Promise<EmbeddingProvider> {
+    return this.picker.pick(opts.signal);
   }
 
+  /**
+   * Abandonné pendant le sondage du primaire, rejette tout de suite par la raison du signal, et
+   * aucune demande d'embedding ne part (J9).
+   */
   async embed(
     texts: string[],
     opts: { signal?: AbortSignal } = {}
   ): Promise<number[][]> {
-    const chosen = await this.picker.pick();
+    const chosen = await this.picker.pick(opts.signal);
     return chosen.embed(texts, opts);
   }
 
@@ -195,10 +233,17 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
  * du journal d'usage (`instrumentEmbedding`), qui enveloppe toujours le repli dans le vrai registre :
  * un `instanceof FallbackEmbeddingProvider` ne le voit jamais.
  */
-export function resolveEmbeddingProvider(provider: EmbeddingProvider): Promise<EmbeddingProvider> {
+export function resolveEmbeddingProvider(
+  provider: EmbeddingProvider,
+  signal?: AbortSignal
+): Promise<EmbeddingProvider> {
   const candidate = provider as EmbeddingProvider & { resolve?: unknown };
   if (typeof candidate.resolve === 'function') {
-    return (candidate as EmbeddingProvider & { resolve(): Promise<EmbeddingProvider> }).resolve();
+    return (
+      candidate as EmbeddingProvider & {
+        resolve(opts?: { signal?: AbortSignal }): Promise<EmbeddingProvider>;
+      }
+    ).resolve({ signal });
   }
   return Promise.resolve(provider);
 }

@@ -22,6 +22,7 @@ import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-gu
 import { makeTpy } from '../../../../backend/integrations/tropy/__tests__/helpers/make-tpy';
 import type { PDFDocument } from '../../../../backend/types/pdf-document';
 import type { RAGExplanation } from '../../../../backend/types/chat-source';
+import type { EmbeddingProvider } from '../../../../backend/core/llm/providers/base';
 
 vi.mock('electron', () => ({
   app: { commandLine: { hasSwitch: () => false }, getPath: () => os.tmpdir() },
@@ -43,6 +44,8 @@ const provider = vi.hoisted(() => ({
   held: [] as HeldRequest[],
   /** Les messages reçus par le modèle de génération. */
   prompts: [] as Array<Array<{ role: string; content: string }>>,
+  /** Ce que le registre rend à la place du fournisseur local : un repli du mode « auto », par exemple. */
+  wrapEmbedding: null as ((local: EmbeddingProvider) => EmbeddingProvider) | null,
 }));
 
 const DIMENSION = 768;
@@ -75,7 +78,8 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
           yield { delta: '', done: true, finishReason: 'stop' };
         },
       }),
-      getEmbedding: () => ({
+      getEmbedding: () => {
+        const local = {
         id: 'local-test',
         name: 'local-test',
         model: 'hashed-bag-of-words',
@@ -98,7 +102,9 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
           });
         },
         dispose: async () => undefined,
-      }),
+        } as unknown as EmbeddingProvider;
+        return provider.wrapEmbedding ? provider.wrapEmbedding(local) : local;
+      },
       dispose: async () => undefined,
     }),
   };
@@ -114,6 +120,7 @@ const { manuscriptIndexService } = await import('../manuscript-index-service.js'
 const { readingNotesIndexService } = await import('../reading-notes-index-service.js');
 const { EnhancedVectorStore } = await import('../../../../backend/core/vector-store/EnhancedVectorStore.js');
 const { VectorStore } = await import('../../../../backend/core/vector-store/VectorStore.js');
+const { FallbackEmbeddingProvider } = await import('../../../../backend/core/llm/providers/fallback.js');
 
 const ARCHIVE_NOTE =
   'Rapport du commissaire central au préfet sur la réunion tenue salle Colbert le 18 mars 1907. ' +
@@ -134,6 +141,8 @@ let projectDir = '';
 let pdfStore: InstanceType<typeof EnhancedVectorStore> | null = null;
 /** Les tours lancés : un tour que rien n'a coupé finit après la libération de ses demandes. */
 let turns: Array<{ sent: Sent[] }> = [];
+/** Les sondages d'Ollama restés sans réponse, que la fin du test relâche. */
+let heldProbes: Array<() => void> = [];
 
 /** Chaque question est neuve : le cache d'embeddings du module ne doit pas répondre à la place du fournisseur. */
 let turn = 0;
@@ -251,7 +260,9 @@ beforeEach(async () => {
   provider.holdWhen = null;
   provider.held.length = 0;
   provider.prompts.length = 0;
+  provider.wrapEmbedding = null;
   turns = [];
+  heldProbes = [];
   await tropyService.init(projectDir);
 });
 
@@ -259,6 +270,7 @@ afterEach(async () => {
   // Une demande que rien n'a coupée (le défaut) se libère ici : son tour finit, et ne déborde pas
   // sur le test suivant.
   provider.holdWhen = null;
+  for (const release of heldProbes.splice(0)) release();
   for (const request of provider.held) request.release();
   for (const { sent } of turns) await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
   retrievalService.clear();
@@ -338,5 +350,44 @@ describe.skipIf(!sqliteAvailable)('fermeture du projet pendant un embedding des 
     // le compte rendu la dise en échec.
     const result = await syncing;
     expect(result.issues.map((issue) => issue.code)).not.toContain('embedding-failed');
+  });
+});
+
+/**
+ * Mode « auto » : Ollama d'abord, le moteur embarqué en repli (`FallbackEmbeddingProvider`). Avant
+ * l'embedding de la question, la recherche fait choisir le repli, qui sonde Ollama (`healthCheck`,
+ * sans signal au contrat). Ollama dont le serveur ne répond plus, « Arrêter » attendait la fin du
+ * sondage : le tour restait au registre des opérations jusqu'à sa réponse.
+ */
+describe.skipIf(!sqliteAvailable)('« Arrêter » pendant le sondage d’Ollama, en mode « auto » (J9)', () => {
+  it('le tour finit annulé sans attendre la réponse du sondage, et le modèle n’est pas appelé', async () => {
+    const probes: Array<() => void> = [];
+    provider.wrapEmbedding = (local) =>
+      new FallbackEmbeddingProvider(
+        {
+          ...local,
+          id: 'ollama-sans-reponse',
+          healthCheck: () =>
+            new Promise((resolve) => {
+              const release = (): void => resolve({ state: 'ready' });
+              probes.push(release);
+              heldProbes.push(release);
+            }),
+        },
+        local
+      );
+    await openBibliography();
+    const before = probes.length;
+    const { sessionId, sent } = startTurn(nextMarker(), 'secondary');
+    await vi.waitFor(() => expect(probes.length).toBeGreaterThan(before), WAIT);
+
+    expect(fusionChatService.cancel(sessionId)).toBe(true);
+
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), ABORT_WAIT);
+    expect(terminal(sent)).toMatchObject({ chunk: { done: true, finishReason: 'cancelled' } });
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(explanations(sent).map((e) => e.search.retrievalStatus)).not.toContain('failed');
+    expect(provider.prompts).toHaveLength(0);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
   });
 });

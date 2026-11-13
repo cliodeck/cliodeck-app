@@ -10,8 +10,10 @@
  * Returns a typed `VaultScanReport` (step 2.1bis) — partial-success
  * first-class. An unreadable or malformed note doesn't fail the whole
  * indexing; it's recorded in `skipped` or `failed` with a typed reason.
- * Une seule exception : si les tables du coffre disparaissent pendant la
- * passe (« Détacher »), elle s'arrête au lieu de compter N échecs.
+ * Deux exceptions : si les tables du coffre disparaissent pendant la
+ * passe (« Détacher »), elle s'arrête au lieu de compter N échecs ; si son
+ * `signal` s'avorte (fermeture du projet), elle s'arrête sans rien écrire et
+ * rejette par sa raison (J9).
  *
  * Unchanged notes (same file hash) are skipped on incremental runs
  * (`{ force: false }` default), as long as their chunks are there. Pass
@@ -44,6 +46,12 @@ const MAX_NOTE_BYTES = 2 * 1024 * 1024; // 2 MB — anything larger is almost ce
 
 export interface IndexOptions {
   force?: boolean;
+  /**
+   * Abandonné (fermeture du projet) : la requête d'embedding en cours est coupée, rien de ce qu'elle
+   * rendrait n'est écrit, et la passe rejette par la raison du signal, une `AbortError`. Sans lui,
+   * Ollama figé, la requête restait ouverte jusqu'au redémarrage de l'app (J9).
+   */
+  signal?: AbortSignal;
   onProgress?: (p: {
     stage: 'scanning' | 'parsing' | 'embedding' | 'complete';
     processed: number;
@@ -70,6 +78,8 @@ export class ObsidianVaultIndexer {
   }
 
   async indexAll(opts: IndexOptions = {}): Promise<VaultScanReport> {
+    const signal = opts.signal;
+    signal?.throwIfAborted();
     const entries = await this.reader.scan();
     const report = emptyReport(this.reader.path);
     const force = opts.force ?? false;
@@ -81,6 +91,7 @@ export class ObsidianVaultIndexer {
     });
 
     for (let i = 0; i < entries.length; i++) {
+      signal?.throwIfAborted();
       const entry = entries[i];
       const ref = {
         relativePath: entry.relativePath,
@@ -173,7 +184,9 @@ export class ObsidianVaultIndexer {
       const chunks = this.chunkNote(noteId, parsed);
       let embedded = false;
       try {
-        const rows = await this.embedBatched(chunks);
+        const rows = await this.embedBatched(chunks, signal);
+        // Rendu après l'abandon (un fournisseur qui finit sa passe quand même) : rien ne s'écrit.
+        signal?.throwIfAborted();
         embedded = true;
         this.store.transaction(() => {
           this.store.upsertNote(note);
@@ -184,6 +197,8 @@ export class ObsidianVaultIndexer {
         });
         report.indexed.push({ ref, parsed });
       } catch (e) {
+        // Passe abandonnée : un abandon n'est pas l'échec d'une note, elle s'arrête là.
+        signal?.throwIfAborted();
         // Tables disparues : « Détacher » a effacé le coffre pendant l'appel au fournisseur. Ce
         // n'est pas l'échec d'une note, la passe s'arrête : continuer enverrait au fournisseur,
         // peut-être en ligne, toutes les notes d'un coffre que l'auteur vient de retirer.
@@ -302,12 +317,13 @@ export class ObsidianVaultIndexer {
   // MARK: - embed
 
   private async embedBatched(
-    chunks: ObsidianChunkRecord[]
+    chunks: ObsidianChunkRecord[],
+    signal: AbortSignal | undefined
   ): Promise<Array<{ chunk: ObsidianChunkRecord; embedding: Float32Array }>> {
     const out: Array<{ chunk: ObsidianChunkRecord; embedding: Float32Array }> = [];
     for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
       const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE);
-      const vectors = await this.embedder.embed(batch.map((c) => c.content));
+      const vectors = await this.embedder.embed(batch.map((c) => c.content), { signal });
       for (let j = 0; j < batch.length; j++) {
         out.push({ chunk: batch[j], embedding: Float32Array.from(vectors[j]) });
       }

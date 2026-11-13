@@ -22,10 +22,16 @@ test.afterEach(() => {
   for (const dir of toClean.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function makeArticle(): string {
+function makeArticle(vault?: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-embed-stop-'));
   toClean.push(dir);
   mkdirSync(join(dir, '.cliodeck'), { recursive: true });
+  if (vault) {
+    writeFileSync(
+      join(dir, '.cliodeck', 'config.json'),
+      JSON.stringify({ schema_version: 2, name: 'Projet E2E embedding', vault: { path: vault } }),
+    );
+  }
   writeFileSync(join(dir, 'document.md'), '# Article\n\nUn paragraphe.\n');
   const projectJson = join(dir, 'project.json');
   writeFileSync(
@@ -66,7 +72,8 @@ test('« Arrêter » pendant l’embedding de la question coupe sa requête ; fe
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
     }, projectJson);
     await window.locator('button[title="Ouvrir un projet"]').first().click();
-    await expect(window.locator('.codemirror-editor .cm-content')).toBeVisible({ timeout: 20_000 });
+    // Le texte du document, pas l'éditeur seul : l'éditeur est visible avant que le projet soit ouvert.
+    await expect(window.locator('.codemirror-editor .cm-content')).toContainText('Un paragraphe.', { timeout: 20_000 });
 
     const question = 'Le corridor de Danzig en 1939';
     await panel(window).locator('#right-tab-chat').click();
@@ -97,6 +104,55 @@ test('« Arrêter » pendant l’embedding de la question coupe sa requête ; fe
     await expect
       .poll(() => ollama.embedRequests().filter((r) => !r.aborted).map((r) => r.texts[0]), { timeout: 30_000 })
       .toEqual([]);
+  } finally {
+    await app.close();
+    await ollama.close();
+  }
+});
+
+/**
+ * L'indexation du coffre Obsidian construit son propre registre et son propre magasin, que la
+ * fermeture du projet ne voyait pas : Ollama figé, sa requête restait ouverte jusqu'au redémarrage
+ * de l'app, le brain.db du projet quitté avec (relevé à la revue de J9).
+ */
+test('fermer le projet pendant l’indexation du coffre Obsidian coupe sa requête d’embedding', async () => {
+  const ollama = await startFakeOllama('jamais envoyée', { hangEmbed: true });
+  toClean.push(ollama.userDataDir);
+  const vault = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-embed-stop-vault-'));
+  toClean.push(vault);
+  const note = 'Le comité de grève des dockers de Saint-Nazaire';
+  writeFileSync(join(vault, 'comite.md'), `# Comité de grève\n\n${note}, réuni le 3 avril 1907.\n`);
+  const outcome = await launchApp({ userDataDir: ollama.userDataDir });
+  if (outcome.kind === 'skip') {
+    await ollama.close();
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window }: { app: ElectronApplication; window: Page } = outcome.value;
+
+  try {
+    const projectJson = makeArticle(vault);
+    await app.evaluate(({ dialog }, filePath) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+    }, projectJson);
+    await window.locator('button[title="Ouvrir un projet"]').first().click();
+    // Le texte du document, pas l'éditeur seul : l'éditeur est visible avant que le projet soit ouvert.
+    await expect(window.locator('.codemirror-editor .cm-content')).toContainText('Un paragraphe.', { timeout: 20_000 });
+
+    // Le canal du bouton « Indexer » des Réglages ; la réponse n'arrive qu'à la fin de la passe. Une
+    // passe que rien ne coupe ne répond jamais : sa promesse rejette à la fermeture de l'app, et ce
+    // rejet ne doit pas masquer l'échec qui compte, celui de l'attente ci-dessous.
+    const indexing = window
+      .evaluate(() => window.electron.fusion.vault.index({}))
+      .catch((error: unknown) => ({ unanswered: String(error) }));
+    await expect.poll(() => requestsFor(ollama, note).length, { timeout: 30_000 }).toBeGreaterThan(0);
+
+    await window.locator('#left-tab-projects').click();
+    await window.getByRole('button', { name: 'Fermer le projet' }).click();
+
+    await expect.poll(() => requestsFor(ollama, note).every((r) => r.aborted), { timeout: 15_000 }).toBe(true);
+    // Arrêtée par la fermeture : le refus que le renderer reconnaît sans alerte, pas une panne.
+    expect(await indexing).toEqual({ success: false, error: 'project-changed' });
   } finally {
     await app.close();
     await ollama.close();

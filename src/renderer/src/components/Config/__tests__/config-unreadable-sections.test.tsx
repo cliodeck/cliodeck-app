@@ -202,6 +202,28 @@ describe('VaultConfigSection', () => {
     expect(screen.queryByText('project-changed')).toBeNull();
   });
 
+  it('indexation arrêtée par la fermeture du projet (J9) : ni le code project-changed, ni « échec »', async () => {
+    const index = vi.fn().mockResolvedValue({ success: false, error: 'project-changed' });
+    const status = vi.fn().mockResolvedValue({ success: true, indexed: true, dbPath: '/db', vaultPath: '/Notes' });
+    installFusion({ vault: vault({ index, status }) });
+    render(<VaultConfigSection />);
+    fireEvent.click(screen.getByText('vault.title'));
+    const button = await waitFor(() => {
+      const found = screen.getByText('vault.buttons.index');
+      expect(found.closest('button')?.disabled).toBe(false);
+      return found;
+    });
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(index).toHaveBeenCalledTimes(1));
+    // L'état se relit, celui du projet qui est maintenant à l'écran.
+    await waitFor(() => expect(status).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByText('vault.buttons.index').closest('button')?.disabled).toBe(false));
+    expect(screen.queryByText('project-changed')).toBeNull();
+    expect(screen.queryByText('vault.errors.indexFailed')).toBeNull();
+  });
+
   it('délier refusé : le motif reste à l’écran, même si l’état se lit encore', async () => {
     const unlink = vi.fn().mockResolvedValue({ success: false, error: REASON });
     const status = vi.fn().mockResolvedValue({ success: true, indexed: true, dbPath: '/db', vaultPath: '/Notes' });

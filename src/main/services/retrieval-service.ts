@@ -655,15 +655,16 @@ class RetrievalService {
   /**
    * Le fournisseur qui fera l'embedding. En mode « auto », le repli choisit au moment de l'appel :
    * on le fait choisir d'abord, pour que la clé du cache et le vecteur viennent du même modèle.
+   * `signal` : abandonné pendant le sondage d'Ollama, le choix rejette sans attendre sa réponse (J9).
    */
-  private async resolveEmbedding(): Promise<EmbeddingProvider> {
+  private async resolveEmbedding(signal?: AbortSignal): Promise<EmbeddingProvider> {
     if (!this.embedding) {
       throw new Error(
         'retrieval-service: embedding provider not configured (call configure() first)'
       );
     }
     // Le repli arrive enveloppé par le décorateur du journal : `resolveEmbeddingProvider` le traverse.
-    return resolveEmbeddingProvider(this.embedding);
+    return resolveEmbeddingProvider(this.embedding, signal);
   }
 
   private static providerKey(provider: EmbeddingProvider): string {
@@ -696,7 +697,7 @@ class RetrievalService {
       }
       let provider: EmbeddingProvider;
       try {
-        provider = await this.resolveEmbedding();
+        provider = await this.resolveEmbedding(signal);
       } catch {
         return;
       }
@@ -827,7 +828,7 @@ class RetrievalService {
    * vérifie avant (S04-1-14).
    */
   private async getQueryEmbedding(query: string, captured: SearchCapture): Promise<Float32Array> {
-    const provider = await this.resolveEmbedding();
+    const provider = await this.resolveEmbedding(captured.signal);
     const providerId = RetrievalService.providerKey(provider);
     let embedding = queryEmbeddingCache.get(query, providerId);
     if (!captured.cacheLookups.has(query)) captured.cacheLookups.set(query, embedding !== undefined);

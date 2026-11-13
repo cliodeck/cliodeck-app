@@ -152,6 +152,10 @@ export const VaultConfigSection: React.FC = () => {
             vaultName: res.vaultName,
           });
           await refresh();
+        } else if (refusedAsProjectChanged(res)) {
+          // Arrêtée par la fermeture du projet (J9) : la passe appartenait au projet quitté. Ni le
+          // code du main, ni « échec » : on relit l'état du projet à l'écran.
+          await refresh();
         } else {
           setError(res.error ?? t('vault.errors.indexFailed'));
         }

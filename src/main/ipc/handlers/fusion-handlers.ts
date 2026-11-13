@@ -63,6 +63,7 @@ import { UnreadableFileError, withFileLock } from '../../../../backend/core/fs/u
 import { sameFile } from '../../../../backend/core/vector-store/file-identity.js';
 import { workspaceFiles } from '../../../../backend/core/workspace/layout.js';
 import { assertProjectRoot, ProjectRootMissingError } from '../../../../backend/core/workspace/project-root.js';
+import { ProjectChangedError } from '../../../../backend/types/project-handle.js';
 import {
   workspaceLinkOutside,
   workspaceLinkOutsideMessage,
@@ -967,6 +968,11 @@ export function setupFusionHandlers(): void {
     } catch (e) {
       return errorResponse(e as Error);
     }
+    // Une opération de portée projet, inscrite avant le premier `await` : la fermeture du projet
+    // l'annule, et son signal coupe la requête d'embedding en cours. Le registre et le magasin sont
+    // ceux du handler, que la fermeture ne voit pas ; Ollama figé (aucun délai d'en-têtes), la
+    // requête restait ouverte jusqu'au redémarrage de l'app, le brain.db du projet quitté avec (J9).
+    const op = operations.begin('vault-index');
     try {
       const cfg = await readOrInitWorkspaceConfig(root);
       const vaultPath = (cfg.vault as VaultConfigBlock | undefined)?.path;
@@ -976,6 +982,8 @@ export function setupFusionHandlers(): void {
       if (!fsSync.existsSync(vaultPath)) {
         return errorResponse('vault path no longer exists');
       }
+      // Fermé pendant la lecture de la configuration : rien n'a commencé, rien ne s'ouvre.
+      if (op.signal.aborted) return errorResponse(new ProjectChangedError());
 
       const llmCfg = configManager.getLLMConfig();
       const registry = createRegistryFromClioDeckConfig(llmCfg);
@@ -999,6 +1007,7 @@ export function setupFusionHandlers(): void {
             reader.scan().then(() =>
               new ObsidianVaultIndexer(reader, store, embedder).indexAll({
                 force: !!opts.force,
+                signal: op.signal,
                 onProgress: (p) => {
                   try {
                     if (!event.sender.isDestroyed()) {
@@ -1031,7 +1040,13 @@ export function setupFusionHandlers(): void {
         await registry.dispose().catch(() => undefined);
       }
     } catch (e) {
+      // Arrêtée par la fermeture du projet : le refus que le renderer reconnaît sans alerte.
+      if (op.signal.aborted) return errorResponse(new ProjectChangedError());
       return errorResponse(e as Error);
+    } finally {
+      // Après la fermeture du magasin : la fermeture du projet, qui attend la fin des opérations,
+      // ne rend pas la main tant que ce brain.db reste ouvert.
+      op.finish();
     }
   });
 

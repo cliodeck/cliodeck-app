@@ -23,6 +23,7 @@ import { MistralEmbeddingProvider, MistralProvider } from '../mistral.js';
 import { OllamaEmbeddingProvider, OllamaProvider } from '../ollama.js';
 import { OpenAICompatibleEmbeddingProvider, OpenAICompatibleProvider } from '../openai-compatible.js';
 import { instrumentEmbedding } from '../instrument.js';
+import { FallbackEmbeddingProvider, resolveEmbeddingProvider } from '../fallback.js';
 import { setInferenceSink } from '../../../usage-journal/context.js';
 import type { RecordInferenceInput } from '../../../usage-journal/types.js';
 import type { EmbeddedLLMClient } from '../../EmbeddedLLMClient.js';
@@ -230,6 +231,72 @@ describe('moteur embarqué — embed abandonné', () => {
     controller.abort();
 
     await expect(p.embed(['texte'], { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(held.passes()).toBe(0);
+  });
+});
+
+/**
+ * Mode « auto » : Ollama d'abord, le moteur embarqué en repli. Avant chaque `embed`, le repli sonde
+ * Ollama (`healthCheck`, `/api/tags`), et ce sondage n'a pas de signal au contrat. Ollama dont le
+ * serveur ne répond plus, « Arrêter » attendait la fin du sondage : jusqu'à 300 s, le délai d'en-têtes
+ * par défaut d'undici. Le sondage lui-même reste ouvert jusqu'à sa réponse ; l'appel, lui, rejette
+ * tout de suite, et aucune demande d'embedding ne part.
+ */
+describe('repli Ollama → moteur embarqué (« auto ») — abandonné pendant le sondage d’Ollama', () => {
+  function autoProvider(): { fallback: FallbackEmbeddingProvider; held: ReturnType<typeof heldEmbeddingClient> } {
+    const held = heldEmbeddingClient();
+    const fallback = new FallbackEmbeddingProvider(
+      new OllamaEmbeddingProvider({ model: 'nomic-embed-text', dimension: 4, baseUrl: 'http://mock.ollama' }),
+      new EmbeddedEmbeddingProvider({ modelPath: MODEL_PATH, dimension: 4, client: held.client })
+    );
+    return { fallback, held };
+  }
+
+  /** L'issue d'une promesse, lue sans l'attendre : `pending` tant qu'elle n'est pas réglée. */
+  function settle(promise: Promise<unknown>): () => unknown {
+    let outcome: unknown = 'pending';
+    promise.then(
+      (value) => (outcome = { value }),
+      (error: unknown) => (outcome = { error })
+    );
+    return () => outcome;
+  }
+
+  it.each([
+    {
+      cas: 'embed',
+      call: (p: EmbeddingProvider, signal: AbortSignal) => p.embed(['La grève des dockers de Nantes'], { signal }),
+    },
+    {
+      cas: 'le fournisseur résolu avant l’embedding (clé du cache de la recherche)',
+      call: (p: EmbeddingProvider, signal: AbortSignal) => resolveEmbeddingProvider(p, signal),
+    },
+  ])('$cas : abort() pendant le sondage rejette par une AbortError, sans demande d’embedding', async ({ call }) => {
+    const seen = silentFetch();
+    const { fallback, held } = autoProvider();
+    // Comme dans l'app : le repli arrive enveloppé par le décorateur du journal d'usage.
+    const embedder = instrumentEmbedding(fallback, 'ollama', 'http://mock.ollama');
+    const controller = new AbortController();
+
+    const outcome = settle(call(embedder, controller.signal));
+    await vi.waitFor(() => expect(seen.map((r) => r.url)).toEqual(['http://mock.ollama/api/tags']));
+    controller.abort();
+
+    await vi.waitFor(() => expect(outcome()).toMatchObject({ error: { name: 'AbortError' } }), { timeout: 2_000 });
+    expect(seen.map((r) => r.url)).toEqual(['http://mock.ollama/api/tags']);
+    expect(held.passes()).toBe(0);
+  });
+
+  it('signal déjà abandonné : rejet par une AbortError, sans sondage ni demande d’embedding', async () => {
+    const seen = silentFetch();
+    const { fallback, held } = autoProvider();
+    const controller = new AbortController();
+    controller.abort();
+
+    const outcome = settle(fallback.embed(['texte'], { signal: controller.signal }));
+
+    await vi.waitFor(() => expect(outcome()).toMatchObject({ error: { name: 'AbortError' } }), { timeout: 2_000 });
+    expect(seen).toEqual([]);
     expect(held.passes()).toBe(0);
   });
 });
