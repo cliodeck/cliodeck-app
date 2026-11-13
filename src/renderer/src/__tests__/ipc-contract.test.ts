@@ -11,7 +11,7 @@
  *   1. une propriété lue sur la réponse d'un `window.electron.x.y()` et absente des clés que son
  *      handler peut répondre ;
  *   2. un `await window.electron.x.y()` en instruction seule, alors que le handler peut répondre
- *      `success: false` : l'échec est jeté sans être lu ;
+ *      `success: false` : l'échec est jeté sans être lu, `.catch(…)` chaîné ou non ;
  *   3. un `CustomEvent` émis sans écouteur, ou écouté sans émetteur ;
  *   4. un abonnement du preload (`ipcRenderer.on`) que le renderer ne peut pas défaire.
  *
@@ -27,11 +27,13 @@
  *     d'origine inconnue : ses clés restent ouvertes, aucune lecture n'y est vérifiée ;
  *   - une méthode du preload qui transforme la réponse (`.then`, plusieurs `invoke`) : sautée ;
  *   - un `await` jeté sur un handler dont aucun `success: false` n'est visible, et un appel non
- *     attendu (`window.electron.x.y();`, `void …`) ;
+ *     attendu (`window.electron.x.y();`, `void …`). Un `.catch(…)` ou un `.finally(…)` chaîné
+ *     avant l'`await` est traversé : il ne lit pas l'échec répondu, le résultat reste jeté ;
  *   - un échec lu sur une seule branche (`if (r.success) { … }`, rien pour l'échec) : la réponse
  *     est lue, le test est content ;
  *   - les propriétés lues au-delà du premier niveau (`r.data.noteCount` : seul `data` compte) ;
- *   - un `CustomEvent` dont le nom est calculé, ou émis par `new Event('nom-en-minuscules')`.
+ *   - un `CustomEvent` dont le nom est calculé ; un événement dont le nom n'a que des minuscules
+ *     (`new Event('refresh')`, `addEventListener('refresh')`), pris pour un événement du DOM.
  */
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
@@ -56,6 +58,15 @@ function walk(rel: string): SourceText[] {
 /** Les entrées, une par occurrence, triées : la même forme que la baseline. */
 function entries(findings: Array<{ entry: string }>): string[] {
   return findings.map((f) => f.entry).sort();
+}
+
+/**
+ * Le texte de la baseline tel que le test le compare. Les fins de ligne n'y comptent pas : un
+ * clone Windows (`core.autocrlf=true`, le réglage par défaut de Git pour Windows) l'extrait en
+ * CRLF sans que le contrat ait bougé.
+ */
+function baselineText(raw: string): string {
+  return raw.replace(/\r\n/g, '\n');
 }
 
 /** `a` privé de `b`, occurrence par occurrence (une entrée peut revenir plusieurs fois). */
@@ -193,6 +204,30 @@ describe('contrat IPC : chaque règle', () => {
     expect(entries(report.findings)).toEqual(['src/renderer/src/Demo.tsx › demo.save › résultat jeté']);
   });
 
+  it('un .catch ou un .finally ne lit pas success : le résultat reste jeté, ses lectures comptent', () => {
+    // `invoke` résout `{ success: false }` : le `.catch` ne s'exécute jamais sur un échec répondu.
+    const report = analyze(`
+      async function go() {
+        await window.electron.demo.save('a').catch(() => undefined);
+        await window.electron.demo.save('b').finally(() => done());
+        await (window.electron.demo.save('c') as Promise<unknown>).catch(console.error).finally(done);
+        const r = await window.electron.demo.status().catch(() => null);
+        const [listed] = await Promise.all([window.electron.demo.list().catch(() => null)]);
+        // .then change la valeur : la réponse passe au rappel, qui n'est pas suivi.
+        await window.electron.demo.save('d').then((res) => check(res));
+        return [r?.noteCount, listed?.data];
+      }
+    `);
+
+    expect(entries(report.findings)).toEqual([
+      'src/renderer/src/Demo.tsx › demo.list › .data',
+      'src/renderer/src/Demo.tsx › demo.save › résultat jeté',
+      'src/renderer/src/Demo.tsx › demo.save › résultat jeté',
+      'src/renderer/src/Demo.tsx › demo.save › résultat jeté',
+      'src/renderer/src/Demo.tsx › demo.status › .noteCount',
+    ]);
+  });
+
   it("une clé posée après coup compte ; un handler aux clés ouvertes ne se vérifie pas", () => {
     const report = analyze(`
       async function go() {
@@ -250,6 +285,15 @@ describe('contrat IPC : chaque règle', () => {
   });
 });
 
+describe('forme de la baseline', () => {
+  it('ne dépend pas des fins de ligne du clone (CRLF sous Windows)', () => {
+    const lf = `${JSON.stringify(['a › b › .c', 'd › e › résultat jeté'], null, 2)}\n`;
+
+    expect(baselineText(lf)).toBe(lf);
+    expect(baselineText(lf.replace(/\n/g, '\r\n'))).toBe(lf);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Le dépôt, contre la baseline.
 // ---------------------------------------------------------------------------
@@ -280,7 +324,7 @@ describe('contrat IPC du dépôt (cliquet)', () => {
     expect(baseline, 'ipc-contract.baseline.json : triez les entrées (ordre de Array.prototype.sort)').toEqual(
       [...baseline].sort()
     );
-    expect(fs.readFileSync(BASELINE, 'utf8')).toBe(`${JSON.stringify(baseline, null, 2)}\n`);
+    expect(baselineText(fs.readFileSync(BASELINE, 'utf8'))).toBe(`${JSON.stringify(baseline, null, 2)}\n`);
   });
 
   it("aucun écart nouveau au contrat (lecture hors contrat, échec jeté, événement orphelin)", () => {

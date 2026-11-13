@@ -70,7 +70,11 @@ export function errorResponse(error: unknown): IPCErrorResponse {
   return { success: false, error: message };
 }
 
-/** Les clés de l'enveloppe : une valeur qui en porterait une l'écraserait. */
+/**
+ * Les clés de l'enveloppe : une valeur qui en porterait une l'écraserait. `project:load` et
+ * `project:create` répondent déjà `warnings: string[]` (les services non ouverts) : pour les
+ * envelopper, ces noms deviennent des problèmes, ou changent de clé.
+ */
 const OUTCOME_ENVELOPE_KEYS = ['success', 'error', 'errorCode', 'errorParams', 'warnings'] as const;
 
 /**

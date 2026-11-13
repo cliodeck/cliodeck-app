@@ -77,6 +77,27 @@ describe('readOutcome : les réponses écrites sans outcomeResponse', () => {
   it('une réponse sans enveloppe est sa propre valeur', () => {
     expect(readOutcome<string[]>(['a', 'b'])).toEqual({ status: 'ok', value: ['a', 'b'] });
   });
+
+  it("des warnings qui ne sont pas des problèmes restent dans la valeur (project:load, services non ouverts)", () => {
+    // `project:load` et `project:create` répondent `warnings: string[]` : les noms des services
+    // best-effort qui ne se sont pas ouverts. Ce n'est pas l'enveloppe : rien ne doit s'en perdre.
+    expect(readOutcome({ success: true, project: { name: 'x' }, warnings: ['tropy', 'obsidian'] })).toEqual({
+      status: 'ok',
+      value: { project: { name: 'x' }, warnings: ['tropy', 'obsidian'] },
+    });
+    // `outcomeResponse` n'écrit jamais de `warnings` vide : un tableau vide est une valeur.
+    expect(readOutcome({ success: true, project: { name: 'x' }, warnings: [] })).toEqual({
+      status: 'ok',
+      value: { project: { name: 'x' }, warnings: [] },
+    });
+  });
+
+  it('des warnings mêlés (un problème, une chaîne) restent entiers dans la valeur', () => {
+    expect(readOutcome({ success: true, warnings: [{ code: 'similarity.segmentsFailed' }, 'tropy'] })).toEqual({
+      status: 'ok',
+      value: { warnings: [{ code: 'similarity.segmentsFailed' }, 'tropy'] },
+    });
+  });
 });
 
 describe("outcomeResponse : l'enveloppe ne se laisse pas écraser", () => {

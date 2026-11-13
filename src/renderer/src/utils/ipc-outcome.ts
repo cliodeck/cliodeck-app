@@ -51,9 +51,26 @@ function readIssue(value: unknown): OutcomeIssue | null {
 }
 
 /**
+ * Les avertissements de l'enveloppe, ou `null` si `warnings` n'en est pas une : `outcomeResponse`
+ * n'écrit que des tableaux non vides de problèmes. `project:load` et `project:create` répondent
+ * déjà `warnings: string[]`, les noms des services best-effort qui ne se sont pas ouverts : ce
+ * tableau-là appartient à la valeur, et le filtrer le ferait disparaître sans bruit.
+ */
+function envelopeWarnings(value: unknown): OutcomeIssue[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const issues = value.map(readIssue);
+  return issues.every((issue): issue is OutcomeIssue => issue !== null) ? issues : null;
+}
+
+/**
  * Le problème d'une réponse `success: false`. Sans `errorCode` (un handler qui répond par
  * `errorResponse`), le code ne qualifie rien et `error` est la cause brute. `outcomeResponse`
  * écrit le code dans `error` quand l'échec n'avait pas de cause : ce n'en est pas une.
+ *
+ * `errorCode` se lit comme un code relatif à `messages.*`. Les exports y mettent déjà les leurs
+ * (`export_timed_out`, `export_cancelled`, avec `timeLimitMinutes` à côté) : sans clé sous
+ * `messages`, `translateMessage` rend leur cause brute. La table des anciens codes (L12-13) les
+ * rattachera.
  */
 function failureIssue(res: { error?: unknown; errorCode?: unknown; errorParams?: unknown }): OutcomeIssue {
   const code = typeof res.errorCode === 'string' ? res.errorCode : UNEXPECTED_ISSUE_CODE;
@@ -67,7 +84,8 @@ function failureIssue(res: { error?: unknown; errorCode?: unknown; errorParams?:
 
 /**
  * La réponse relue en `Outcome`. Une réponse sans enveloppe (un tableau, un objet sans
- * `success`) est sa propre valeur ; `success: true` sans avertissement rend `ok`.
+ * `success`) est sa propre valeur ; `success: true` sans avertissement rend `ok`. Un `warnings`
+ * qui n'est pas fait de problèmes (`project:load`) reste entier dans la valeur.
  */
 export function readOutcome<T>(res: unknown): Outcome<T> {
   if (res === undefined || res === null) {
@@ -75,13 +93,11 @@ export function readOutcome<T>(res: unknown): Outcome<T> {
   }
   if (!isRecord(res) || !('success' in res)) return { status: 'ok', value: res as T };
   if (res.success === false) return { status: 'failed', error: failureIssue(res) };
+  const warnings = envelopeWarnings(res.warnings);
   const value = Object.fromEntries(
-    Object.entries(res).filter(([key]) => key !== 'success' && key !== 'warnings')
+    Object.entries(res).filter(([key]) => key !== 'success' && !(key === 'warnings' && warnings))
   );
-  const warnings = Array.isArray(res.warnings)
-    ? res.warnings.map(readIssue).filter((issue): issue is OutcomeIssue => issue !== null)
-    : [];
-  return partial(value as T, warnings);
+  return partial(value as T, warnings ?? []);
 }
 
 /** La réponse même, ou une `IpcError` si le main a répondu un échec. */

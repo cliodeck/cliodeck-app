@@ -635,8 +635,21 @@ interface RendererCall {
 }
 
 /**
+ * `appel.catch(…)` ou `appel.finally(…)` : l'appel chaîné, qui résout la même réponse. `invoke`
+ * résout `{ success: false }` sur un échec répondu, si bien que ce `.catch` ne lit pas l'échec.
+ * `.then` change la valeur : il n'est pas traversé.
+ */
+function settledChain(top: ts.Expression, parent: ts.Node): ts.CallExpression | null {
+  if (!ts.isPropertyAccessExpression(parent) || parent.expression !== top) return null;
+  if (parent.name.text !== 'catch' && parent.name.text !== 'finally') return null;
+  const chained = parent.parent;
+  return ts.isCallExpression(chained) && chained.expression === parent ? chained : null;
+}
+
+/**
  * Ce que l'appelant fait de la réponse. `await` en instruction seule : jetée. `const r = await` ou
- * `const { a } = await` : les propriétés lues. `Promise.all([…])` déstructuré : chacune.
+ * `const { a } = await` : les propriétés lues. `Promise.all([…])` déstructuré : chacune. Un
+ * `.catch(…)` ou un `.finally(…)` chaîné avant l'`await` ne change rien à ces règles.
  * Le reste (`.then`, réponse passée à une fonction, rendue) n'est pas suivi.
  */
 function followResponse(call: ts.CallExpression): { discarded: boolean; reads: Read[] | null } {
@@ -644,7 +657,9 @@ function followResponse(call: ts.CallExpression): { discarded: boolean; reads: R
   let awaited = false;
   for (;;) {
     const parent: ts.Node = top.parent;
+    const chained = awaited ? null : settledChain(top, parent);
     if (isTransparent(parent)) top = parent;
+    else if (chained) top = chained;
     else if (ts.isAwaitExpression(parent)) {
       awaited = true;
       top = parent;
