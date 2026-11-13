@@ -40,7 +40,7 @@ function usable(status: ProviderStatus): boolean {
  * `promise`, ou le rejet par la raison de `signal` dès qu'il s'avorte. Seule l'attente de l'appelant
  * est coupée : ce que `promise` attend continue (J9).
  */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return promise;
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise<T>((resolve, reject) => {
@@ -285,4 +285,15 @@ export function resolveEmbeddingProvider(
     ).resolve({ signal });
   }
   return Promise.resolve(provider);
+}
+
+/**
+ * L'identifiant du fournisseur qui sert les appels de `provider` : derrière un repli
+ * (`FallbackLLMProvider`), celui qu'il a retenu au dernier sondage ; sinon le sien. Passe à travers
+ * le décorateur du journal d'usage (`instrumentLLM`), qui enveloppe toujours le repli dans le vrai
+ * registre : un `instanceof FallbackLLMProvider` ne le voit jamais.
+ */
+export function activeLLMId(provider: LLMProvider): string {
+  const candidate = provider as LLMProvider & { activeId?: unknown };
+  return typeof candidate.activeId === 'string' ? candidate.activeId : provider.id;
 }

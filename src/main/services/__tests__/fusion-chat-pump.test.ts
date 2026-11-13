@@ -34,7 +34,15 @@ const bench = vi.hoisted(() => ({
   tools: false,
   /** Le faux modèle passe par le décorateur du journal d'usage, comme les vrais. */
   instrumented: false,
+  /**
+   * Un registre dont le fournisseur dépend de la configuration du tour (moteur embarqué, repli
+   * « auto ») : remplace le faux modèle unique quand il est posé.
+   */
+  registry: null as null | ((cfg: { generationProvider?: string; embeddedModelId?: string }) => LLMProvider),
 }));
+
+// Le vrai moteur embarqué, sans GGUF : `EmbeddedLLMClient` charge ce double (L08-4).
+vi.mock('node-llama-cpp', async () => (await import('../../../../backend/core/llm/__tests__/helpers/fake-node-llama-cpp.js')).fakeNodeLlamaCpp);
 
 vi.mock('electron', () => ({
   BrowserWindow: {
@@ -54,8 +62,12 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
   const { instrumentLLM } = await import('../../../../backend/core/llm/providers/instrument.js');
   return {
     ...original,
-    createRegistryFromClioDeckConfig: () => {
+    createRegistryFromClioDeckConfig: (cfg: { generationProvider?: string; embeddedModelId?: string }) => {
       if (bench.configError) throw new Error(bench.configError);
+      if (bench.registry) {
+        const provider = bench.registry(cfg);
+        return { getLLM: () => provider, dispose: () => provider.dispose() };
+      }
       const llm = {
         id: 'fake', name: 'Fake', model: 'fake-model',
         capabilities: { chat: true, streaming: true, tools: bench.tools },
@@ -94,6 +106,11 @@ import { HistoryManager } from '../../../../backend/core/history/HistoryManager.
 import { getJournalContext, setInferenceSink } from '../../../../backend/core/usage-journal/context.js';
 import type { RecordInferenceInput } from '../../../../backend/core/usage-journal/types.js';
 import { OperationBusyError } from '../cancellable-operation.js';
+import { FallbackLLMProvider } from '../../../../backend/core/llm/providers/fallback.js';
+import { EmbeddedProvider } from '../../../../backend/core/llm/providers/embedded.js';
+import { instrumentLLM } from '../../../../backend/core/llm/providers/instrument.js';
+import type { ProviderStatus } from '../../../../backend/core/llm/providers/base.js';
+import { fakeLlama } from '../../../../backend/core/llm/__tests__/helpers/fake-node-llama-cpp.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -165,6 +182,7 @@ afterEach(() => {
   bench.dialogCalls.length = 0;
   bench.tools = false;
   bench.instrumented = false;
+  bench.registry = null;
   setInferenceSink(undefined);
 });
 
@@ -881,5 +899,255 @@ describe('résumé du compacteur dans le tour (S06-1-18)', () => {
     expect(terminal(sent)?.chunk.finishReason).toBe('stop');
     expect(bench.seenMessages.map(isSummaryCall)).toEqual([true, false]);
     await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+  });
+});
+
+/**
+ * Le moteur embarqué crée un contexte de 4 096 jetons, mais le compacteur lisait la fenêtre du nom
+ * du modèle (Qwen 2.5 : 32 768) et ne se déclenchait jamais avant le débordement (S05-1-16) ; en
+ * « auto », Ollama arrêté, il lisait celle du modèle Ollama. La recherche, elle, envoyait autant
+ * d'extraits que le réglage en demandait, et llama.cpp coupait ce qui dépassait sans rien dire : le
+ * panneau des sources affichait ce que le modèle n'avait pas lu (L08-4).
+ */
+describe('moteur embarqué : la fenêtre réelle du tour (L08-4)', () => {
+  const EMBEDDED = {
+    backend: 'ollama',
+    ollamaURL: 'http://127.0.0.1:9',
+    ollamaChatModel: 'llama3.2',
+    generationProvider: 'embedded',
+    embeddedModelPath: '/modeles/qwen2.5-0.5b-instruct-q4_k_m.gguf',
+    embeddedModelId: 'qwen2.5-0.5b',
+  };
+  const AUTO = { ...EMBEDDED, generationProvider: 'auto' };
+  let project = '';
+
+  function useConfig(cfg: typeof EMBEDDED): void {
+    vi.mocked(configManager.getLLMConfig).mockReturnValue(cfg as unknown as ReturnType<typeof configManager.getLLMConfig>);
+  }
+
+  /** Un fournisseur du banc : son sondage est `health`, ses réponses celles de `bench.provider`. */
+  function benchLLM(id: string, model: string, health: () => Promise<ProviderStatus>): LLMProvider {
+    return {
+      id, name: id, model,
+      capabilities: { chat: true, streaming: true, tools: false, embeddings: false },
+      getStatus: () => ({ state: 'ready' }),
+      healthCheck: health,
+      chat: (messages: ChatMessage[], opts: ChatOptions = {}) => {
+        bench.seenOpts.push(opts);
+        bench.seenMessages.push(messages);
+        if (!bench.provider) throw new Error('bench.provider non défini');
+        return bench.provider(messages, opts);
+      },
+      complete: async () => '',
+      dispose: async () => undefined,
+    };
+  }
+
+  /** Le registre du réglage « auto », comme dans l'app : le repli enveloppé par le journal d'usage. */
+  function autoRegistry(ollamaHealth: () => Promise<ProviderStatus>): () => LLMProvider {
+    return () =>
+      instrumentLLM(
+        new FallbackLLMProvider(
+          benchLLM('ollama', 'llama3.2', ollamaHealth),
+          benchLLM('embedded', 'qwen2.5-0.5b', async () => ({ state: 'ready' }))
+        ),
+        'ollama',
+        'http://127.0.0.1:9'
+      );
+  }
+
+  const secondaryHit: RetrievalSearchWithStatsResult['hits'][number] = {
+    chunk: { id: 's-0', content: 'Jules Durand, secrétaire du syndicat des charbonniers.', documentId: 'doc-1', chunkIndex: 0, pageNumber: 12 },
+    document: { id: 'doc-1', title: 'Les dockers du Havre', author: 'Pigenet', bibtexKey: 'pigenet1990' },
+    source: undefined,
+    similarity: 0.7,
+    sourceType: 'secondary',
+  } as unknown as RetrievalSearchWithStatsResult['hits'][number];
+
+  const explanationOf = (sent: Sent[]): RAGExplanation | undefined =>
+    (sent.find((e) => e.channel === 'fusion:chat:explanation')?.payload as { explanation: RAGExplanation } | undefined)
+      ?.explanation;
+
+  function ask(retrievalOptions?: { topK?: number }): Sent[] {
+    const { webContents, sent } = captureWebContents();
+    fusionChatService.start({
+      webContents,
+      messages: [{ role: 'user', content: 'Qui était Jules Durand ?' }],
+      systemPrompt: { language: 'fr' },
+      retrievalOptions,
+    });
+    return sent;
+  }
+
+  async function turn(retrievalOptions?: { topK?: number }): Promise<Sent[]> {
+    const sent = ask(retrievalOptions);
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    return sent;
+  }
+
+  const searchedTopK = (): number | undefined =>
+    (vi.mocked(retrievalService.searchWithStats).mock.calls.at(-1)?.[0] as { topK?: number } | undefined)?.topK;
+
+  beforeEach(() => {
+    project = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-fenetre-embarquee-'));
+    vi.mocked(projectManager.getCurrentProjectPath).mockReturnValue(project);
+    vi.mocked(configManager.getRAGConfig).mockReturnValue({ topK: 10, systemPromptLanguage: 'fr' } as ReturnType<typeof configManager.getRAGConfig>);
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValue({
+      hits: [secondaryHit], manuscriptHits: [], readingNoteHits: [], outcomes: [], securityEvents: [],
+      stats: {
+        search: {
+          query: 'Qui était Jules Durand ?', totalResults: 1, searchDurationMs: 1, cacheHit: false, sourceType: 'both', documents: [],
+          corpora: [{ source: 'secondary', attempted: true, ok: true, hitCount: 1, selectedCount: 1 }],
+        },
+        timing: { searchMs: 1 },
+      },
+    });
+    bench.provider = async function* () {
+      yield { delta: 'Un syndicaliste [1].', done: false };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    fakeLlama.reset();
+  });
+
+  afterEach(() => {
+    fs.rmSync(project, { recursive: true, force: true });
+  });
+
+  it('embarqué : le compacteur et l’explication lisent 4 096, pas les 32 768 du nom du modèle', async () => {
+    useConfig(EMBEDDED);
+    bench.registry = () => benchLLM('embedded', 'qwen2.5-0.5b', async () => ({ state: 'ready' }));
+    const sent = await turn();
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    expect(explanationOf(sent)?.llm.contextWindow).toBe(4096);
+  });
+
+  it('« auto », Ollama arrêté : le modèle embarqué répond, avec sa fenêtre et son plafond', async () => {
+    useConfig(AUTO);
+    bench.registry = autoRegistry(async () => ({ state: 'failed' }));
+    const sent = await turn({ topK: 25 });
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    expect(terminal(sent)?.model).toBe('qwen2.5-0.5b');
+    expect(explanationOf(sent)?.llm.contextWindow).toBe(4096);
+    expect(searchedTopK()).toBe(4);
+  });
+
+  it('témoin : « auto », Ollama présent, la fenêtre et le nombre d’extraits d’Ollama', async () => {
+    useConfig(AUTO);
+    bench.registry = autoRegistry(async () => ({ state: 'ready' }));
+    const sent = await turn({ topK: 25 });
+    expect(terminal(sent)?.model).toBe('llama3.2');
+    expect(explanationOf(sent)?.llm.contextWindow).toBe(131_072);
+    expect(searchedTopK()).toBe(25);
+    expect(explanationOf(sent)?.search.extractsCap).toBeUndefined();
+  });
+
+  it('topK 25 en embarqué : la recherche part avec le plafond, et l’explication le dit', async () => {
+    useConfig(EMBEDDED);
+    bench.registry = () => benchLLM('embedded', 'qwen2.5-0.5b', async () => ({ state: 'ready' }));
+    const sent = await turn({ topK: 25 });
+    expect(searchedTopK()).toBe(4);
+    expect(explanationOf(sent)?.search.extractsCap).toBe(4);
+    // Un plafond au-dessus du réglage ne se dit pas : il n'a rien retiré.
+    await turn({ topK: 3 });
+    expect(searchedTopK()).toBe(3);
+  });
+
+  it('plafond et panne partielle : l’explication dit les deux', async () => {
+    useConfig(EMBEDDED);
+    bench.registry = () => benchLLM('embedded', 'qwen2.5-0.5b', async () => ({ state: 'ready' }));
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValueOnce({
+      hits: [secondaryHit], manuscriptHits: [], readingNoteHits: [], outcomes: [], securityEvents: [],
+      stats: {
+        search: {
+          query: 'q', totalResults: 1, searchDurationMs: 1, cacheHit: false, sourceType: 'both', documents: [],
+          corpora: [
+            { source: 'secondary', attempted: true, ok: true, hitCount: 1, selectedCount: 1 },
+            { source: 'primary', attempted: true, ok: false, hitCount: 0, selectedCount: 0 },
+          ],
+        },
+        timing: { searchMs: 1 },
+      },
+    });
+    const sent = await turn({ topK: 25 });
+    expect(explanationOf(sent)?.search.retrievalStatus).toBe('partial');
+    expect(explanationOf(sent)?.search.extractsCap).toBe(4);
+  });
+
+  // Le sondage qui décide de la fenêtre passe avant le tour : il ne doit pas rendre « Arrêter » sans
+  // effet pendant qu'Ollama ne répond pas (le sondage n'a pas de signal au contrat, J9).
+  it('« Arrêter » pendant le sondage d’Ollama : le tour finit annulé tout de suite, sans rien demander au modèle', async () => {
+    useConfig(AUTO);
+    let probing = false;
+    bench.registry = autoRegistry(() => {
+      probing = true;
+      return new Promise<ProviderStatus>(() => undefined);
+    });
+    const { webContents, sent } = captureWebContents();
+    const sessionId = fusionChatService.start({
+      webContents,
+      messages: [{ role: 'user', content: 'Qui était Jules Durand ?' }],
+      systemPrompt: { language: 'fr' },
+    });
+    await vi.waitFor(() => expect(probing).toBe(true), WAIT);
+    expect(fusionChatService.cancel(sessionId)).toBe(true);
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(terminal(sent)?.chunk.finishReason).toBe('cancelled');
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(bench.seenOpts).toHaveLength(0);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+  });
+
+  it('le sondage n’inscrit rien au journal d’usage : seule la réponse, au nom du modèle embarqué', async () => {
+    const recorded: RecordInferenceInput[] = [];
+    setInferenceSink((e) => recorded.push(e));
+    useConfig(AUTO);
+    bench.registry = autoRegistry(async () => ({ state: 'failed' }));
+    await turn();
+    expect(recorded.map((e) => [e.kind, e.provider, e.status, e.isLocal])).toEqual([['completion', 'embedded', 'ok', true]]);
+  });
+
+  /**
+   * Le résumé du compacteur (L09-9) part au moteur embarqué comme une seule question qui contient
+   * tout le milieu de la conversation. Plus long que le budget d'entrée, il est refusé avant
+   * llama.cpp, par une erreur lisible : le compacteur le compte comme un résumé raté, une fois par
+   * tour, et la réponse part quand même. Ni « Failed to compress chat history », ni exception.
+   * Vrai fournisseur et vrai client embarqués ; seul `node-llama-cpp` est simulé.
+   */
+  it('résumé plus long que le budget d’entrée : refusé une fois, lisiblement, et le tour répond', async () => {
+    const recorded: RecordInferenceInput[] = [];
+    setInferenceSink((e) => recorded.push(e));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.mocked(projectManager.getCurrentProjectPath).mockReturnValue(null);
+    useConfig(EMBEDDED);
+    bench.registry = () =>
+      instrumentLLM(new EmbeddedProvider({ modelPath: EMBEDDED.embeddedModelPath, modelId: 'qwen2.5-0.5b' }), 'embedded');
+
+    // Sept questions : les quatre dernières restent, le milieu (trois échanges de 500 mots par
+    // message, 3 000 jetons) dépasse les 2 663 du budget. 39 000 caractères en tout : au-delà de
+    // 70 % de 4 096 jetons, loin sous ceux de 32 768.
+    const prose = (tag: string): string => Array.from({ length: 500 }, (_, i) => `${tag}${i}`).join(' ');
+    const messages: ChatMessage[] = [];
+    for (let i = 1; i <= 6; i++) {
+      messages.push({ role: 'user', content: prose(`q${i}-`) });
+      messages.push({ role: 'assistant', content: prose(`r${i}-`) });
+    }
+    messages.push({ role: 'user', content: 'Et le préfet ?' });
+    const { webContents, sent } = captureWebContents();
+    fusionChatService.start({ webContents, messages, systemPrompt: { language: 'fr' } });
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(chunks(sent).map((e) => e.chunk.delta).join('')).toBe('Selon [1], la grève éclate en 1910.');
+    // Le résumé n'a jamais atteint llama.cpp ; la réponse, si.
+    expect(fakeLlama.sessions.flatMap((s) => s.prompts.map((p) => p.text))).toEqual(['Et le préfet ?']);
+    // Une tentative de résumé, refusée, puis la réponse.
+    expect(recorded.map((e) => [e.provider, e.status])).toEqual([
+      ['embedded', 'error'],
+      ['embedded', 'ok'],
+    ]);
+    const warnings = warn.mock.calls.map((args) => args.map(String).join(' ')).join('\n');
+    expect(warnings).toMatch(/compaction skipped: .*tokens/);
+    expect(warnings).not.toMatch(/Failed to compress/);
   });
 });

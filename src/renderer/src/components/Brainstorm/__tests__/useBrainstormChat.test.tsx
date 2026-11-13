@@ -200,6 +200,12 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
     ['provider_error', 'Le fournisseur a interrompu la réponse sans donner de cause.', 'chat.providerNoCause'],
     // Plafond des tours d'outils (S06-1-4) : le moteur l'écrit en anglais, pour le journal.
     ['max_tool_turns', 'Tool-call limit reached (6 turns) without a final answer', 'chat.maxToolTurns'],
+    // Question plus longue que la fenêtre du modèle embarqué (L08-4) : jamais coupée, refusée.
+    [
+      'embedded_prompt_too_long',
+      "The question needs 2700 tokens, more than the 2663 that the embedded model's 4096-token context window leaves for the input.",
+      'chat.embeddedPromptTooLong',
+    ],
   ])('traduit par son code la panne %s, dont la cause vient de ClioDeck', async (code, message, key) => {
     await i18n.changeLanguage('en');
     try {

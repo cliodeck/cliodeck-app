@@ -163,4 +163,25 @@ describe('ExplanationPanel', () => {
       'Manuscrit non interrogé'
     );
   });
+
+  // L08-4 : le modèle embarqué ne lit pas plus d'extraits que sa fenêtre n'en tient. Le plafond se
+  // dit quand il a réduit le nombre demandé ; sans lui, rien.
+  it('dit le plafond d’extraits imposé par la fenêtre du modèle, et seulement quand il y en a un', () => {
+    const capped = {
+      ...fixture,
+      search: { ...fixture.search, extractsCap: 4 },
+      llm: { ...fixture.llm, contextWindow: 4096 },
+    } as unknown as RAGExplanation;
+    render(<ExplanationPanel explanation={capped} />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByTestId('explanation-extracts-cap').textContent).toBe(
+      "Plafond d'extraits: 4 (fenêtre de contexte du modèle)"
+    );
+    expect(screen.getByTestId('explanation-content').textContent).toContain('4096 tokens');
+    cleanup();
+
+    render(<ExplanationPanel explanation={fixture} />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.queryByTestId('explanation-extracts-cap')).not.toBeInTheDocument();
+  });
 });

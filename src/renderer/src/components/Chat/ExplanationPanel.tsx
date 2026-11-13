@@ -78,6 +78,15 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
             <ul>
               <li><strong>{t('chat.explanation.resultsFound', 'Résultats trouvés:')}</strong> {explanation.search.totalResults} {t('chat.explanation.chunks', 'chunks')}</li>
               <li><strong>{t('chat.explanation.duration', 'Durée:')}</strong> {explanation.search.searchDurationMs}ms {explanation.search.cacheHit && t('chat.explanation.cacheHitSuffix', '(cache)')}</li>
+              {/* La fenêtre du modèle a réduit le nombre d'extraits demandé (le modèle embarqué) :
+                  le modèle n'en a pas lu davantage, et les sources affichées sont celles-là. */}
+              {explanation.search.extractsCap !== undefined && (
+                <li data-testid="explanation-extracts-cap">
+                  <strong>{t('chat.explanation.extractsCapLabel', "Plafond d'extraits:")}</strong>{' '}
+                  {explanation.search.extractsCap}{' '}
+                  {t('chat.explanation.extractsCapReason', '(fenêtre de contexte du modèle)')}
+                </li>
+              )}
               {corpora ? (
                 <li data-testid="explanation-corpora">
                   <strong>{t('chat.explanation.corporaLabel', 'Par corpus:')}</strong>{' '}

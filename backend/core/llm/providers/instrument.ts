@@ -172,6 +172,14 @@ class InstrumentedLLM implements LLMProvider {
     return this.inner instanceof FallbackLLMProvider ? this.inner.activeId : this.providerId;
   }
 
+  /**
+   * Comme `FallbackLLMProvider.activeId`, à travers le décorateur : le tour lit sur lui la fenêtre
+   * du modèle qui répondra (`activeLLMId`, L08-4).
+   */
+  get activeId(): string {
+    return this.servedBy();
+  }
+
   private emitCompletion(
     startMs: number,
     workspaceRoot: string | undefined,

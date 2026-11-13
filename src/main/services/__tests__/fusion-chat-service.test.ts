@@ -9,6 +9,7 @@ import {
   readingNoteHitsToSources,
   resolvePromptLanguage,
   resolveTurnOptions,
+  resolveTurnWindow,
   retrievalStatus,
   shouldIncludeManuscript,
   summarizeOptionsFor,
@@ -495,13 +496,20 @@ describe('resolveTurnOptions — ce qui est propre à Ollama reste chez Ollama',
     expect(r.maxTokens).toBe(512);
   });
 
-  it('traite le modèle embarqué comme un fournisseur non-Ollama', () => {
+  it('traite le modèle embarqué comme un fournisseur non-Ollama, top-p du panneau excepté', () => {
     const embedded: LLMConfig = {
       ...ollama,
       generationProvider: 'embedded',
       embeddedModelPath: '/models/q.gguf',
     };
-    expect(resolveTurnOptions(embedded, opts).numCtx).toBeUndefined();
+    const r = resolveTurnOptions(embedded, opts);
+    expect(r.numCtx).toBeUndefined();
+    expect(r.topK).toBeUndefined();
+    expect(r.repeatPenalty).toBeUndefined();
+    // S05-1-25 : le moteur embarqué gardait 0,85 en dur, quel que soit le panneau.
+    expect(r.topP).toBe(0.85);
+    expect(resolveTurnOptions(embedded, { ...opts, topP: 0.6 }).topP).toBe(0.6);
+    expect(r.temperature).toBe(0.1);
   });
 });
 
@@ -533,5 +541,55 @@ describe('summarizeOptionsFor — la fenêtre du tour, chez Ollama seulement', (
     const options = summarizeOptionsFor(resolveTurnOptions(claude, { numCtx: 32_768 }));
     expect(options).not.toHaveProperty('numCtx');
     expect(options.temperature).toBe(0);
+  });
+});
+
+/**
+ * La fenêtre du tour (L08-4) : seul le modèle embarqué a la sienne, et seul le réglage « auto » avec
+ * un modèle embarqué sonde Ollama pour savoir qui répondra. Ollama explicite et les fournisseurs
+ * cloud gardent celle d'avant (`num_ctx` du tour en tête, S06-1-18), sans sondage ni plafond.
+ */
+describe('resolveTurnWindow — la fenêtre du modèle qui répondra', () => {
+  const base: LLMConfig = {
+    backend: 'ollama',
+    ollamaURL: 'http://127.0.0.1:11434',
+    ollamaEmbeddingModel: 'nomic-embed-text',
+    ollamaChatModel: 'qwen3:32b',
+    embeddedModelPath: '/models/q.gguf',
+    embeddedModelId: 'qwen2.5-0.5b',
+  };
+  let probes = 0;
+  const llm = {
+    id: 'ollama',
+    healthCheck: async () => {
+      probes += 1;
+      return { state: 'ready' as const };
+    },
+  } as unknown as LLMProvider;
+
+  it('Ollama explicite et cloud : la fenêtre du modèle, sans sondage ni plafond', async () => {
+    probes = 0;
+    const ollama = { ...base, generationProvider: 'ollama' as const };
+    expect(await resolveTurnWindow({ cfg: ollama, llm, activeModel: 'qwen3:32b', numCtx: 16_384 })).toEqual({
+      contextWindow: 16_384,
+    });
+    const claude: LLMConfig = { ...base, backend: 'claude', claudeAPIKey: 'k', generationProvider: 'embedded' };
+    expect(await resolveTurnWindow({ cfg: claude, llm, activeModel: 'claude-sonnet-4-6' })).toEqual({
+      contextWindow: 200_000,
+    });
+    // « embarqué » sans modèle téléchargé : l'adaptateur sert Ollama.
+    const noModel: LLMConfig = { ...base, generationProvider: 'embedded', embeddedModelPath: undefined };
+    expect((await resolveTurnWindow({ cfg: noModel, llm, activeModel: 'qwen3:32b' })).maxExtracts).toBeUndefined();
+    expect(probes).toBe(0);
+  });
+
+  it('embarqué : 4 096 et 4 extraits, sans sondage', async () => {
+    probes = 0;
+    const embedded = { ...base, generationProvider: 'embedded' as const };
+    expect(await resolveTurnWindow({ cfg: embedded, llm, activeModel: 'qwen2.5-0.5b' })).toEqual({
+      contextWindow: 4096,
+      maxExtracts: 4,
+    });
+    expect(probes).toBe(0);
   });
 });

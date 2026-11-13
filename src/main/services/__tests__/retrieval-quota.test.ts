@@ -184,6 +184,24 @@ describe('selectWithOwnTextBands — une seule bande pour la voix de l’auteur,
     expect(count(twenty, 'readingNotes')).toBeGreaterThanOrEqual(1);
   });
 
+  // L08-4 : le modèle embarqué ne lit que 4 extraits (`maxExtractsForWindow(4096)`), et la bande se
+  // calcule sur ce plafond. Elle y vaut une place : manuscrit et notes ne peuvent en avoir une
+  // chacun, la plus pertinente des deux voix la prend. Une question de rappel en ouvre trois.
+  it('au plafond du modèle embarqué (4 extraits) : une seule place pour la voix de l’auteur', () => {
+    expect(manuscriptSlots(4)).toBe(1);
+    const out = selectWithOwnTextBands([...biblio(20), ...manuscrit(5, 0.9), ...notes(5, 0.95)], 4);
+    expect(ownCount(out)).toBe(1);
+    expect(count(out, 'readingNotes')).toBe(1);
+    expect(count(out, 'secondary')).toBe(3);
+
+    const recall = selectWithOwnTextBands([...biblio(20), ...manuscrit(5, 0.9), ...notes(5, 0.95)], 4, {
+      manuscript: 3,
+    });
+    expect(count(recall, 'manuscript')).toBe(2);
+    expect(count(recall, 'readingNotes')).toBe(1);
+    expect(count(recall, 'secondary')).toBe(1);
+  });
+
   it('une bande élargie par l’appelant élargit la bande commune, pour le corpus nommé', () => {
     // Question de rappel sur les notes : six places pour elles, le manuscrit
     // garde son plafond ordinaire, et une place.

@@ -262,8 +262,11 @@ import {
 import { ContextCompactor } from '../../../backend/core/context-mgmt/compactor.js';
 import {
   clampNumCtx,
+  EMBEDDED_CONTEXT_SIZE,
   getContextWindow,
+  maxExtractsForWindow,
 } from '../../../backend/core/llm/context-windows.js';
+import { activeLLMId, untilAborted } from '../../../backend/core/llm/providers/fallback.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -411,11 +414,69 @@ export function resolveTurnOptions(
     temperature: opts?.temperature,
     maxTokens: opts?.maxTokens,
     numCtx: local ? (opts?.numCtx ?? clampNumCtx(cfg.ollamaNumCtx)) : undefined,
-    topP: local ? opts?.topP : undefined,
+    // Le moteur embarqué prend aussi le top-p du panneau (S05-1-25) : il était à 0,85 en dur.
+    topP: local || servesEmbedded(cfg) ? opts?.topP : undefined,
     topK: local ? opts?.topK : undefined,
     repeatPenalty: local ? opts?.repeatPenalty : undefined,
     think: local ? opts?.think : undefined,
   };
+}
+
+/** Génération confiée au modèle embarqué par les réglages (« embarqué », modèle téléchargé). */
+function servesEmbedded(cfg: LLMConfig): boolean {
+  return (cfg.backend ?? 'ollama') === 'ollama' && cfg.generationProvider === 'embedded' && !!cfg.embeddedModelPath;
+}
+
+/** La fenêtre d'un tour, et le nombre d'extraits qu'elle laisse lire au modèle quand elle est petite. */
+export interface TurnWindow {
+  /** Budget du compacteur, et fenêtre affichée dans l'explication. */
+  contextWindow: number;
+  /** Plafond d'extraits ; absent quand la fenêtre n'en impose aucun. */
+  maxExtracts?: number;
+}
+
+const EMBEDDED_TURN_WINDOW: TurnWindow = {
+  contextWindow: EMBEDDED_CONTEXT_SIZE,
+  maxExtracts: maxExtractsForWindow(EMBEDDED_CONTEXT_SIZE),
+};
+
+/**
+ * La fenêtre du tour (S05-1-16). Le moteur embarqué crée un contexte de 4 096 jetons, mais la
+ * fenêtre se lisait sur le nom du modèle (Qwen 2.5 : 32 768) : le compacteur ne se déclenchait
+ * jamais avant le débordement, et autant d'extraits partaient que le réglage en demandait, llama.cpp
+ * coupant le reste en silence.
+ *
+ * - Réglage « embarqué » : la fenêtre du moteur embarqué, et son plafond d'extraits.
+ * - Réglage « auto » avec un modèle embarqué : le repli sonde Ollama, et la fenêtre est celle du
+ *   fournisseur retenu (`activeLLMId`, lu à travers le décorateur du journal d'usage). Le sondage
+ *   est celui que le premier appel du tour aurait fait : son choix reste en cache pour lui
+ *   (`PROBE_TTL_MS`). Il n'a pas de signal au contrat ; seule l'attente du tour s'arrête avec
+ *   « Arrêter », et le sondage va à son terme (borné par le délai d'en-têtes d'undici, 300 s), comme
+ *   pour `FallbackLLMProvider.chat` (J9). `healthCheck` ne passe pas par le journal d'usage.
+ * - Sinon : la fenêtre du modèle, `num_ctx` du tour en tête (Ollama), comme avant.
+ */
+export async function resolveTurnWindow(args: {
+  cfg: LLMConfig;
+  llm: LLMProvider;
+  activeModel: string;
+  numCtx?: number;
+  signal?: AbortSignal;
+}): Promise<TurnWindow> {
+  const { cfg, llm, activeModel, numCtx, signal } = args;
+  const ofModel: TurnWindow = { contextWindow: getContextWindow(activeModel, numCtx) };
+  if (servesEmbedded(cfg)) return EMBEDDED_TURN_WINDOW;
+  const auto =
+    (cfg.backend ?? 'ollama') === 'ollama' &&
+    (cfg.generationProvider ?? 'auto') === 'auto' &&
+    !!cfg.embeddedModelPath;
+  if (!auto) return ofModel;
+  try {
+    await untilAborted(llm.healthCheck(), signal);
+  } catch {
+    // Arrêté pendant le sondage : le tour finit annulé, sans rien demander au modèle.
+    if (signal?.aborted) return ofModel;
+  }
+  return activeLLMId(llm) === 'embedded' ? EMBEDDED_TURN_WINDOW : ofModel;
 }
 
 /**
@@ -764,6 +825,9 @@ class FusionChatService {
     // deux parlent de la même fenêtre.
     const turnOpts = resolveTurnOptions(cfg, args.opts);
     const numCtx = turnOpts.numCtx;
+    // La fenêtre du modèle qui répondra : celle du contexte llama.cpp quand c'est le modèle embarqué,
+    // avec le plafond d'extraits qu'elle impose (L08-4). En « auto », un sondage d'Ollama le dit.
+    const turnWindow = await resolveTurnWindow({ cfg, llm, activeModel, numCtx, signal: op.signal });
 
     // Build a context compactor (fusion 1.3) sized to the active chat
     // model. Engine runs `compactor.compact(messages)` at the start of
@@ -778,8 +842,9 @@ class FusionChatService {
       // When the caller explicitly sized `num_ctx` for this turn, honour
       // that as the compaction budget — otherwise the compactor would
       // assume the model's full advertised window and let the prompt
-      // overflow the smaller per-call allocation.
-      contextWindow: getContextWindow(activeModel, numCtx),
+      // overflow the smaller per-call allocation. Le modèle embarqué :
+      // la fenêtre du contexte llama.cpp (`resolveTurnWindow`).
+      contextWindow: turnWindow.contextWindow,
       summarizeOptions: summarizeOptionsFor(turnOpts),
     });
 
@@ -857,7 +922,15 @@ class FusionChatService {
             const manuscriptOnly = sourceType === 'manuscript';
             const notesOnly = sourceType === 'readingNotes';
             const ownOnly = manuscriptOnly || notesOnly;
-            const topK = options?.topK ?? configManager.getRAGConfig().topK;
+            const requestedTopK = options?.topK ?? configManager.getRAGConfig().topK;
+            // Plafond de la fenêtre (L08-4) : le modèle embarqué ne lit pas plus d'extraits que sa
+            // fenêtre n'en tient. La recherche n'en demande pas davantage, si bien que le panneau des
+            // sources montre ce que le modèle a lu ; les bandes de l'auteur se calculent sur lui.
+            const topK =
+              turnWindow.maxExtracts !== undefined
+                ? Math.min(requestedTopK, turnWindow.maxExtracts)
+                : requestedTopK;
+            const extractsCap = topK < requestedTopK ? topK : undefined;
             // Le manuscrit : ce que l'auteur a déjà écrit. Sa place dans le
             // tour est une politique (manuscript-policy.ts, palier 2) :
             // question de rappel > portée > case « Mon manuscrit » > posture
@@ -921,7 +994,7 @@ class FusionChatService {
               readingNoteSlots: readingNotes.slots,
               documentIds: options?.documentIds,
               collectionKeys: options?.collectionKeys,
-              topK: options?.topK,
+              topK,
               // Celui du tour : « Arrêter » coupe l'embedding de la question (J9).
               signal,
             });
@@ -1070,7 +1143,12 @@ class FusionChatService {
                 ...readingNoteHitsToSources(noteHits),
               ],
               explanation: {
-                search: { ...stats.search, contextChars, retrievalStatus: status },
+                search: {
+                  ...stats.search,
+                  contextChars,
+                  retrievalStatus: status,
+                  ...(extractsCap !== undefined ? { extractsCap } : {}),
+                },
                 ...(compressionSlice ? { compression: compressionSlice } : {}),
                 timing: {
                   ...stats.timing,

@@ -113,6 +113,8 @@ function errorMessage(error: { code: string; message: string }): string {
     // Un code `_http_2xx` ne naît que d'une réponse acceptée mais sans corps : un refus porte son
     // statut d'échec.
     if (/_http_2\d\d$/.test(error.code)) return i18n.t('chat.emptyResponse');
+    // La question ne tient pas dans la fenêtre du modèle embarqué : elle n'est jamais coupée (L08-4).
+    if (error.code === 'embedded_prompt_too_long') return i18n.t('chat.embeddedPromptTooLong');
     // Aucune cause : événement d'erreur vide, ou fournisseur qui n'a rien rangé dans son état
     // (`provider_error`, le repli de `chat-engine`).
     if (error.code === 'provider_error' || !error.message.trim()) {

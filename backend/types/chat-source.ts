@@ -57,6 +57,12 @@ export interface RAGExplanation {
       manuscript: number;
       readingNotes: number;
     };
+    /**
+     * Plafond d'extraits imposé par la fenêtre du modèle (le moteur embarqué : 4 096 jetons), quand
+     * il a réduit le nombre demandé : la recherche n'en a pas rendu davantage, et le panneau des
+     * sources montre ce que le modèle a lu (L08-4).
+     */
+    extractsCap?: number;
   };
   compression?: {
     enabled: boolean;
