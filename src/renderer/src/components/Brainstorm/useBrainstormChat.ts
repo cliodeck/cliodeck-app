@@ -171,6 +171,11 @@ export function useBrainstormChat(): UseBrainstormChat {
       const switched = handle ? !handle.isCurrent() : projectLifecycle.capture() !== null;
       if (switched) {
         abandonSession(sessionId);
+        // Le chat n'est pas vidé quand A reste à l'écran (ouverture de B en échec, même dossier
+        // rouvert) : la bulle, posée avant l'appel, tournait jusqu'à Stop. Une bulle déjà finie par
+        // le flux (clé absente) garde son erreur ; vidé, le chat n'a plus la bulle, et rien ne bouge.
+        const bubble = useChatStore.getState().messages.find((m) => m.id === aId);
+        if (bubble?.pending) store.finishAssistant(aId, 'cancelled');
         if (failure === null) void chat.cancel(sessionId);
         return;
       }

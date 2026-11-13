@@ -168,18 +168,35 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const [waitSeconds, setWaitSeconds] = useState(0);
   const [firstTokenSeen, setFirstTokenSeen] = useState(false);
   const timeoutMinutes = useRAGQueryStore((s) => Math.max(1, Math.round(s.params.timeout / 60_000)));
+  // L'attente se lit sur le tour, pas sur l'instance : quitter l'onglet Chat démonte ce composant
+  // et la réponse continue (L09-6). Le statut `generating` n'est émis qu'une fois par tour, et
+  // l'instance remontée ne le reverra pas : elle annonçait « le modèle lit encore le prompt » sous
+  // une réponse qui s'écrivait (S16-1-0). Une bulle qui a du texte ou un appel d'outil a reçu son
+  // premier jeton, et l'attente se compte depuis l'envoi (horodatage de la bulle).
+  const pendingAnswerStarted = useChatStore((s) => {
+    const m = s.pendingAssistantId
+      ? s.messages.find((x) => x.id === s.pendingAssistantId)
+      : undefined;
+    return !!m && (m.content.length > 0 || (m.toolCalls?.length ?? 0) > 0);
+  });
+  const pendingSentAt = useChatStore((s) => {
+    const m = s.pendingAssistantId
+      ? s.messages.find((x) => x.id === s.pendingAssistantId)
+      : undefined;
+    return m?.timestamp?.getTime() ?? null;
+  });
   useEffect(() => {
     if (!isStreaming) {
       setWaitSeconds(0);
       setFirstTokenSeen(false);
       return;
     }
-    const startedAt = Date.now();
-    const timer = setInterval(() => {
-      setWaitSeconds(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
+    const startedAt = pendingSentAt ?? Date.now();
+    const tick = (): void => setWaitSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    tick();
+    const timer = setInterval(tick, 1000);
     return () => clearInterval(timer);
-  }, [isStreaming]);
+  }, [isStreaming, pendingSentAt]);
   const mcpTools = useMcpToolsList();
 
   // État vide de la variante panel : nombre de PDFs indexés (repris de
@@ -576,7 +593,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     return m?.thinking?.length ?? 0;
   });
   const waitingNotice =
-    isStreaming && !firstTokenSeen
+    isStreaming && !firstTokenSeen && !pendingAnswerStarted
       ? pendingThinkingChars > 0
         ? t('chat.thinking', { chars: pendingThinkingChars })
         : waitSeconds >= 60

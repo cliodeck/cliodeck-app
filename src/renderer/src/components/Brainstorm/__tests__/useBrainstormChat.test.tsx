@@ -280,6 +280,77 @@ describe('useBrainstormChat — un envoi parti avant la bascule', () => {
     expect(cancel).toHaveBeenCalledWith(s1);
   });
 
+  // Le chat n'est pas vidé quand A reste à l'écran : l'ouverture de B échoue et A revient « stores
+  // intacts », ou le même dossier est rouvert. La bulle, posée avant chat.start (L09-6), ne doit pas
+  // tourner jusqu'à Stop.
+  it.each([
+    ['l’ouverture de B échoue et A revient', () => projectLifecycle.abortTransition()],
+    ['le même projet est rouvert', () => projectLifecycle.enter('/projets/A')],
+  ])('%s pendant chat.start : la bulle s’arrête, la session est annulée', async (_cas, settle) => {
+    const start = installFusionChat();
+    let answer!: (value: { success: boolean; sessionId?: string }) => void;
+    start.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    const cancel = cancelOf();
+
+    const { result } = renderHook(() => useBrainstormChat());
+    let sending!: Promise<void>;
+    act(() => {
+      sending = result.current.send('Qui était le préfet en 1934 ?');
+    });
+    const s1 = sessionOf(start);
+    act(() => {
+      projectLifecycle.beginTransition();
+      settle();
+    });
+    await act(async () => {
+      answer({ success: true, sessionId: s1 });
+      await sending;
+    });
+    act(() => emit({ sessionId: s1, chunk: { delta: 'Le préfet était…' } }));
+
+    const [question, bubble] = useChatStore.getState().messages;
+    expect(question.content).toBe('Qui était le préfet en 1934 ?');
+    expect(bubble).toMatchObject({ role: 'assistant', content: '', pending: false, finishReason: 'cancelled' });
+    expect(useChatStore.getState().pendingAssistantId).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    expect(cancel).toHaveBeenCalledWith(s1);
+  });
+
+  it('témoin : la clé absente a fini la bulle avant le retour de A, son erreur reste affichée', async () => {
+    const start = installFusionChat();
+    let answer!: (value: { success: boolean; sessionId?: string }) => void;
+    start.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+
+    const { result } = renderHook(() => useBrainstormChat());
+    let sending!: Promise<void>;
+    act(() => {
+      sending = result.current.send('Qui était le préfet en 1934 ?');
+    });
+    const s1 = sessionOf(start);
+    act(() =>
+      emit({
+        sessionId: s1,
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code: 'config_error', message: 'Clé d’API absente pour Claude.' },
+      })
+    );
+    act(() => {
+      projectLifecycle.beginTransition();
+      projectLifecycle.abortTransition();
+    });
+    await act(async () => {
+      answer({ success: true, sessionId: s1 });
+      await sending;
+    });
+
+    expect(useChatStore.getState().messages[1]).toMatchObject({
+      pending: false,
+      finishReason: 'error',
+      error: 'Clé d’API absente pour Claude.',
+    });
+    expect(result.current.isStreaming).toBe(false);
+  });
+
   it('chat.start échoue après le passage à B : aucun message d’erreur dans B', async () => {
     const start = installFusionChat();
     let answer!: (value: { success: boolean; error?: string }) => void;
