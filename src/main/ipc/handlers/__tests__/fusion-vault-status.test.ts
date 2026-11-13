@@ -82,11 +82,12 @@ function makeProject(name: string, vault: string | null): string {
   return root;
 }
 
-function note(id: string) {
+/** Une note comme l'indexeur l'écrit : `vaultPath` est le chemin résolu du vault indexé. */
+function note(id: string, vault: string = vaultDir) {
   return {
     id,
     relativePath: `${id}.md`,
-    vaultPath: vaultDir,
+    vaultPath: vault,
     title: id,
     tags: [],
     frontmatter: {},
@@ -98,9 +99,9 @@ function note(id: string) {
 }
 
 /** Un index du vault comme l'indexeur l'écrit, ses notes comprises. */
-function indexNotes(root: string, ids: string[]): ObsidianVaultStore {
+function indexNotes(root: string, ids: string[], vault: string = vaultDir): ObsidianVaultStore {
   const store = new ObsidianVaultStore({ dbPath: obsidianStorePath(root), dimension: 4 });
-  for (const id of ids) store.upsertNote(note(id));
+  for (const id of ids) store.upsertNote(note(id, vault));
   return store;
 }
 
@@ -159,6 +160,44 @@ describe.skipIf(!sqliteAvailable)('fusion:vault:status : indexed et noteCount lu
 
     expect(status).toMatchObject({ success: true, indexed: false, noteCount: 0 });
     expect(fs.existsSync(obsidianStorePath(projectA))).toBe(false);
+  });
+
+  it('après « Changer de vault » : les notes de l’ancien vault, restées dans l’index, ne comptent pas', async () => {
+    // `fusion:vault:set-path` réécrit le chemin sans rien purger : l'index garde l'ancien vault
+    // (S09-1-5). Le nouveau, jamais indexé, n'est pas « prêt ».
+    indexNotes(projectA, ['gdansk', 'port-franc'], path.join(tmp, 'ancien-coffre')).close();
+
+    expect(await call('fusion:vault:status')).toMatchObject({
+      success: true,
+      indexed: false,
+      noteCount: 0,
+      vaultPath: vaultDir,
+    });
+
+    indexNotes(projectA, ['senat']).close();
+    expect(await call('fusion:vault:status')).toMatchObject({ success: true, indexed: true, noteCount: 1 });
+  });
+
+  it('aucun vault lié, des notes restées dans brain.db : 0 note, pas « prêt »', async () => {
+    const bare = makeProject('C', null);
+    indexNotes(bare, ['gdansk']).close();
+    h.current.mockReturnValue(bare);
+
+    expect(await call('fusion:vault:status')).toMatchObject({
+      success: true,
+      indexed: false,
+      noteCount: 0,
+      vaultPath: null,
+    });
+  });
+
+  it('un chemin lié avec une barre finale : ses notes comptent, comme l’indexeur les a écrites', async () => {
+    // L'indexeur range le chemin résolu (`path.resolve`, par le lecteur du vault).
+    const slashed = makeProject('D', `${vaultDir}${path.sep}`);
+    indexNotes(slashed, ['gdansk', 'port-franc']).close();
+    h.current.mockReturnValue(slashed);
+
+    expect(await call('fusion:vault:status')).toMatchObject({ success: true, indexed: true, noteCount: 2 });
   });
 
   it('le projet change pendant la lecture : refus project-changed, et aucune base n’est ouverte', async () => {

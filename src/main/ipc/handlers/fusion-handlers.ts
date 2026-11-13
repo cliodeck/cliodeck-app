@@ -893,8 +893,9 @@ export function setupFusionHandlers(): void {
       // Lu toutes les 30 s par la barre d'état : une bascule pendant l'attente ne lit ni la base du
       // projet quitté, ni celle du suivant. Le compte se fait d'un bloc, sans attente.
       if (projectManager.getCurrentProjectPath() !== root) return errorResponse('project-changed');
-      // `brain.db` est partagé et naît avec le projet : seules les notes disent l'index (S09-1-14).
-      const noteCount = ObsidianVaultStore.countNotes(dbPath);
+      // `brain.db` est partagé et naît avec le projet : seules les notes du vault lié disent l'index
+      // (S09-1-14), pas celles d'un vault d'avant « Changer de vault », restées dans l'index.
+      const noteCount = ObsidianVaultStore.countNotes(dbPath, vaultPath);
       return successResponse({ indexed: noteCount > 0, noteCount, dbPath, vaultPath });
     } catch (e) {
       return errorResponse(e as Error);

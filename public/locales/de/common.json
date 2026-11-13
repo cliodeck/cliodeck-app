@@ -877,7 +877,8 @@
       "noHints": "Keine .cliohints-Datei vorhanden. Fügen Sie eine unter {{path}} hinzu, um dauerhaften Kontext in jeden Prompt einzufügen.",
       "obsidianVault": "Obsidian-Vault",
       "vaultReady": "Index bereit unter {{path}}",
-      "vaultNotIndexed": "Noch nicht indiziert — verknüpfen Sie einen Vault in den Einstellungen.",
+      "vaultNotLinked": "Kein Vault verknüpft — verknüpfen Sie einen in den Einstellungen.",
+      "vaultNotIndexed": "Vault verknüpft, noch nicht indiziert — starten Sie „Indizieren“ in den Einstellungen.",
       "vaultChecking": "Prüfung läuft…",
       "vaultUnavailable": "Vault-Status derzeit nicht verfügbar.",
       "recipesHeading": "Rezepte ({{count}})",
@@ -1909,8 +1910,10 @@
     "action": "Exporter öffnen"
   },
   "statusBar": {
-    "mcpTooltip": "MCP: {{ready}}/{{total}} bereit",
-    "vaultTooltip": "Vault: {{count}} Notizen",
+    "mcpTooltip_one": "MCP: {{ready}}/{{total}} bereit",
+    "mcpTooltip_other": "MCP: {{ready}}/{{total}} bereit",
+    "vaultTooltip_one": "Vault: {{count}} Notiz",
+    "vaultTooltip_other": "Vault: {{count}} Notizen",
     "indexing": "Indexierung",
     "indexingTooltip": "Indexierung: {{current}}/{{total}} Dokumente",
     "syncing": "Sync",

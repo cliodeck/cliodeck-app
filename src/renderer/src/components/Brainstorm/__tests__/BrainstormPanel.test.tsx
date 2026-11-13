@@ -197,33 +197,41 @@ describe('BrainstormPanel — context.md dans le tiroir', () => {
   });
 });
 
+/** Le tiroir « Contexte du projet » ouvert, l'état du vault répondu par `status`. */
+async function openVaultDrawer(status: unknown): Promise<void> {
+  (window as unknown as { electron: { fusion: unknown } }).electron = {
+    ...(window as unknown as { electron: Record<string, unknown> }).electron,
+    fusion: {
+      hints: { read: vi.fn().mockResolvedValue({ success: true, hints: await loadWorkspaceHints(os.tmpdir()) }) },
+      recipes: { list: vi.fn().mockResolvedValue({ success: true, builtin: [], user: [] }) },
+      vault: { status: vi.fn().mockResolvedValue(status) },
+    },
+  };
+  useProjectStore.setState({
+    currentProject: {
+      id: 'p1',
+      name: 'Danzig',
+      path: '/tmp/danzig',
+      type: 'article',
+      createdAt: new Date(),
+      lastOpenedAt: new Date(),
+    },
+  });
+  render(<BrainstormPanel />);
+  fireEvent.click(await screen.findByText('chat.brainstorm.projectContext'));
+}
+
 /**
  * `config.json` illisible : l'état du coffre répond par une erreur, et le tiroir disait
  * « vérification… » sans fin (S11-1-8).
  */
 describe('BrainstormPanel — état du coffre indisponible', () => {
-  async function openDrawer(status: unknown): Promise<void> {
-    (window as unknown as { electron: { fusion: unknown } }).electron = {
-      ...(window as unknown as { electron: Record<string, unknown> }).electron,
-      fusion: {
-        hints: { read: vi.fn().mockResolvedValue({ success: true, hints: await loadWorkspaceHints(os.tmpdir()) }) },
-        recipes: { list: vi.fn().mockResolvedValue({ success: true, builtin: [], user: [] }) },
-        vault: { status: vi.fn().mockResolvedValue(status) },
-      },
-    };
-    useProjectStore.setState({
-      currentProject: {
-        id: 'p1',
-        name: 'Danzig',
-        path: '/tmp/danzig',
-        type: 'article',
-        createdAt: new Date(),
-        lastOpenedAt: new Date(),
-      },
-    });
-    render(<BrainstormPanel />);
-    fireEvent.click(await screen.findByText('chat.brainstorm.projectContext'));
-  }
+  const openDrawer = openVaultDrawer;
+
+  afterEach(() => {
+    cleanup();
+    useProjectStore.setState({ currentProject: null });
+  });
 
   it('config.json illisible : le motif, et plus de « vérification… »', async () => {
     const reason = ".cliodeck/config.json ne se lit pas : ce fichier n'a pas été modifié.";
@@ -236,11 +244,48 @@ describe('BrainstormPanel — état du coffre indisponible', () => {
   it.each<[string, unknown]>([
     ['sans motif', { success: false }],
     ['le code no_project', { success: false, error: 'no_project' }],
+    // Le main le répond quand le projet change pendant la lecture (L09-2b).
+    ['le code project-changed', { success: false, error: 'project-changed' }],
   ])('%s : un texte pour l’auteur, jamais un code', async (_label, status) => {
     await openDrawer(status);
 
     expect(await screen.findByText('chat.brainstorm.vaultUnavailable')).toBeTruthy();
     expect(screen.queryByText('no_project')).toBeNull();
+    expect(screen.queryByText('project-changed')).toBeNull();
     expect(screen.queryByText('chat.brainstorm.vaultChecking')).toBeNull();
+  });
+});
+
+/**
+ * `indexed` dit l'index réel depuis S09-1-14 : un vault lié mais pas encore indexé n'est plus
+ * « prêt ». Le tiroir disait alors « liez un vault depuis les Réglages », à l'auteur qui venait
+ * d'en lier un : il lui reste à l'indexer.
+ */
+describe('BrainstormPanel — le tiroir distingue un vault non lié d’un vault pas encore indexé', () => {
+  afterEach(() => {
+    cleanup();
+    useProjectStore.setState({ currentProject: null });
+  });
+
+  it('aucun vault lié : il propose d’en lier un', async () => {
+    await openVaultDrawer({ success: true, indexed: false, noteCount: 0, dbPath: '/tmp/danzig/.cliodeck/brain.db', vaultPath: null });
+
+    expect(await screen.findByText('chat.brainstorm.vaultNotLinked')).toBeTruthy();
+    expect(screen.queryByText('chat.brainstorm.vaultNotIndexed')).toBeNull();
+  });
+
+  it('un vault lié, pas encore indexé : il reste à l’indexer, pas à le lier', async () => {
+    await openVaultDrawer({ success: true, indexed: false, noteCount: 0, dbPath: '/tmp/danzig/.cliodeck/brain.db', vaultPath: '/Volumes/Notes' });
+
+    expect(await screen.findByText('chat.brainstorm.vaultNotIndexed')).toBeTruthy();
+    expect(screen.queryByText('chat.brainstorm.vaultNotLinked')).toBeNull();
+  });
+
+  it('un vault lié et indexé : l’index est prêt', async () => {
+    await openVaultDrawer({ success: true, indexed: true, noteCount: 3, dbPath: '/tmp/danzig/.cliodeck/brain.db', vaultPath: '/Volumes/Notes' });
+
+    expect(await screen.findByText('chat.brainstorm.vaultReady')).toBeTruthy();
+    expect(screen.queryByText('chat.brainstorm.vaultNotIndexed')).toBeNull();
+    expect(screen.queryByText('chat.brainstorm.vaultNotLinked')).toBeNull();
   });
 });

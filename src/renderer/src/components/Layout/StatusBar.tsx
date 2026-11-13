@@ -284,6 +284,8 @@ export const StatusBar: React.FC = () => {
           <span
             className={`status-bar__item ${failedCount > 0 ? 'status-bar__item--warning' : ''}`}
             title={t('statusBar.mcpTooltip', {
+              // L'accord se fait sur les serveurs prêts : « 1/2 prêt », « 2/2 prêts ».
+              count: readyCount,
               ready: readyCount,
               total: mcpClients.length,
               defaultValue: `MCP: ${readyCount}/${mcpClients.length} ready`,

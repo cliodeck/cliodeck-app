@@ -4,6 +4,7 @@ import { Check, FolderOpen, Link2Off, Play } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
+import { refusedAsProjectChanged } from '../../services/still-in-project';
 
 interface VaultStatus {
   indexed: boolean;
@@ -86,6 +87,9 @@ export const VaultConfigSection: React.FC = () => {
       setError(null);
     } else if (res.error === 'no_project') {
       setError(t('vault.errors.noProject'));
+    } else if (refusedAsProjectChanged(res)) {
+      // Le projet a changé pendant la lecture : un code du main, pas un texte pour l'auteur.
+      setError(t('vault.errors.statusFailed'));
     } else {
       setError(res.error ?? t('vault.errors.statusFailed'));
     }

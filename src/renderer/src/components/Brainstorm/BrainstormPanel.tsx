@@ -34,6 +34,7 @@ import { useProjectStore } from '../../stores/projectStore';
 import { ideasFilePath, useIdeaStore } from '../../stores/ideaStore';
 import { useBrainstormModeNotice } from '../../hooks/useBrainstormModeNotice';
 import { contextFailureText, unreadableFailure, type ContextHints } from '../../services/context-file';
+import { refusedAsProjectChanged } from '../../services/still-in-project';
 import './BrainstormPanel.css';
 
 interface RecipeSummary {
@@ -47,6 +48,8 @@ interface RecipeSummary {
 interface VaultStatus {
   indexed: boolean;
   dbPath: string;
+  /** Le vault lié, ou `null` : « pas encore indexé » et « aucun vault lié » ne se règlent pas pareil. */
+  vaultPath: string | null;
 }
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'no_project';
@@ -198,11 +201,16 @@ export const BrainstormPanel: React.FC = () => {
           setUser(r.user ?? []);
         }
         if (v.success) {
-          setVault({ indexed: !!v.indexed, dbPath: v.dbPath ?? '' });
+          setVault({ indexed: !!v.indexed, dbPath: v.dbPath ?? '', vaultPath: v.vaultPath ?? null });
           setVaultError(null);
         } else {
-          // Sans cela, le tiroir dirait « vérification… » sans fin.
-          setVaultError(v.error && v.error !== 'no_project' ? v.error : t('chat.brainstorm.vaultUnavailable'));
+          // Sans cela, le tiroir dirait « vérification… » sans fin. `no_project` et `project-changed`
+          // (le projet a changé pendant la lecture) sont des codes, pas des textes pour l'auteur.
+          setVaultError(
+            v.error && v.error !== 'no_project' && !refusedAsProjectChanged(v)
+              ? v.error
+              : t('chat.brainstorm.vaultUnavailable')
+          );
         }
         setStatus('ready');
       } catch (e) {
@@ -394,7 +402,9 @@ export const BrainstormPanel: React.FC = () => {
                 <p className="brainstorm-panel__muted">
                   {vault.indexed
                     ? t('chat.brainstorm.vaultReady', { path: vault.dbPath })
-                    : t('chat.brainstorm.vaultNotIndexed')}
+                    : vault.vaultPath
+                      ? t('chat.brainstorm.vaultNotIndexed')
+                      : t('chat.brainstorm.vaultNotLinked')}
                 </p>
               ) : (
                 <p className="brainstorm-panel__muted">

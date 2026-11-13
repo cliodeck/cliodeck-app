@@ -877,7 +877,8 @@
       "noHints": "No .cliohints set. Add one at {{path}} to inject durable context into every prompt.",
       "obsidianVault": "Obsidian vault",
       "vaultReady": "Index ready at {{path}}",
-      "vaultNotIndexed": "Not indexed yet — link a vault from Settings.",
+      "vaultNotLinked": "No vault linked — link one from Settings.",
+      "vaultNotIndexed": "Vault linked, not indexed yet — run “Index” from Settings.",
       "vaultChecking": "checking…",
       "vaultUnavailable": "Vault status unavailable for now.",
       "recipesHeading": "Recipes ({{count}})",
@@ -1909,8 +1910,10 @@
     "action": "Open exporter"
   },
   "statusBar": {
-    "mcpTooltip": "MCP: {{ready}}/{{total}} ready",
-    "vaultTooltip": "Vault: {{count}} notes",
+    "mcpTooltip_one": "MCP: {{ready}}/{{total}} ready",
+    "mcpTooltip_other": "MCP: {{ready}}/{{total}} ready",
+    "vaultTooltip_one": "Vault: {{count}} note",
+    "vaultTooltip_other": "Vault: {{count}} notes",
     "indexing": "Indexing",
     "indexingTooltip": "Indexing: {{current}}/{{total}} documents",
     "syncing": "Sync",

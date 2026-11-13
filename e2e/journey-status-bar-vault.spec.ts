@@ -4,7 +4,11 @@
  *
  * La barre lisait `data.noteCount` d'une réponse étalée : « Vault » ne s'affichait jamais. Et le
  * statut répondait `indexed: true` dès que `.cliodeck/brain.db` existait, ce qui arrive à
- * l'ouverture de tout projet : « Index : prêt » pour un vault jamais indexé.
+ * l'ouverture de tout projet : « Index : prêt » pour un vault jamais indexé. Après « Changer de
+ * vault », les notes de l'ancien, restées dans l'index (S09-1-5), comptaient pour le nouveau.
+ *
+ * Le tiroir du Brainstorm distingue un vault lié mais pas encore indexé (« lancez « Indexer » »)
+ * d'un projet sans vault (« liez-en un »).
  *
  * L'app réelle, des projets temporaires. L'index d'un vault se calcule par le fournisseur
  * d'embeddings, absent des tests : les notes sont écrites dans `brain.db` par le vrai magasin, comme
@@ -27,8 +31,17 @@ test.afterEach(() => {
   for (const dir of toClean.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-/** Un projet article ; `vault`, le dossier lié ; `notes`, celles déjà indexées dans `brain.db`. */
-function makeProject(root: string, name: string, vault: string | null, notes: string[] = []): string {
+/**
+ * Un projet article ; `vault`, le dossier lié ; `notes`, celles déjà indexées dans `brain.db`, depuis
+ * `indexedFrom` (par défaut le vault lié : un autre chemin, c'est un vault d'avant « Changer de vault »).
+ */
+function makeProject(
+  root: string,
+  name: string,
+  vault: string | null,
+  notes: string[] = [],
+  indexedFrom: string | null = vault,
+): string {
   const dir = join(root, name);
   mkdirSync(join(dir, '.cliodeck'), { recursive: true });
   writeFileSync(
@@ -52,7 +65,7 @@ function makeProject(root: string, name: string, vault: string | null, notes: st
       store.upsertNote({
         id: `note-${i}`,
         relativePath: `${title}.md`,
-        vaultPath: vault ?? '',
+        vaultPath: indexedFrom ?? '',
         title,
         tags: [],
         frontmatter: {},
@@ -94,6 +107,18 @@ async function vaultIndexLine(window: Page): Promise<string> {
   return text;
 }
 
+/** Brainstormer, tiroir « Contexte du projet » : la ligne sous « Vault Obsidian ». */
+async function brainstormVaultLine(window: Page): Promise<string> {
+  await window.locator('.workspace-mode-bar').getByRole('button', { name: 'Brainstormer' }).click();
+  await window.getByRole('button', { name: /Contexte du projet/i }).first().click();
+  const section = window.locator('.brainstorm-panel__section', { has: window.locator('h3', { hasText: 'Vault Obsidian' }) });
+  const line = section.locator('.brainstorm-panel__muted');
+  await expect(line).not.toHaveText(/vérification/, { timeout: 10_000 });
+  const text = (await line.innerText()).trim();
+  await window.locator('.workspace-mode-bar').getByRole('button', { name: 'Écrire' }).click();
+  return text;
+}
+
 async function withApp(run: (app: ElectronApplication, window: Page) => Promise<void>): Promise<void> {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {
@@ -126,22 +151,34 @@ test('un vault lié et indexé : « Vault 3 » dans la barre d’état, « prêt
   });
 });
 
-test('un vault lié jamais indexé : « Vault 0 » et « non indexé » ; sans vault, aucun indicateur', async () => {
+test('un vault lié jamais indexé, ou changé : « Vault 0 » et « non indexé » ; sans vault, aucun indicateur', async () => {
   const root = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-barre-'));
   toClean.push(root);
   const vault = join(root, 'coffre');
   mkdirSync(vault);
   const linked = makeProject(root, 'Lié', vault);
+  // « Changer de vault » : l'index garde les notes de l'ancien, qui ne sont pas celles du nouveau.
+  const changed = makeProject(root, 'Changé', vault, ['Gdansk', 'Port franc'], join(root, 'ancien-coffre'));
   const bare = makeProject(root, 'Sans vault', null);
 
   await withApp(async (app, window) => {
     // Le projet ouvert, brain.db existe : il ne dit rien du vault.
     await openProject(app, window, linked, 'Lié');
     await expect(vaultItem(window)).toHaveText('Vault 0', { timeout: 15_000 });
+    await expect(vaultItem(window)).toHaveAttribute('title', 'Vault : 0 note');
+    expect(await vaultIndexLine(window)).toMatch(/^Index :\s*non indexé/);
+    expect(await brainstormVaultLine(window)).toBe(
+      'Vault lié, pas encore indexé — lancez « Indexer » depuis les Paramètres.',
+    );
+
+    await openProject(app, window, changed, 'Changé');
+    await expect(window.locator('.status-bar')).toContainText('Changé');
+    await expect(vaultItem(window)).toHaveText('Vault 0', { timeout: 15_000 });
     expect(await vaultIndexLine(window)).toMatch(/^Index :\s*non indexé/);
 
     await openProject(app, window, bare, 'Sans vault');
     await expect(window.locator('.status-bar')).toContainText('Sans vault');
     await expect(vaultItem(window)).toHaveCount(0);
+    expect(await brainstormVaultLine(window)).toBe('Aucun vault lié — liez-en un depuis les Paramètres.');
   });
 });

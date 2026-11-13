@@ -520,16 +520,20 @@ export class ObsidianVaultStore {
   }
 
   /**
-   * Le nombre de notes indexées, pour le statut du vault (S09-1-14). `brain.db` est partagé et naît
-   * à l'ouverture de tout projet : sa présence ne dit pas que le vault est indexé. Table absente
-   * (jamais indexé, ou « Détacher ») ou fichier absent : 0.
+   * Le nombre de notes indexées du vault `vaultPath`, pour le statut du vault (S09-1-14). `brain.db`
+   * est partagé et naît à l'ouverture de tout projet : sa présence ne dit pas que le vault est
+   * indexé. Table absente (jamais indexé, ou « Détacher »), fichier absent ou aucun vault lié : 0.
+   *
+   * Seules comptent les notes de ce vault : « Changer de vault » réécrit le chemin sans purger
+   * l'index, qui garde les notes de l'ancien (S09-1-5). L'indexeur range le chemin résolu par le
+   * lecteur du vault (`path.resolve`) : il se compare de même.
    *
    * Lecture seule, connexion ouverte et fermée dans l'appel, sans attente entre les deux : aucun
    * handle ne reste entre deux lectures, et rien ne retarde la fermeture du projet. Un échec de
    * lecture compte 0 note : c'est un indicateur, pas l'index.
    */
-  static countNotes(dbPath: string): number {
-    if (!fs.existsSync(dbPath)) return 0;
+  static countNotes(dbPath: string, vaultPath: string | null): number {
+    if (!vaultPath || !fs.existsSync(dbPath)) return 0;
     let db: Database.Database | null = null;
     try {
       db = new Database(dbPath, { readonly: true, fileMustExist: true });
@@ -537,7 +541,10 @@ export class ObsidianVaultStore {
         .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'obsidian_notes'`)
         .get();
       if (!table) return 0;
-      return (db.prepare('SELECT COUNT(*) AS c FROM obsidian_notes').get() as { c: number }).c;
+      const row = db
+        .prepare('SELECT COUNT(*) AS c FROM obsidian_notes WHERE vault_path = ?')
+        .get(path.resolve(vaultPath)) as { c: number };
+      return row.c;
     } catch (error) {
       console.warn('[obsidian] note count unreadable:', error);
       return 0;
