@@ -77,12 +77,19 @@ export const StatusBar: React.FC = () => {
       return;
     }
 
+    // Une réponse du projet quitté, arrivée après la bascule, n'a rien à dire du suivant.
+    let left = false;
+
+    // Les réponses sont étalées (`{ success, clients }`, `{ success, vaultPath, noteCount }`) : la
+    // barre lisait `data.clients` et `data.noteCount`, et ses indicateurs ne s'affichaient jamais
+    // (S17-1-10).
     const refresh = async () => {
       try {
         const mcpResult = await window.electron.fusion?.mcp?.list();
-        if (mcpResult?.success && mcpResult.data?.clients) {
+        if (left) return;
+        if (mcpResult?.success && Array.isArray(mcpResult.clients)) {
           setMcpClients(
-            mcpResult.data.clients.map((c: { name: string; state: string }) => ({
+            mcpResult.clients.map((c: { name: string; state: string }) => ({
               name: c.name,
               state: c.state,
             }))
@@ -96,16 +103,18 @@ export const StatusBar: React.FC = () => {
 
       try {
         const vaultResult = await window.electron.fusion?.vault?.status();
-        if (vaultResult?.success && vaultResult.data) {
+        if (left) return;
+        // Lié : un chemin de vault. `brain.db` existe dans tout projet, il ne dit rien du vault.
+        if (vaultResult?.success && vaultResult.vaultPath) {
           setVaultStatus({
             connected: true,
-            noteCount: vaultResult.data.noteCount,
+            noteCount: vaultResult.noteCount,
           });
         } else {
           setVaultStatus(null);
         }
       } catch {
-        setVaultStatus(null);
+        if (!left) setVaultStatus(null);
       }
     };
 
@@ -113,14 +122,15 @@ export const StatusBar: React.FC = () => {
 
     // Subscribe to MCP events for live updates
     const unsub = window.electron.fusion?.mcp?.onEvent?.((event: unknown) => {
-      const payload = event as { type?: string } | null;
-      if (payload?.type === 'stateChanged') refresh();
+      const payload = event as { kind?: string } | null;
+      if (payload?.kind === 'state_changed') refresh();
     });
 
     // Also refresh periodically (30s) for vault changes
     const timer = setInterval(refresh, 30_000);
 
     return () => {
+      left = true;
       clearInterval(timer);
       unsub?.();
     };

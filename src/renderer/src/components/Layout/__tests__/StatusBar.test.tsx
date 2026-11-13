@@ -322,3 +322,117 @@ describe('StatusBar : les sources primaires à réindexer pour un nouveau modèl
     expect(screen.queryByText('primarySources.reembed.status')).toBeNull();
   });
 });
+
+/**
+ * Les indicateurs MCP et Vault (S17-1-10, S09-1-14) ne s'affichaient jamais : la barre lisait
+ * `data.clients` et `data.noteCount` d'une réponse étalée (`{ success, clients }`), et attendait
+ * `type: 'stateChanged'` d'un événement qui dit `kind: 'state_changed'`.
+ */
+describe('StatusBar : les serveurs MCP et le vault se voient', () => {
+  const electron = () => (window as unknown as { electron: { fusion?: unknown } }).electron;
+  let list: ReturnType<typeof vi.fn>;
+  let status: ReturnType<typeof vi.fn>;
+  let emit: (event: unknown) => void;
+  let fusionBefore: unknown;
+
+  const ready = { name: 'europeana', state: 'ready' };
+  const failed = { name: 'gallica', state: 'failed' };
+  const mcpItem = () => screen.queryByText(/^MCP \d+\/\d+$/);
+  const vaultItem = () => screen.queryByText(/^Vault \d+$/);
+
+  beforeEach(() => {
+    list = vi.fn(async () => ({ success: true, clients: [ready, failed] }));
+    status = vi.fn(async () => ({
+      success: true,
+      indexed: true,
+      noteCount: 12,
+      dbPath: '/p/.cliodeck/brain.db',
+      vaultPath: '/Volumes/Notes',
+    }));
+    emit = () => undefined;
+    fusionBefore = electron().fusion;
+    electron().fusion = {
+      mcp: {
+        list,
+        onEvent: (callback: (event: unknown) => void) => {
+          emit = callback;
+          return () => {
+            emit = () => undefined;
+          };
+        },
+      },
+      vault: { status },
+    };
+  });
+
+  afterEach(() => {
+    electron().fusion = fusionBefore;
+  });
+
+  it('deux serveurs, dont un en échec : « MCP 1/2 », en avertissement, avec la pastille', async () => {
+    await mountWith({ filePath: null, isDirty: false });
+
+    const item = await waitFor(() => {
+      const found = mcpItem();
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(item.textContent).toBe('MCP 1/2');
+    expect(item).toHaveClass('status-bar__item--warning');
+    expect(item.querySelector('.status-bar__dot--danger')).not.toBeNull();
+  });
+
+  it('un changement d’état d’un serveur relance la lecture : la barre suit', async () => {
+    await mountWith({ filePath: null, isDirty: false });
+    await waitFor(() => expect(mcpItem()?.textContent).toBe('MCP 1/2'));
+    const reads = list.mock.calls.length;
+    list.mockResolvedValue({ success: true, clients: [ready, { ...failed, state: 'ready' }] });
+
+    await act(async () => {
+      emit({ kind: 'state_changed', at: '2026-11-13T10:00:00Z', name: 'gallica', from: 'failed', to: 'ready' });
+    });
+
+    expect(list.mock.calls.length).toBeGreaterThan(reads);
+    await waitFor(() => expect(mcpItem()?.textContent).toBe('MCP 2/2'));
+    expect(mcpItem()?.querySelector('.status-bar__dot--danger')).toBeNull();
+  });
+
+  it('un vault lié : « Vault 12 », le nombre de notes indexées', async () => {
+    await mountWith({ filePath: null, isDirty: false });
+
+    await waitFor(() => expect(vaultItem()?.textContent).toBe('Vault 12'));
+  });
+
+  it('aucun vault lié : pas d’indicateur, même si brain.db existe', async () => {
+    status.mockResolvedValue({ success: true, indexed: false, noteCount: 0, dbPath: '/p/.cliodeck/brain.db', vaultPath: null });
+    await mountWith({ filePath: null, isDirty: false });
+
+    await waitFor(() => expect(status).toHaveBeenCalled());
+    await act(async () => undefined);
+    expect(vaultItem()).toBeNull();
+  });
+
+  it('une réponse du projet quitté, arrivée après la bascule, ne s’affiche pas dans le suivant', async () => {
+    let answerA: (value: unknown) => void = () => undefined;
+    // A attend sa liste de serveurs ; son vault se lirait ensuite.
+    list.mockImplementationOnce(() => new Promise((resolve) => (answerA = resolve)));
+    await mountWith({ filePath: null, isDirty: false });
+
+    // B n'a ni serveur ni vault.
+    list.mockResolvedValue({ success: true, clients: [] });
+    status.mockResolvedValue({ success: true, indexed: false, noteCount: 0, vaultPath: null });
+    await act(async () => {
+      useProjectStore.setState({
+        currentProject: { id: 'p2', name: 'B', path: '/b', type: 'article', createdAt: new Date(), lastOpenedAt: new Date() },
+      });
+    });
+    await act(async () => {
+      answerA({ success: true, clients: [ready, failed] });
+    });
+
+    expect(mcpItem()).toBeNull();
+    expect(vaultItem()).toBeNull();
+    // A, revenu après coup, ne lit pas non plus son vault : seul B l'a demandé.
+    expect(status).toHaveBeenCalledTimes(1);
+  });
+});

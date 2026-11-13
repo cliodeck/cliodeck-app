@@ -518,6 +518,33 @@ export class ObsidianVaultStore {
       db.close();
     }
   }
+
+  /**
+   * Le nombre de notes indexées, pour le statut du vault (S09-1-14). `brain.db` est partagé et naît
+   * à l'ouverture de tout projet : sa présence ne dit pas que le vault est indexé. Table absente
+   * (jamais indexé, ou « Détacher ») ou fichier absent : 0.
+   *
+   * Lecture seule, connexion ouverte et fermée dans l'appel, sans attente entre les deux : aucun
+   * handle ne reste entre deux lectures, et rien ne retarde la fermeture du projet. Un échec de
+   * lecture compte 0 note : c'est un indicateur, pas l'index.
+   */
+  static countNotes(dbPath: string): number {
+    if (!fs.existsSync(dbPath)) return 0;
+    let db: Database.Database | null = null;
+    try {
+      db = new Database(dbPath, { readonly: true, fileMustExist: true });
+      const table = db
+        .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'obsidian_notes'`)
+        .get();
+      if (!table) return 0;
+      return (db.prepare('SELECT COUNT(*) AS c FROM obsidian_notes').get() as { c: number }).c;
+    } catch (error) {
+      console.warn('[obsidian] note count unreadable:', error);
+      return 0;
+    } finally {
+      db?.close();
+    }
+  }
 }
 
 // MARK: - row helpers

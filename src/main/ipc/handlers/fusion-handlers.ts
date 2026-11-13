@@ -880,13 +880,6 @@ export function setupFusionHandlers(): void {
     if (!root) return noProject();
     try {
       const dbPath = obsidianStorePath(root);
-      let exists = false;
-      try {
-        await fs.access(dbPath);
-        exists = true;
-      } catch {
-        exists = false;
-      }
       let vaultPath: string | null = null;
       try {
         const cfg = await readWorkspaceConfig(root);
@@ -896,7 +889,12 @@ export function setupFusionHandlers(): void {
         // inviterait à en lier un, et l'écriture serait refusée.
         if (!(e instanceof WorkspaceConfigError) || e.kind !== 'absent') throw e;
       }
-      return successResponse({ indexed: exists, dbPath, vaultPath });
+      // Lu toutes les 30 s par la barre d'état : une bascule pendant l'attente ne lit ni la base du
+      // projet quitté, ni celle du suivant. Le compte se fait d'un bloc, sans attente.
+      if (projectManager.getCurrentProjectPath() !== root) return errorResponse('project-changed');
+      // `brain.db` est partagé et naît avec le projet : seules les notes disent l'index (S09-1-14).
+      const noteCount = ObsidianVaultStore.countNotes(dbPath);
+      return successResponse({ indexed: noteCount > 0, noteCount, dbPath, vaultPath });
     } catch (e) {
       return errorResponse(e as Error);
     }
