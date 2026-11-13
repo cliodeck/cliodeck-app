@@ -141,6 +141,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
         signal: opts.signal,
       });
     } catch (e) {
+      // Abandonnée avant toute réponse (« Arrêter », fermeture du projet) : pas une panne (J9).
+      if (opts.signal?.aborted) {
+        yield { delta: '', done: true, finishReason: 'cancelled' };
+        return;
+      }
       this.status = {
         state: 'failed',
         lastError: {

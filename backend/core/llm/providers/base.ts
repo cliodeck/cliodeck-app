@@ -110,7 +110,11 @@ export interface ChatOptions {
   numCtx?: number;
   /** Tool-calling, when `capabilities.tools` is true. */
   tools?: ToolDescriptor[];
-  /** Abort cooperatively. */
+  /**
+   * Abort cooperatively. Abandonné (« Arrêter », fermeture du projet), même avant toute réponse, le
+   * flux finit par un chunk terminal `cancelled`, et l'état du fournisseur ne change pas : un
+   * abandon n'est pas une panne.
+   */
   signal?: AbortSignal;
 }
 
@@ -186,7 +190,11 @@ export interface EmbeddingProvider {
   getStatus(): ProviderStatus;
   healthCheck(): Promise<ProviderStatus>;
 
-  /** Embed a batch of texts; returns vectors of length `dimension`. */
+  /**
+   * Embed a batch of texts; returns vectors of length `dimension`. `signal` abandonné : la promesse
+   * rejette par sa raison (une `AbortError`, comme `fetch`), la requête se ferme, aucun vecteur
+   * n'est rendu, et l'état du fournisseur ne change pas.
+   */
   embed(texts: string[], opts?: { signal?: AbortSignal }): Promise<number[][]>;
 
   dispose(): Promise<void>;
