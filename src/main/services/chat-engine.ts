@@ -17,7 +17,8 @@
  *  - Retrieval is a single async hook returning chunks to prepend as a
  *    system message; leaving it undefined skips RAG entirely.
  *  - The agent loop is capped by `maxTurns` (default 6) to avoid runaway
- *    tool-use ping-pong.
+ *    tool-use ping-pong. Au dernier tour permis, les outils encore demandés
+ *    ne partent pas et le tour finit en erreur `max_tool_turns` (S06-1-4).
  */
 
 import type {
@@ -241,10 +242,15 @@ export interface RunChatTurnArgs<TSource = unknown> {
   promptLanguage?: 'fr' | 'en';
 }
 
-/** Consigne au modèle quand la recherche lève : il ne doit rien prétendre avoir lu. */
-const RETRIEVAL_FAILED_TEXT: Record<'fr' | 'en', string> = {
-  fr: 'La recherche dans les sources a échoué. Aucun extrait n’a été récupéré. Ne prétends pas avoir consulté des sources et ne fabrique pas de citations.',
-  en: 'The source search failed. No evidence was retrieved. Do not imply that sources were consulted or invent citations.',
+/**
+ * Consigne au modèle quand la recherche lève : il ne doit rien prétendre avoir lu, ni conclure que
+ * les sources se taisent, et doit le dire à l'utilisateur (S04-2-1). Le service la reprend telle
+ * quelle quand un corpus a échoué et qu'aucun n'a rendu d'extrait (`CONTEXT_TEXT.searchFailed`) :
+ * une seule consigne pour une recherche qui n'a rien pu donner.
+ */
+export const RETRIEVAL_FAILED_TEXT: Record<'fr' | 'en', string> = {
+  fr: 'La recherche dans les sources a échoué pour ce tour. Aucun extrait n’a été récupéré. Dis à l’utilisateur que ses sources n’ont pas pu être consultées : ne conclus pas qu’elles ne disent rien sur la question, ne prétends pas les avoir consultées et ne fabrique pas de citations.',
+  en: 'The source search failed for this turn. No evidence was retrieved. Tell the user that their sources could not be searched: do not conclude that they say nothing about the question, do not imply that they were consulted, and do not invent citations.',
 };
 
 /**
@@ -600,6 +606,28 @@ export async function runChatTurn<TSource = unknown>(
         return;
       }
 
+      // Dernier tour permis et des outils encore demandés (S06-1-4) : leurs résultats ne seraient
+      // jamais relus, et le tour finissait en « stop » sans un mot. Les outils ne partent pas, et le
+      // tour finit en erreur — sauf s'il a été arrêté entre-temps : il finit alors annulé. Dans les
+      // deux cas, l'explication part d'abord : la bande d'une recherche en panne reste sous la bulle.
+      if (turn === maxTurns - 1) {
+        generationMs = Date.now() - generationStart;
+        emitExplanation();
+        if (args.signal?.aborted) {
+          finalFinishReason = 'cancelled';
+          safeStatus({ phase: 'done' });
+          hooks.onDone?.({ delta: '', done: true, finishReason: 'cancelled' });
+        } else {
+          finalFinishReason = 'error';
+          emitError(
+            'max_tool_turns',
+            `Tool-call limit reached (${maxTurns} turns) without a final answer`
+          );
+        }
+        logTurnDone();
+        return;
+      }
+
       // Record the assistant's tool-call message so the provider-specific
       // adapter can replay it on the next turn (Anthropic tool_use blocks,
       // OpenAI tool_calls array, Gemini functionCall parts, etc.).
@@ -664,7 +692,8 @@ export async function runChatTurn<TSource = unknown>(
       // callers debug mid-loop state. No functional use today.
       void lastDoneChunk;
     }
-    // Loop unwound without a natural terminal — emit a stop.
+    // Loop unwound without a natural terminal — emit a stop. Le dernier tour permis finit toujours
+    // de lui-même : seul `maxTurns < 1` arrive ici.
     finalFinishReason = 'stop';
     generationMs = Date.now() - generationStart;
     emitExplanation();

@@ -45,6 +45,7 @@ import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js
 import { type RAGExplanation } from '../../../backend/types/chat-source.js';
 import type { LLMConfig } from '../../../backend/types/config.js';
 import {
+  RETRIEVAL_FAILED_TEXT,
   runChatTurn,
   type ChatEngineRetriever,
   type ChatEngineRetrievalOptions,
@@ -483,13 +484,28 @@ export interface ChatStreamEnvelope {
   error?: { code: string; message: string };
 }
 
+/**
+ * Issue de la recherche d'un tour, seul calcul pour la bande, le panneau et les consignes au modèle.
+ *
+ * - `failed` : un corpus tenté au moins a échoué, et aucun n'a rendu d'extrait. Un corpus vide
+ *   (Tropy sans projet lié, rien d'indexé) rend 0 sans rien chercher : à côté d'une panne, il n'en
+ *   fait pas une panne partielle. C'est le cas d'Ollama arrêté (S04-2-1). Un corpus qui a cherché
+ *   sans rien trouver compte de même : `fanOutCorpora` rend `ok: true, hitCount: 0` dans les deux cas.
+ * - `partial` : une panne, et un autre corpus a rendu des extraits.
+ * - `empty` : aucune panne, aucun extrait.
+ */
 export function retrievalStatus(
   corpora: NonNullable<RAGExplanation['search']['corpora']>,
   noHits: boolean
 ): RAGExplanation['search']['retrievalStatus'] {
   const attempted = corpora.filter((corpus) => corpus.attempted);
   const failures = attempted.filter((corpus) => !corpus.ok);
-  if (failures.length > 0) return failures.length === attempted.length ? 'failed' : 'partial';
+  if (failures.length > 0) {
+    // Un extrait dans le prompt, ou un corpus qui en a rendu (même écarté ensuite par la bande ou
+    // l'inspecteur) : quelque chose a répondu.
+    const answered = !noHits || attempted.some((corpus) => corpus.ok && corpus.hitCount > 0);
+    return answered ? 'partial' : 'failed';
+  }
   return noHits && attempted.length > 0 ? 'empty' : undefined;
 }
 
@@ -1014,17 +1030,12 @@ class FusionChatService {
             };
 
             return {
-              systemPrompt: scopeBlock + sourcesBlock + manuscriptBlock + notesBlock +
-                (someFailed
-                  ? (promptLang === 'fr'
-                    ? '\nCertaines recherches ont échoué. Les éléments disponibles peuvent être incomplets ; ne prétends pas avoir consulté les corpus en échec et ne fabrique pas de citations.'
-                    : '\nSome requested source searches failed. The available evidence may be incomplete; do not imply that failed sources were consulted or invent citations.')
-                  : '') +
-                (noHits && (ownOnly || someFailed)
-                  ? (promptLang === 'fr'
-                    ? '\nAucun extrait n’a été fourni. Ne prétends pas disposer de preuves et ne fabrique pas de citations.'
-                    : '\nNo evidence was retrieved. Do not imply that evidence was provided or invent citations.')
-                  : ''),
+              systemPrompt:
+                scopeBlock +
+                sourcesBlock +
+                manuscriptBlock +
+                notesBlock +
+                formatRetrievalNotes(status, { noHits, ownOnly }, promptLang),
               sources: [
                 ...hitsToSources(effectiveHits, groupEventsByChunk(securityEvents)),
                 ...manuscriptHitsToSources(ownHits),
@@ -1474,6 +1485,16 @@ interface ContextText {
   noSources: string;
   /** Préambule du texte de l'utilisateur quand aucune source ne le précède. */
   ownPassagesNotSources: string;
+  /**
+   * Recherche en échec (S04-2-1), choisie par le statut affiché (`formatRetrievalNotes`). Un corpus
+   * tenté au moins en échec, et aucun extrait rendu : la consigne d'une recherche qui a levé, celle du
+   * moteur, mot pour mot.
+   */
+  searchFailed: string;
+  /** Une partie des corpus tentés en échec, un autre a rendu des extraits. */
+  someSearchesFailed: string;
+  /** Aucun extrait du tout, quand une source a échoué ou que seul le texte de l'utilisateur est interrogé. */
+  noEvidence: string;
   /** Consigne de rappel : dire à l'utilisateur ce qu'il a déjà écrit. */
   manuscript: string[];
   /** Arrière-plan d'un brainstorm : ce qu'il pense déjà, à ne pas reformuler. */
@@ -1504,6 +1525,11 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
       'Aucun extrait des sources interrogées (bibliographie, archives, notes) ne correspond à cette question. Si elle porte sur une source, dis-le.',
     ownPassagesNotSources:
       "Les passages qui suivent, s'il y en a, sont le texte de l'utilisateur ou ses notes de lecture : ne les présente JAMAIS comme le contenu d'une source.",
+    searchFailed: RETRIEVAL_FAILED_TEXT.fr,
+    someSearchesFailed:
+      'Certaines recherches dans les sources ont échoué pour ce tour : les éléments disponibles peuvent être incomplets. Dis à l’utilisateur qu’une partie de ses sources n’a pas pu être consultée : ne conclus pas qu’une information en est absente, ne prétends pas avoir consulté les corpus en échec et ne fabrique pas de citations.',
+    noEvidence:
+      'Aucun extrait n’a été fourni. Ne prétends pas disposer de preuves et ne fabrique pas de citations.',
     manuscript: [
       "--- MANUSCRIT DE L'UTILISATEUR (hors sources) ---",
       "Passages du MANUSCRIT EN COURS : le texte que l'utilisateur est lui-même en train d'écrire. Ce n'est PAS une source, et les numéros [M…] ne désignent aucun des documents numérotés ci-dessus.",
@@ -1555,6 +1581,10 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
       'No excerpt from the searched sources (bibliography, archives, notes) matches this question. If it is about a source, say so.',
     ownPassagesNotSources:
       "The passages that follow, if any, are the user's own text or their reading notes: NEVER present them as the content of a source.",
+    searchFailed: RETRIEVAL_FAILED_TEXT.en,
+    someSearchesFailed:
+      'Some source searches failed for this turn: the available evidence may be incomplete. Tell the user that part of their sources could not be searched: do not conclude that something is absent from them, do not imply that the failed sources were consulted, and do not invent citations.',
+    noEvidence: 'No evidence was retrieved. Do not imply that evidence was provided or invent citations.',
     manuscript: [
       "--- THE USER'S MANUSCRIPT (not a source) ---",
       'Passages from the MANUSCRIPT IN PROGRESS: the text the user is writing themselves. It is NOT a source, and the [M…] numbers refer to none of the numbered documents above.',
@@ -1634,6 +1664,26 @@ export function formatSelectionScope(
   return [...(count === 1 ? text.scopeOne(named) : text.scopeMany(count, named)), '', ''].join(
     '\n'
   );
+}
+
+/**
+ * Consignes au modèle sur l'issue de la recherche, tirées du statut affiché (`retrievalStatus`) :
+ * l'écran et le modèle lisent le même calcul. Une panne sans aucun extrait rendu : la consigne d'une
+ * recherche qui a levé, qui dit déjà qu'aucun extrait n'a été récupéré. Une panne à côté d'extraits :
+ * le dire, sans conclure à une absence (S04-2-1).
+ */
+function formatRetrievalNotes(
+  status: RAGExplanation['search']['retrievalStatus'],
+  opts: { noHits: boolean; ownOnly: boolean },
+  lang: PromptLanguage = 'fr'
+): string {
+  const text = CONTEXT_TEXT[lang];
+  if (status === 'failed') return `\n${text.searchFailed}`;
+  const notes = [
+    ...(status === 'partial' ? [text.someSearchesFailed] : []),
+    ...(opts.noHits && (opts.ownOnly || status === 'partial') ? [text.noEvidence] : []),
+  ];
+  return notes.map((note) => `\n${note}`).join('');
 }
 
 export function formatContextAsSystemPrompt(

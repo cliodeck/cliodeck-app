@@ -38,6 +38,18 @@ describe('retrievalStatus', () => {
     expect(retrievalStatus([failed, skipped], true)).toBe('failed');
     expect(retrievalStatus([success, skipped], false)).toBeUndefined();
   });
+
+  // Le cas courant d'Ollama arrêté (S04-2-1) : Tropy sans projet lié rend 0 sans rien chercher, tous
+  // les corpus qui avaient de quoi chercher tombent. Aucun n'a répondu : la recherche a échoué. Une
+  // panne n'est « partielle » que si un autre corpus a rendu des extraits.
+  it('une panne sans aucun extrait rendu est une recherche en échec, même à côté d’un corpus vide', () => {
+    const answered = { ...success, hitCount: 2, selectedCount: 2 };
+    expect(retrievalStatus([failed, success], true)).toBe('failed');
+    expect(retrievalStatus([failed, success, skipped], true)).toBe('failed');
+    expect(retrievalStatus([failed, answered], false)).toBe('partial');
+    // Extraits rendus puis tous écartés (bande, inspecteur) : le corpus a répondu, la panne reste partielle.
+    expect(retrievalStatus([failed, answered], true)).toBe('partial');
+  });
 });
 
 function makeFakeProvider(chunks: ChatChunk[]): {

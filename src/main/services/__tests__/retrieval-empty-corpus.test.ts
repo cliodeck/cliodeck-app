@@ -143,9 +143,11 @@ describe.skipIf(!sqliteAvailable)('un corpus vide n’est pas un corpus en éche
     expect(map.secondary.error).toContain('connexion refusée');
 
     const { status, prompt } = await chatTurn();
-    // Tropy, absent, répond sans embarquer : la bibliographie seule tombe.
-    expect(status).toBe('partial');
-    expect(prompt).toContain('searches failed');
+    // Tropy, absent, répond sans embarquer : la bibliographie seule tombe, et aucun corpus n'a
+    // répondu. La recherche a échoué ; le corpus vide n'en fait pas une panne partielle (S04-2-1).
+    expect(status).toBe('failed');
+    expect(prompt).toContain('The source search failed');
+    expect(prompt).not.toContain('searches failed');
   });
 });
 

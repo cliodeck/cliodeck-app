@@ -487,18 +487,21 @@ describe.skipIf(!sqliteAvailable)('au chat : la bande et la consigne d’échec'
 
   // Le pire cas d'avant le correctif : aucun autre corpus ne trouve rien, et
   // la bande « Aucune source pertinente trouvée. » (`empty`) affirmait que les
-  // archives n'avaient rien, alors que leur recherche avait levé.
-  it('archives seules en panne, rien ailleurs : statut « partiel », jamais « aucune source pertinente »', async () => {
+  // archives n'avaient rien, alors que leur recherche avait levé. La bibliographie,
+  // sans PDF, n'avait rien à chercher : aucun corpus n'a répondu, la recherche a
+  // échoué (S04-2-1). « Partiel » ne vaut que si un autre corpus a rendu des extraits.
+  it('archives seules en panne, rien ailleurs : statut « échec », jamais « aucune source pertinente »', async () => {
     await linkAndIndex();
     await openBibliography();
     provider.mode = 'other-model';
 
     const { status, corpora, prompt } = await chatTurn();
 
-    expect(status).toBe('partial');
+    expect(status).toBe('failed');
     expect(corpora.primary).toMatchObject({ attempted: true, ok: false, hitCount: 0 });
     expect(corpora.secondary).toMatchObject({ attempted: true, ok: true, hitCount: 0 });
-    expect(prompt).toContain('searches failed');
+    expect(prompt).toContain('The source search failed');
+    expect(prompt).not.toContain('searches failed');
   });
 
   it('projet sans Tropy, bibliographie en marche : aucune bande, aucune consigne d’échec', async () => {
@@ -525,17 +528,27 @@ describe.skipIf(!sqliteAvailable)('au chat : la bande et la consigne d’échec'
     expect(status).toBe('failed');
     expect(corpora.primary).toMatchObject({ attempted: true, ok: false, hitCount: 0 });
     expect(corpora.secondary).toMatchObject({ attempted: true, ok: false });
-    expect(prompt).toContain('searches failed');
+    // Au modèle aussi, la consigne d'une recherche qui n'a pas eu lieu, pas « certaines
+    // recherches » : celle que le moteur écrit quand la recherche lève (S04-2-1).
+    expect(prompt).toContain('The source search failed');
+    expect(prompt).not.toContain('searches failed');
   });
 
-  it('projet sans Tropy, embeddings en panne : la bande vient des autres corpus, les archives restent à 0', async () => {
+  // Le scénario du défaut et du contrôle à la main de L09-8 (S04-2-1) : PDF indexés, pas de Tropy,
+  // Ollama arrêté. Tropy rend 0 sans rien chercher ; la bibliographie, seule à avoir de quoi chercher,
+  // tombe. Aucun corpus n'a répondu : « La recherche de sources a échoué. », et au modèle la consigne
+  // d'une recherche qui a levé. La ligne « Par corpus » garde « Archives 0 » (amendement de E2).
+  it('projet sans Tropy, embeddings en panne : recherche en échec, les archives restent à 0', async () => {
     await openBibliography(DIMENSION);
     provider.mode = 'down';
 
-    const { status, corpora } = await chatTurn();
+    const { status, corpora, prompt } = await chatTurn();
 
-    expect(status).toBe('partial');
+    expect(status).toBe('failed');
     expect(corpora.primary).toMatchObject({ attempted: true, ok: true, hitCount: 0 });
     expect(corpora.secondary).toMatchObject({ attempted: true, ok: false });
+    expect(prompt).toContain('The source search failed');
+    expect(prompt).toContain('Tell the user that their sources could not be searched');
+    expect(prompt).not.toContain('searches failed');
   });
 });

@@ -894,6 +894,7 @@
     "timeout": "Seit {{minutes}} Min. keine Antwort vom Modell: Generierung abgebrochen. Erhöhen Sie das Inaktivitäts-Timeout in den Chat-Einstellungen, wenn das Modell nur langsam ist.",
     "providerError": "Das Modell ist gescheitert: {{message}}",
     "streamIncomplete": "Das Modell ist gescheitert: Die Verbindung wurde vor dem Ende der Antwort geschlossen.",
+    "maxToolTurns": "Das Modell hat wiederholt MCP-Tools aufgerufen, ohne zu antworten: Der Durchgang wurde an der Grenze beendet. Formulieren Sie die Frage um oder deaktivieren Sie einige MCP-Tools.",
     "emptyResponse": "Das Modell ist gescheitert: Der Anbieter hat eine leere Antwort zurückgegeben.",
     "providerNoCause": "Das Modell ist gescheitert: Der Anbieter hat die Antwort ohne Angabe eines Grundes abgebrochen.",
     "truncated": "Antwort abgeschnitten: Das Modell hat die maximale Antwortlänge erreicht.",

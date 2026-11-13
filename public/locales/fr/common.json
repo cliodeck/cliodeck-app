@@ -894,6 +894,7 @@
     "timeout": "Aucune réponse du modèle depuis {{minutes}} min : génération interrompue. Augmentez le délai d'inactivité dans les réglages du chat si le modèle est simplement lent.",
     "providerError": "Le modèle a échoué : {{message}}",
     "streamIncomplete": "Le modèle a échoué : la connexion s'est fermée avant la fin de la réponse.",
+    "maxToolTurns": "Le modèle a enchaîné les appels d'outils MCP sans donner de réponse : le tour s'est arrêté à la limite. Reformulez la question, ou désactivez des outils MCP.",
     "emptyResponse": "Le modèle a échoué : le fournisseur a renvoyé une réponse vide.",
     "providerNoCause": "Le modèle a échoué : le fournisseur a interrompu la réponse sans donner de cause.",
     "truncated": "Réponse tronquée : le modèle a atteint la longueur maximale de réponse.",
