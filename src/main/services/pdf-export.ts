@@ -178,6 +178,28 @@ $if(strikeout)$
 \\usepackage{soul}
 $endif$`;
 
+/**
+ * Citations liées (J19). Avec `link-citations: true` dans l'en-tête YAML du document, pandoc
+ * écrit `\citeproc{ref-cle}{texte}`, que seul le bloc `csl-refs` de `common.latex` définit :
+ * « Undefined control sequence \citeproc » sinon. Par `\cite`, le texte devient un lien vers le
+ * `\bibitem[\citeproctext]{ref-cle}` que pandoc écrit toujours dans `CSLReferences`.
+ *
+ * Recopié de pandoc 3.13, sans son `\citeproctext` : celui des gabarits, robuste, reste en place
+ * (`\citeproc` le redéfinit dans un groupe). Sans `link-citations`, pandoc n'écrit pas `\cite`, et
+ * `CSLReferences` efface déjà les étiquettes de `\bibitem` : le rendu ne change pas (mesuré :
+ * pages identiques à l'octet près, article et livre).
+ */
+const PANDOC_CITEPROC_LINKS = `% Citations liees (link-citations) : recopie de pandoc 3.13 (common.latex, bloc csl-refs).
+\\NewDocumentCommand\\citeproc{mm}{%
+  \\begingroup\\def\\citeproctext{#2}\\cite{#1}\\endgroup}
+\\makeatletter
+ % allow citations to break across lines
+ \\let\\@cite@ofmt\\@firstofone
+ % avoid brackets around text for \\cite:
+ \\def\\@biblabel#1{}
+ \\def\\@cite#1#2{{#1\\if@tempswa , #2\\fi}}
+\\makeatother`;
+
 const getLatexTemplate = (projectType: string): string => {
   // Get platform-appropriate system fonts
   const { mainFont, sansFont, monoFont } = getSystemFonts();
@@ -241,6 +263,7 @@ ${PANDOC_OUTPUT_PREAMBLE}
 \\DeclareRobustCommand{\\citeprocvolume}{}
 \\DeclareRobustCommand{\\citeprocissue}{}
 \\DeclareRobustCommand{\\citeprocpages}{}
+${PANDOC_CITEPROC_LINKS}
 
 % Header/Footer
 \\pagestyle{fancy}
@@ -344,6 +367,7 @@ ${PANDOC_OUTPUT_PREAMBLE}
 \\DeclareRobustCommand{\\citeprocvolume}{}
 \\DeclareRobustCommand{\\citeprocissue}{}
 \\DeclareRobustCommand{\\citeprocpages}{}
+${PANDOC_CITEPROC_LINKS}
 
 % Header/Footer
 \\pagestyle{fancy}

@@ -11,12 +11,20 @@
  * chacun des trois types de projet, puis toutes ensemble. Sans pandoc ou sans xelatex il est
  * sauté : la CI n'a ni l'un ni l'autre, il tourne sur le Mac de l'auteur.
  *
- * Avant le correctif, le texte souligné (`\ul`), les formules alignées (`aligned`) et le code dans
- * une note (faute de `\VerbatimFootnotes`) échouaient de même.
+ * Avant le correctif, le texte souligné (`\ul`), les formules alignées (`aligned`), le code dans
+ * une note (faute de `\VerbatimFootnotes`) et les citations liées (`link-citations: true`, qui
+ * fait écrire `\citeproc`) échouaient de même.
  *
  * La présentation passe par le gabarit beamer de pandoc lui-même (`presentationArgs` ne donne pas
- * `--template`) : elle compilait déjà, le banc la garde. Le code dans une note n'y compile pas,
- * même avec `pandoc -t beamer` seul : limite de pandoc, écartée du banc pour elle.
+ * `--template`) : elle compilait déjà, le banc la garde. Ce qui ne compile pas sur un chemin, même
+ * avec le gabarit de pandoc, en sort pour ce chemin (voir `failsIn`).
+ *
+ * Restent hors du banc, car d'autres PR les traitent :
+ * - une image en chemin relatif au projet (`images/carte.png`) : pandoc tourne dans le dossier
+ *   temporaire de l'export, sans `--resource-path`, et remplace l'image par sa légende sans
+ *   erreur. L'export se dit réussi, sans l'image. C'est L07-2 : le banc donne un chemin absolu ;
+ * - un passage dans une autre langue (`[hello]{lang=en}`) : pandoc écrit `\foreignlanguage`, et
+ *   le gabarit ne charge que le français (« The language english is not loaded »). C'est L12-6.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
@@ -50,15 +58,19 @@ const BIBLIOGRAPHY = `@book{dupont2020,
 
 interface Construction {
   name: string;
-  /** `image` : chemin absolu de l'image. */
+  /** `image` : chemin absolu de l'image (un chemin relatif attend L07-2, voir plus haut). */
   markdown: (image: string) => string;
   /**
-   * Du code dans une note. Ni le gabarit beamer de pandoc (`pandoc -t beamer` seul, 3.13 :
-   * « Paragraph ended before \@makefntext was complete ») ni les notes de fin du livre (le paquet
-   * endnotes recopie les notes dans un fichier : « Argument of \NormalTok has an extra } ») ne le
-   * compilent, avant comme après J19 : il sort du banc pour eux.
+   * Les chemins où la construction ne compile pas, avant comme après J19 : elle sort du banc pour
+   * eux. Mesuré avec pandoc 3.13 et xelatex (TeX Live 2026).
+   * - `endnotes` (livre à notes de fin) : le paquet endnotes recopie les notes dans un fichier, et
+   *   le code coloré n'y survit pas. Bloc : « Argument of \NormalTok has an extra } » ; en ligne :
+   *   « Forbidden control sequence found while scanning use of \FancyVerbGetVerb ». Le code en
+   *   ligne sans couleur passe.
+   * - `presentation` : un bloc de code dans une note ne compile pas, même avec `pandoc -t beamer`
+   *   seul (« Paragraph ended before \@makefntext was complete »).
    */
-  verbatimInNote?: true;
+  failsIn?: readonly ('endnotes' | 'presentation')[];
 }
 
 /** Ce que l'historien écrit, une construction à la fois. */
@@ -125,11 +137,23 @@ const CONSTRUCTIONS: readonly Construction[] = [
     name: 'code dans une note',
     markdown: () =>
       'Un appel de note[^code].\n\n[^code]: Une note qui cite du code :\n\n    ```python\n    x = 1\n    ```\n',
-    verbatimInNote: true,
+    failsIn: ['endnotes', 'presentation'],
+  },
+  {
+    name: 'code en ligne coloré dans une note',
+    markdown: () => 'Un appel de note[^ligne].\n\n[^ligne]: Une note qui cite `x = 1`{.python}.\n',
+    failsIn: ['endnotes'],
   },
   {
     name: 'citations par citeproc',
     markdown: () => 'Selon @dupont2020, et aussi [@dupont2020, p. 12].\n',
+  },
+  {
+    // L'en-tête YAML que l'historien écrit en tête de son document (ou d'un chapitre). Pandoc
+    // écrit alors `\citeproc{ref-dupont2020}{…}` : dans le texte et dans une note.
+    name: 'citations liées (link-citations)',
+    markdown: () =>
+      '---\nlink-citations: true\n---\n\nSelon @dupont2020, et aussi [@dupont2020, p. 12][^liee].\n\n[^liee]: Voir @dupont2020.\n',
   },
 ];
 
@@ -148,12 +172,14 @@ function latexErrors(result: ExportResult): string[] {
 const PROJECT_TYPES = ['article', 'book', 'presentation'] as const;
 type ProjectType = (typeof PROJECT_TYPES)[number];
 
-/** Ce qui peut compiler pour ce type de projet (voir `verbatimInNote`). */
+/** Ce qui peut compiler pour ce type de projet (voir `failsIn`). */
 function constructionsFor(projectType: ProjectType, noteStyle?: NoteStyle): readonly Construction[] {
   const endnotes = noteStyle === 'endnote-chapter' || noteStyle === 'endnote-book';
-  return projectType === 'presentation' || endnotes
-    ? CONSTRUCTIONS.filter((c) => !c.verbatimInNote)
-    : CONSTRUCTIONS;
+  return CONSTRUCTIONS.filter(
+    (c) =>
+      !(projectType === 'presentation' && c.failsIn?.includes('presentation')) &&
+      !(endnotes && c.failsIn?.includes('endnotes'))
+  );
 }
 
 describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
