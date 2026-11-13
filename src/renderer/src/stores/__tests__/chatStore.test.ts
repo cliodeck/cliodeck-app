@@ -67,6 +67,24 @@ describe('chatStore (fusion unified store)', () => {
     expect(a?.finishReason).toBe('error');
   });
 
+  /**
+   * La fin d'un tour effacé arrivait après l'envoi du suivant : elle remettait à zéro la session et
+   * le message en cours, ceux du nouveau tour, qui perdait son bouton Stop (S16-1-3).
+   */
+  it('finishAssistant d’un message qui n’est pas en cours ne touche ni sessionId ni pendingAssistantId', () => {
+    const s = useChatStore.getState();
+    const old = s.beginAssistant('s1');
+    const current = s.beginAssistant('s2');
+
+    s.finishAssistant(old, 'stop');
+
+    const after = useChatStore.getState();
+    expect(after.sessionId).toBe('s2');
+    expect(after.pendingAssistantId).toBe(current);
+    expect(after.messages.find((m) => m.id === old)?.pending).toBe(false);
+    expect(after.messages.find((m) => m.id === current)?.pending).toBe(true);
+  });
+
   it('reset clears everything', () => {
     useChatStore.getState().appendUser('Hi');
     useChatStore.getState().beginAssistant('s');

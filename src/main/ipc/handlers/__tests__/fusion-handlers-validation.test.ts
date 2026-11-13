@@ -8,7 +8,7 @@
  * force, `recentLimit` sans borne.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -17,6 +17,8 @@ const h = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   llmConfig: { backend: 'claude', ollamaURL: 'http://127.0.0.1:11434' } as Record<string, unknown>,
   projectPath: '' as string,
+  /** `fusionChatService.start` : rend l'identifiant reçu, comme le vrai service. */
+  chatStart: null as unknown as Mock<(args: { sessionId?: string }) => string>,
 }));
 
 vi.mock('electron', () => {
@@ -45,7 +47,9 @@ vi.mock('../../../services/config-manager.js', () => ({
 vi.mock('../../../services/project-manager.js', () => ({
   projectManager: { getCurrentProjectPath: () => h.projectPath },
 }));
-vi.mock('../../../services/fusion-chat-service.js', () => ({ fusionChatService: {} }));
+vi.mock('../../../services/fusion-chat-service.js', () => ({
+  fusionChatService: { start: (args: { sessionId?: string }) => h.chatStart(args) },
+}));
 vi.mock('../../../services/retrieval-service.js', () => ({ retrievalService: {} }));
 vi.mock('../../../services/secure-storage.js', () => ({ secureStorage: {}, SENSITIVE_KEYS: [] }));
 vi.mock('../../../services/recipe-step-handlers.js', () => ({ recipeStepHandlers: {} }));
@@ -59,6 +63,7 @@ import {
   rememberConsentedPath,
 } from '../../utils/user-consented-paths.js';
 import { setupFusionHandlers } from '../fusion-handlers.js';
+import { OperationBusyError } from '../../../services/cancellable-operation.js';
 import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards.js';
 
 type Response = { success: boolean; error?: string } & Record<string, unknown>;
@@ -83,6 +88,7 @@ beforeEach(() => {
   h.llmConfig = { backend: 'claude', ollamaURL: 'http://127.0.0.1:11434' };
   cloudConsent.revoke();
   __resetConsentedPaths();
+  h.chatStart = vi.fn((args: { sessionId?: string }) => args.sessionId ?? 'tiré-par-le-main');
 });
 
 afterEach(() => {
@@ -324,5 +330,41 @@ describe('fusion:security:get-events — recentLimit borné', () => {
   it('accepte une limite raisonnable, ou aucune', async () => {
     expect((await invoke('fusion:security:get-events', { recentLimit: 20 })).success).toBe(true);
     expect((await invoke('fusion:security:get-events')).success).toBe(true);
+  });
+});
+
+/**
+ * Le renderer choisit l'identifiant du tour et lie son message avant l'appel (L09-6) : un événement
+ * émis avant la réponse — l'erreur d'une clé d'API absente — trouve ainsi son message (S16-1-20).
+ */
+describe('fusion:chat:start — l’identifiant du tour vient du renderer', () => {
+  const SESSION = '0b9f3c1e-6a2d-4f0b-9c8e-2d7a5e4f1a3b';
+  const ask = (opts?: unknown) => invoke('fusion:chat:start', [{ role: 'user', content: 'Qui ?' }], opts);
+
+  it('le transmet au service, et le rend', async () => {
+    const res = await ask({ sessionId: SESSION });
+
+    expect(h.chatStart).toHaveBeenCalledTimes(1);
+    expect(h.chatStart.mock.calls[0][0]).toMatchObject({ sessionId: SESSION });
+    expect(res).toMatchObject({ success: true, sessionId: SESSION });
+  });
+
+  it('refuse une valeur qui n’est pas un UUID, sans lancer de tour', async () => {
+    for (const bad of ['s1', 42, '']) {
+      const res = await ask({ sessionId: bad });
+      expect(res.success, JSON.stringify(bad)).toBe(false);
+    }
+    expect(h.chatStart).not.toHaveBeenCalled();
+  });
+
+  it('un identifiant déjà en cours : un refus répondu, pas une exception', async () => {
+    h.chatStart.mockImplementation(() => {
+      throw new OperationBusyError('chat', SESSION);
+    });
+
+    const res = await ask({ sessionId: SESSION });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toContain(SESSION);
   });
 });

@@ -13,6 +13,7 @@ import { useRAGQueryStore } from '../../../stores/ragQueryStore';
 import { useChatStore } from '../../../stores/chatStore';
 import { useNotificationStore } from '../../../stores/notificationStore';
 import { projectLifecycle } from '../../../lifecycle/projectLifecycle';
+import i18n from '../../../i18n';
 
 type StartOpts = Record<string, unknown> | undefined;
 type ChunkEnvelope = {
@@ -23,11 +24,21 @@ type ChunkEnvelope = {
 
 const chunkListeners: Array<(env: ChunkEnvelope) => void> = [];
 
+/** Ce que le main enverrait sur `fusion:chat:chunk`, à tous les abonnés du moment. */
+function emit(env: ChunkEnvelope): void {
+  for (const cb of [...chunkListeners]) cb(env);
+}
+
+/**
+ * Le canal `fusion:chat:*` du preload. Un abonnement se défait vraiment : un composant démonté
+ * n'entend plus rien, comme dans l'app. `start` rend l'identifiant qu'il reçoit, comme le main
+ * (L09-6), ou celui qu'il aurait tiré.
+ */
 function installFusionChat(): ReturnType<typeof vi.fn> {
   chunkListeners.length = 0;
-  const start = vi.fn(async (_messages: unknown[], _opts?: StartOpts) => ({
+  const start: ReturnType<typeof vi.fn> = vi.fn(async (_messages: unknown[], opts?: StartOpts) => ({
     success: true,
-    sessionId: 's1',
+    sessionId: (opts?.sessionId as string | undefined) ?? drawnByMain(start.mock.calls.length - 1),
   }));
   const unsub = (): void => undefined;
   const chat = {
@@ -35,7 +46,10 @@ function installFusionChat(): ReturnType<typeof vi.fn> {
     cancel: vi.fn(async () => ({ success: true })),
     onChunk: (cb: (env: ChunkEnvelope) => void) => {
       chunkListeners.push(cb);
-      return unsub;
+      return () => {
+        const i = chunkListeners.indexOf(cb);
+        if (i >= 0) chunkListeners.splice(i, 1);
+      };
     },
     onContext: () => unsub,
     onToolCall: () => unsub,
@@ -45,6 +59,20 @@ function installFusionChat(): ReturnType<typeof vi.fn> {
   const w = window as unknown as { electron: Record<string, unknown> };
   w.electron = { ...w.electron, fusion: { chat } };
   return start;
+}
+
+/** L'identifiant que le main tire quand le renderer n'en donne pas : un par tour. */
+const drawnByMain = (call: number): string => `tiré-par-le-main-${call}`;
+
+/** L'identifiant du tour n° `call`, tel que le renderer l'a donné à `start` (ou que le main a tiré). */
+function sessionOf(start: ReturnType<typeof vi.fn>, call = 0): string {
+  const opts = (start.mock.calls[call] as [unknown[], StartOpts])[1];
+  return (opts?.sessionId as string | undefined) ?? drawnByMain(call);
+}
+
+function cancelOf(): ReturnType<typeof vi.fn> {
+  return (window as unknown as { electron: { fusion: { chat: { cancel: ReturnType<typeof vi.fn> } } } })
+    .electron.fusion.chat.cancel;
 }
 
 function optsOf(start: ReturnType<typeof vi.fn>): Record<string, unknown> {
@@ -92,16 +120,17 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
   });
 
   it('accumule les chunks de raisonnement à part de la réponse', async () => {
-    installFusionChat();
+    const start = installFusionChat();
     useRAGQueryStore.getState().setParams({ provider: 'ollama', model: 'qwen3.5:35b' });
     const { result } = renderHook(() => useBrainstormChat());
     await act(async () => {
       await result.current.send('bonjour');
     });
+    const s1 = sessionOf(start);
     act(() => {
-      chunkListeners[0]({ sessionId: 's1', chunk: { delta: '', thinking: 'hmm' } });
-      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Réponse' } });
-      chunkListeners[0]({ sessionId: 's1', chunk: { delta: '', done: true, finishReason: 'stop' } });
+      emit({ sessionId: s1, chunk: { delta: '', thinking: 'hmm' } });
+      emit({ sessionId: s1, chunk: { delta: 'Réponse' } });
+      emit({ sessionId: s1, chunk: { delta: '', done: true, finishReason: 'stop' } });
     });
     const last = useChatStore.getState().messages.at(-1);
     expect(last?.thinking).toBe('hmm');
@@ -109,7 +138,7 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
   });
 
   it('traduit le délai d’inactivité dépassé en message d’erreur localisé', async () => {
-    installFusionChat();
+    const start = installFusionChat();
     useRAGQueryStore.getState().setParams({ provider: 'ollama', model: 'gemma3:4b', timeout: 300_000 });
 
     const { result } = renderHook(() => useBrainstormChat());
@@ -118,15 +147,17 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
     });
     expect(chunkListeners).toHaveLength(1);
     act(() => {
-      chunkListeners[0]({
-        sessionId: 's1',
+      emit({
+        sessionId: sessionOf(start),
         chunk: { delta: '', done: true, finishReason: 'error' },
         error: { code: 'timeout', message: 'message côté main' },
       });
     });
-    // Le mock de react-i18next renvoie la clé quand des variables sont
-    // passées : c'est la clé localisée qui doit sortir, pas le message brut.
-    expect(result.current.error).toBe('chat.timeout');
+    // Traduit par l'instance i18n de l'app (le flux vit hors des composants, L09-6) : la phrase
+    // localisée, avec le délai réglé, et non le message brut du main.
+    expect(result.current.error).toBe(i18n.t('chat.timeout', { minutes: 5 }));
+    expect(result.current.error).not.toBe('chat.timeout');
+    expect(result.current.error).toContain('5');
     expect(result.current.isStreaming).toBe(false);
   });
 
@@ -220,32 +251,104 @@ describe('useBrainstormChat — un envoi parti avant la bascule', () => {
     const start = installFusionChat();
     let answer!: (value: { success: boolean; sessionId?: string }) => void;
     start.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
-    const cancel = (window as unknown as { electron: { fusion: { chat: { cancel: ReturnType<typeof vi.fn> } } } })
-      .electron.fusion.chat.cancel;
+    const cancel = cancelOf();
 
     const { result } = renderHook(() => useBrainstormChat());
     let sending!: Promise<void>;
     act(() => {
       sending = result.current.send('Qui était le préfet en 1934 ?');
     });
-    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(['Qui était le préfet en 1934 ?']);
+    // La bulle en attente est posée avant la réponse de chat.start (L09-6).
+    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(['Qui était le préfet en 1934 ?', '']);
+    const s1 = sessionOf(start);
 
     act(() => {
       projectLifecycle.beginTransition();
       projectLifecycle.enter('/projets/B');
     });
     await act(async () => {
-      answer({ success: true, sessionId: 's1' });
+      answer({ success: true, sessionId: s1 });
       await sending;
     });
     act(() => {
-      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Le préfet était…' } });
-      chunkListeners[0]({ sessionId: 's1', chunk: { delta: '', done: true, finishReason: 'cancelled' } });
+      emit({ sessionId: s1, chunk: { delta: 'Le préfet était…' } });
+      emit({ sessionId: s1, chunk: { delta: '', done: true, finishReason: 'cancelled' } });
     });
 
     expect(useChatStore.getState().messages).toEqual([]);
     expect(result.current.isStreaming).toBe(false);
-    expect(cancel).toHaveBeenCalledWith('s1');
+    expect(cancel).toHaveBeenCalledWith(s1);
+  });
+
+  // Le chat n'est pas vidé quand A reste à l'écran : l'ouverture de B échoue et A revient « stores
+  // intacts », ou le même dossier est rouvert. La bulle, posée avant chat.start (L09-6), ne doit pas
+  // tourner jusqu'à Stop.
+  it.each([
+    ['l’ouverture de B échoue et A revient', () => projectLifecycle.abortTransition()],
+    ['le même projet est rouvert', () => projectLifecycle.enter('/projets/A')],
+  ])('%s pendant chat.start : la bulle s’arrête, la session est annulée', async (_cas, settle) => {
+    const start = installFusionChat();
+    let answer!: (value: { success: boolean; sessionId?: string }) => void;
+    start.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    const cancel = cancelOf();
+
+    const { result } = renderHook(() => useBrainstormChat());
+    let sending!: Promise<void>;
+    act(() => {
+      sending = result.current.send('Qui était le préfet en 1934 ?');
+    });
+    const s1 = sessionOf(start);
+    act(() => {
+      projectLifecycle.beginTransition();
+      settle();
+    });
+    await act(async () => {
+      answer({ success: true, sessionId: s1 });
+      await sending;
+    });
+    act(() => emit({ sessionId: s1, chunk: { delta: 'Le préfet était…' } }));
+
+    const [question, bubble] = useChatStore.getState().messages;
+    expect(question.content).toBe('Qui était le préfet en 1934 ?');
+    expect(bubble).toMatchObject({ role: 'assistant', content: '', pending: false, finishReason: 'cancelled' });
+    expect(useChatStore.getState().pendingAssistantId).toBeNull();
+    expect(result.current.isStreaming).toBe(false);
+    expect(cancel).toHaveBeenCalledWith(s1);
+  });
+
+  it('témoin : la clé absente a fini la bulle avant le retour de A, son erreur reste affichée', async () => {
+    const start = installFusionChat();
+    let answer!: (value: { success: boolean; sessionId?: string }) => void;
+    start.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+
+    const { result } = renderHook(() => useBrainstormChat());
+    let sending!: Promise<void>;
+    act(() => {
+      sending = result.current.send('Qui était le préfet en 1934 ?');
+    });
+    const s1 = sessionOf(start);
+    act(() =>
+      emit({
+        sessionId: s1,
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code: 'config_error', message: 'Clé d’API absente pour Claude.' },
+      })
+    );
+    act(() => {
+      projectLifecycle.beginTransition();
+      projectLifecycle.abortTransition();
+    });
+    await act(async () => {
+      answer({ success: true, sessionId: s1 });
+      await sending;
+    });
+
+    expect(useChatStore.getState().messages[1]).toMatchObject({
+      pending: false,
+      finishReason: 'error',
+      error: 'Clé d’API absente pour Claude.',
+    });
+    expect(result.current.isStreaming).toBe(false);
   });
 
   it('chat.start échoue après le passage à B : aucun message d’erreur dans B', async () => {
@@ -271,13 +374,13 @@ describe('useBrainstormChat — un envoi parti avant la bascule', () => {
   });
 
   it('témoin : chat.start répond dans le même projet, la réponse s’affiche', async () => {
-    installFusionChat();
+    const start = installFusionChat();
     const { result } = renderHook(() => useBrainstormChat());
     await act(async () => {
       await result.current.send('Qui était le préfet en 1934 ?');
     });
     act(() => {
-      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Le préfet était…', done: true, finishReason: 'stop' } });
+      emit({ sessionId: sessionOf(start), chunk: { delta: 'Le préfet était…', done: true, finishReason: 'stop' } });
     });
 
     expect(useChatStore.getState().messages.map((m) => m.content)).toEqual([
@@ -307,24 +410,20 @@ describe('useBrainstormChat — un tour sans réponse ne repart pas au modèle',
 
   it('tour en erreur avant le premier jeton : la question suivante part sans la bulle vide ni sa question', async () => {
     const start = installFusionChat();
-    start
-      .mockResolvedValueOnce({ success: true, sessionId: 's1' })
-      .mockResolvedValueOnce({ success: true, sessionId: 's2' })
-      .mockResolvedValueOnce({ success: true, sessionId: 's3' });
     const { result } = renderHook(() => useBrainstormChat());
 
     await act(async () => {
       await result.current.send('Qui était le préfet en 1934 ?');
     });
     act(() => {
-      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Jean Chiappe.', done: true, finishReason: 'stop' } });
+      emit({ sessionId: sessionOf(start, 0), chunk: { delta: 'Jean Chiappe.', done: true, finishReason: 'stop' } });
     });
     await act(async () => {
       await result.current.send('Et en 1936 ?');
     });
     act(() => {
-      chunkListeners[0]({
-        sessionId: 's2',
+      emit({
+        sessionId: sessionOf(start, 1),
         chunk: { delta: '', done: true, finishReason: 'error' },
         error: { code: 'provider_error', message: 'HTTP 529 overloaded' },
       });
@@ -392,10 +491,11 @@ describe('useBrainstormChat — un tour sans réponse ne repart pas au modèle',
     await act(async () => {
       await result.current.send('Qui était le préfet en 1934 ?');
     });
+    const s1 = sessionOf(start);
     act(() => {
-      chunkListeners[0]({ sessionId: 's1', chunk: { delta: 'Le préfet était' } });
-      chunkListeners[0]({
-        sessionId: 's1',
+      emit({ sessionId: s1, chunk: { delta: 'Le préfet était' } });
+      emit({
+        sessionId: s1,
         chunk: { delta: '', done: true, finishReason: 'error' },
         error: { code: 'stream_error', message: 'socket hang up' },
       });
@@ -409,5 +509,152 @@ describe('useBrainstormChat — un tour sans réponse ne repart pas au modèle',
       { role: 'assistant', content: 'Le préfet était' },
       { role: 'user', content: 'Continue.' },
     ]);
+  });
+});
+
+/**
+ * Un tour appartient à sa session, du premier événement au dernier (L09-6). Le lien entre la
+ * session et sa bulle vivait dans le composant, et ne se posait qu'à la réponse de `chat.start`.
+ */
+describe('useBrainstormChat — le tour appartient à sa session', () => {
+  beforeEach(() => {
+    useChatStore.getState().reset();
+    useChatStore.getState().setChatSettings({ sendBlockedReasons: undefined });
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  /** `chat.start` dont le main émet le chunk terminal avant de répondre, comme `pump` le fait. */
+  function startEmitsBeforeAnswering(start: ReturnType<typeof vi.fn>, error: { code: string; message: string }): void {
+    start.mockImplementationOnce(async (_messages: unknown[], opts?: StartOpts) => {
+      const sessionId = (opts?.sessionId as string | undefined) ?? drawnByMain(start.mock.calls.length - 1);
+      emit({ sessionId, chunk: { delta: '', done: true, finishReason: 'error' }, error });
+      return { success: true, sessionId };
+    });
+  }
+
+  it('clé d’API absente : l’erreur émise avant la réponse de chat.start s’affiche, et le tour finit (S16-1-20)', async () => {
+    const start = installFusionChat();
+    const message = 'Anthropic backend selected but no claudeAPIKey set in config.';
+    startEmitsBeforeAnswering(start, { code: 'config_error', message });
+    const { result } = renderHook(() => useBrainstormChat());
+
+    await act(async () => {
+      await result.current.send('Qui était le préfet en 1934 ?');
+    });
+
+    expect(result.current.error).toBe(message);
+    expect(result.current.isStreaming).toBe(false);
+    expect(useChatStore.getState().messages.at(-1)).toMatchObject({ role: 'assistant', pending: false });
+  });
+
+  it('envoi distant refusé : le refus émis avant la réponse de chat.start finit aussi la bulle', async () => {
+    const start = installFusionChat();
+    const message = 'Envoi vers Anthropic Claude refusé : aucun consentement.';
+    startEmitsBeforeAnswering(start, { code: 'cloud_consent_required', message });
+    const { result } = renderHook(() => useBrainstormChat());
+
+    await act(async () => {
+      await result.current.send('Qui était le préfet en 1934 ?');
+    });
+
+    expect(result.current.error).toBe(message);
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it('quitter l’onglet Chat et revenir : la réponse continue et le tour se termine (S16-1-0)', async () => {
+    const start = installFusionChat();
+    const first = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await first.result.current.send('Qui était le préfet en 1934 ?');
+    });
+    const s1 = sessionOf(start);
+    act(() => emit({ sessionId: s1, chunk: { delta: 'Début' } }));
+
+    // L'onglet Journal : le chat est démonté, puis remonté au retour.
+    first.unmount();
+    const second = renderHook(() => useBrainstormChat());
+    act(() => {
+      emit({ sessionId: s1, chunk: { delta: ', suite.' } });
+      emit({ sessionId: s1, chunk: { delta: '', done: true, finishReason: 'stop' } });
+    });
+
+    expect(useChatStore.getState().messages.at(-1)).toMatchObject({ content: 'Début, suite.', pending: false });
+    expect(second.result.current.isStreaming).toBe(false);
+  });
+
+  it('Effacer pendant la génération annule le tour côté main (S16-1-3)', async () => {
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('Une longue question');
+    });
+    const s1 = sessionOf(start);
+    act(() => emit({ sessionId: s1, chunk: { delta: 'Une réponse qui part mal' } }));
+
+    act(() => result.current.reset());
+
+    expect(cancelOf()).toHaveBeenCalledWith(s1);
+    expect(useChatStore.getState().messages).toEqual([]);
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it('la fin du tour effacé, arrivée après l’envoi du suivant, ne termine pas celui-ci (S16-1-3)', async () => {
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('Une longue question');
+    });
+    const s1 = sessionOf(start, 0);
+    act(() => emit({ sessionId: s1, chunk: { delta: 'Une réponse qui part mal' } }));
+    act(() => result.current.reset());
+    await act(async () => {
+      await result.current.send('Une autre question');
+    });
+    const s2 = sessionOf(start, 1);
+
+    act(() => emit({ sessionId: s1, chunk: { delta: '', done: true, finishReason: 'stop' } }));
+
+    expect(result.current.isStreaming).toBe(true);
+    expect(useChatStore.getState().sessionId).toBe(s2);
+
+    act(() => {
+      emit({ sessionId: s2, chunk: { delta: 'La bonne réponse.' } });
+      emit({ sessionId: s2, chunk: { delta: '', done: true, finishReason: 'stop' } });
+    });
+    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual([
+      'Une autre question',
+      'La bonne réponse.',
+    ]);
+    expect(result.current.isStreaming).toBe(false);
+  });
+
+  it('session lancée dans A, puis B ouvert : sa suite et sa fin ne s’écrivent pas dans le chat de B', async () => {
+    projectLifecycle.enter('/projets/A');
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('Question posée dans A');
+    });
+    const sA = sessionOf(start, 0);
+    act(() => emit({ sessionId: sA, chunk: { delta: 'Début de réponse dans A' } }));
+
+    act(() => {
+      projectLifecycle.beginTransition();
+      projectLifecycle.enter('/projets/B');
+    });
+    await act(async () => {
+      await result.current.send('Question posée dans B');
+    });
+    const sB = sessionOf(start, 1);
+    act(() => {
+      emit({ sessionId: sA, chunk: { delta: ', suite de A' } });
+      emit({ sessionId: sA, chunk: { delta: '', done: true, finishReason: 'cancelled' } });
+    });
+
+    expect(useChatStore.getState().messages.map((m) => m.content)).toEqual(['Question posée dans B', '']);
+    expect(result.current.isStreaming).toBe(true);
+    expect(useChatStore.getState().sessionId).toBe(sB);
   });
 });

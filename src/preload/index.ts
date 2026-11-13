@@ -1367,6 +1367,11 @@ const api = {
         messages: unknown[],
         opts?: {
           /**
+           * Identifiant du tour (UUID), tiré par le renderer pour lier sa bulle
+           * avant l'appel. Absent, le main en tire un.
+           */
+          sessionId?: string;
+          /**
            * Modèle du panneau de chat. N'est appliqué qu'à la génération
            * Ollama locale : sa liste vient de `/api/tags`.
            */

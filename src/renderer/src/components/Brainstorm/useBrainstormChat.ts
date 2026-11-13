@@ -1,19 +1,15 @@
 /**
  * useBrainstormChat (fusion phase 3.2).
  *
- * Glue hook: subscribes to the `fusion:chat:chunk` stream, dispatches into
- * `useChatStore`, and exposes a `send(content)` / `cancel()`
- * pair for the UI. Hook is separate from the store so unit tests can
- * stimulate the store directly with synthesized envelopes.
+ * Glue hook: exposes a `send(content)` / `cancel()` / `reset()` triple for
+ * the UI. The `fusion:chat:*` stream itself lives in `chatStream.ts`, outside
+ * any component (L09-6): a turn belongs to its session from start to end,
+ * whether or not the chat tab is mounted.
  */
 
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  useChatStore,
-  type BrainstormSource,
-  type BrainstormToolCall,
-} from '../../stores/chatStore';
+import { useChatStore } from '../../stores/chatStore';
 import {
   useMcpToolsStore,
   selectEnabledToolNames,
@@ -23,66 +19,14 @@ import { toProviderHistory } from './provider-history';
 import { useRAGQueryStore } from '../../stores/ragQueryStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { projectLifecycle } from '../../lifecycle/projectLifecycle';
-import type { RAGExplanation } from '../../../../../backend/types/chat-source';
-
-interface ToolCallEnv {
-  sessionId: string;
-  callId: string;
-  name: string;
-  status: 'started' | 'done';
-  startedAt?: number;
-  durationMs?: number;
-  ok?: boolean;
-  errorMessage?: string;
-}
-
-interface FusionChatApi {
-  start(
-    messages: Array<{ role: string; content: string }>,
-    opts?: {
-      model?: string;
-      temperature?: number;
-      maxTokens?: number;
-      numCtx?: number;
-      topP?: number;
-      topK?: number;
-      repeatPenalty?: number;
-      think?: boolean;
-      timeoutMs?: number;
-      retrievalOptions?: {
-        documentIds?: string[];
-        collectionKeys?: string[];
-        sourceType?: 'primary' | 'secondary' | 'both' | 'vault' | 'manuscript' | 'readingNotes';
-        includeVault?: boolean;
-        includeManuscript?: boolean;
-        includeReadingNotes?: boolean;
-        topK?: number;
-      };
-      systemPrompt?: { modeId?: string; customText?: string; language?: 'fr' | 'en' };
-      enabledTools?: string[];
-    }
-  ): Promise<{ success: boolean; sessionId?: string; error?: string }>;
-  cancel(sessionId: string): Promise<{ success: boolean; cancelled?: boolean }>;
-  onChunk(
-    cb: (env: {
-      sessionId: string;
-      chunk: {
-        delta: string;
-        thinking?: string;
-        done?: boolean;
-        finishReason?: string;
-      };
-      error?: { code: string; message: string };
-    }) => void
-  ): () => void;
-  onContext(
-    cb: (env: { sessionId: string; sources: BrainstormSource[] }) => void
-  ): () => void;
-  onToolCall(cb: (env: ToolCallEnv) => void): () => void;
-  onExplanation?(
-    cb: (env: { sessionId: string; explanation: RAGExplanation }) => void
-  ): () => void;
-}
+import { unwrapIpc } from '../../utils/ipc-outcome';
+import { translateMessage } from '../../utils/translate-message';
+import {
+  abandonSession,
+  bindSession,
+  ensureChatStream,
+  type FusionChatApi,
+} from './chatStream';
 
 function api(): FusionChatApi | null {
   return (window.electron?.fusion?.chat as FusionChatApi | undefined) ?? null;
@@ -99,11 +43,6 @@ export interface UseBrainstormChat {
 export function useBrainstormChat(): UseBrainstormChat {
   const store = useChatStore();
   const { t } = useTranslation('common');
-  // `t` est capturé par l'effet d'abonnement aux chunks, monté une fois : sans
-  // cette référence, il resterait lié à la langue initiale (fr) alors que
-  // l'interface est passée à la langue de la configuration — vu dans l'app.
-  const tRef = useRef(t);
-  tRef.current = t;
   // Track the current MCP tools list in a ref so the `send` callback
   // doesn't get recreated every time the catalogue changes (fusion 2.5).
   const mcpTools = useMcpToolsList();
@@ -111,108 +50,6 @@ export function useBrainstormChat(): UseBrainstormChat {
   useEffect(() => {
     mcpToolsRef.current = mcpTools;
   }, [mcpTools]);
-  // Remember the current assistant id per active session so we don't mix
-  // them up when the user sends fast follow-ups.
-  const assistantIdBySession = useRef<Map<string, string>>(new Map());
-  // Context can arrive before beginAssistant — buffer until the assistant
-  // message exists so we can attach sources to it.
-  const pendingSources = useRef<Map<string, BrainstormSource[]>>(new Map());
-  // Tool-call events may arrive before beginAssistant — buffer by sessionId.
-  const pendingToolCalls = useRef<Map<string, ToolCallEnv[]>>(new Map());
-  // Explanation may arrive before beginAssistant (unlikely) or after — buffer.
-  const pendingExplanation = useRef<Map<string, RAGExplanation>>(new Map());
-
-  useEffect(() => {
-    const chat = api();
-    if (!chat) return;
-    const unsubChunk = chat.onChunk((env) => {
-      const aId = assistantIdBySession.current.get(env.sessionId);
-      if (!aId) return;
-      if (env.error) {
-        // Le délai d'inactivité est traduit ici : le main n'a pas la langue
-        // de l'interface, le renderer connaît le délai réglé.
-        const message =
-          env.error.code === 'timeout'
-            ? tRef.current('chat.timeout', {
-                minutes: Math.max(
-                  1,
-                  Math.round(useRAGQueryStore.getState().params.timeout / 60_000)
-                ),
-              })
-            : /^(ollama_|provider_|stream_)/.test(env.error.code)
-              ? // Échec côté fournisseur : la cause vient du main, on l'habille.
-                tRef.current('chat.providerError', { message: env.error.message })
-              : env.error.message;
-        store.finishAssistant(
-          aId,
-          env.chunk.finishReason ?? 'error',
-          message
-        );
-        assistantIdBySession.current.delete(env.sessionId);
-        return;
-      }
-      // Raisonnement d'un modèle pensant : accumulé à part, jamais dans la
-      // réponse. Le compter est ce qui rend l'attente lisible.
-      if (env.chunk.thinking) store.appendThinking(aId, env.chunk.thinking);
-      if (env.chunk.delta) store.appendDelta(aId, env.chunk.delta);
-      if (env.chunk.done) {
-        store.finishAssistant(aId, env.chunk.finishReason);
-        assistantIdBySession.current.delete(env.sessionId);
-      }
-    });
-    const unsubCtx = chat.onContext((env) => {
-      const aId = assistantIdBySession.current.get(env.sessionId);
-      if (aId) {
-        store.setSources(aId, env.sources);
-      } else {
-        pendingSources.current.set(env.sessionId, env.sources);
-      }
-    });
-    const applyToolCallEnv = (aId: string, env: ToolCallEnv): void => {
-      if (env.status === 'started') {
-        const tc: BrainstormToolCall = {
-          id: env.callId,
-          name: env.name,
-          status: 'started',
-          startedAt: env.startedAt,
-        };
-        store.addToolCall(aId, tc);
-      } else {
-        store.updateToolCall(aId, env.callId, {
-          status: 'done',
-          durationMs: env.durationMs,
-          ok: env.ok,
-          errorMessage: env.errorMessage,
-        });
-      }
-    };
-    const unsubTool = chat.onToolCall((env) => {
-      const aId = assistantIdBySession.current.get(env.sessionId);
-      if (aId) {
-        applyToolCallEnv(aId, env);
-      } else {
-        const arr = pendingToolCalls.current.get(env.sessionId) ?? [];
-        arr.push(env);
-        pendingToolCalls.current.set(env.sessionId, arr);
-      }
-    });
-    const unsubExpl = chat.onExplanation?.((env) => {
-      const aId = assistantIdBySession.current.get(env.sessionId);
-      if (aId) {
-        store.setExplanation(aId, env.explanation);
-      } else {
-        pendingExplanation.current.set(env.sessionId, env.explanation);
-      }
-    });
-    return () => {
-      unsubChunk();
-      unsubCtx();
-      unsubTool();
-      unsubExpl?.();
-    };
-    // store methods are stable references (zustand), deps intentionally minimal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const send = useCallback(
     async (content: string) => {
@@ -235,8 +72,6 @@ export function useBrainstormChat(): UseBrainstormChat {
       const chat = api();
       // Le projet où la question est posée : sa réponse n'a rien à faire dans un autre (Q11).
       const handle = projectLifecycle.capture();
-      // Capture user message, then prep the assistant placeholder before
-      // firing IPC — chunks may land before the IPC promise resolves.
       const priorMessages = useChatStore.getState().messages;
       store.appendUser(trimmed);
       if (!chat) {
@@ -317,79 +152,59 @@ export function useBrainstormChat(): UseBrainstormChat {
           useMcpToolsStore.getState().overrides
         );
       }
-      const res = await chat.start(payload, startOpts);
+      // La bulle et son lien avant l'appel, sous un identifiant tiré ici : le main peut émettre
+      // avant de répondre — une clé d'API absente finit le tour pendant `start` (S16-1-20).
+      const sessionId = crypto.randomUUID();
+      startOpts.sessionId = sessionId;
+      ensureChatStream(chat);
+      const aId = store.beginAssistant(sessionId);
+      bindSession(sessionId, aId);
+      let failure: string | null = null;
+      try {
+        unwrapIpc(await chat.start(payload, startOpts));
+      } catch (e) {
+        failure = translateMessage(t, e instanceof Error ? e : { message: String(e) });
+      }
       // Un autre projet à l'écran depuis : sa conversation a été vidée, et ce tour n'y apparaît pas,
       // ni réponse, ni attente, ni échec. Le main l'annule à la bascule ; s'il est parti après, on
       // l'arrête ici. Sans projet au départ, l'ouverture d'un projet compte aussi.
       const switched = handle ? !handle.isCurrent() : projectLifecycle.capture() !== null;
       if (switched) {
-        if (res.success && res.sessionId) {
-          pendingSources.current.delete(res.sessionId);
-          pendingToolCalls.current.delete(res.sessionId);
-          pendingExplanation.current.delete(res.sessionId);
-          void chat.cancel(res.sessionId);
-        }
+        abandonSession(sessionId);
+        // Le chat n'est pas vidé quand A reste à l'écran (ouverture de B en échec, même dossier
+        // rouvert) : la bulle, posée avant l'appel, tournait jusqu'à Stop. Une bulle déjà finie par
+        // le flux (clé absente) garde son erreur ; vidé, le chat n'a plus la bulle, et rien ne bouge.
+        const bubble = useChatStore.getState().messages.find((m) => m.id === aId);
+        if (bubble?.pending) store.finishAssistant(aId, 'cancelled');
+        if (failure === null) void chat.cancel(sessionId);
         return;
       }
-      if (!res.success || !res.sessionId) {
+      if (failure !== null) {
         // eslint-disable-next-line no-console
-        console.error('[brainstorm] start failed', res.error);
-        const aId = store.beginAssistant('local-error');
-        store.finishAssistant(
-          aId,
-          'error',
-          res.error
-            ? t('chat.startFailed', { error: res.error })
-            : t('chat.notConfigured')
-        );
-        return;
-      }
-      const aId = store.beginAssistant(res.sessionId);
-      assistantIdBySession.current.set(res.sessionId, aId);
-      // Flush any context event that raced ahead of beginAssistant.
-      const buffered = pendingSources.current.get(res.sessionId);
-      if (buffered) {
-        store.setSources(aId, buffered);
-        pendingSources.current.delete(res.sessionId);
-      }
-      const bufferedTools = pendingToolCalls.current.get(res.sessionId);
-      if (bufferedTools) {
-        for (const env of bufferedTools) {
-          if (env.status === 'started') {
-            store.addToolCall(aId, {
-              id: env.callId,
-              name: env.name,
-              status: 'started',
-              startedAt: env.startedAt,
-            });
-          } else {
-            store.updateToolCall(aId, env.callId, {
-              status: 'done',
-              durationMs: env.durationMs,
-              ok: env.ok,
-              errorMessage: env.errorMessage,
-            });
-          }
-        }
-        pendingToolCalls.current.delete(res.sessionId);
-      }
-      const bufferedExpl = pendingExplanation.current.get(res.sessionId);
-      if (bufferedExpl) {
-        store.setExplanation(aId, bufferedExpl);
-        pendingExplanation.current.delete(res.sessionId);
+        console.error('[brainstorm] start failed', failure);
+        abandonSession(sessionId);
+        store.finishAssistant(aId, 'error', t('chat.startFailed', { error: failure }));
       }
     },
     [store, t]
   );
 
+  // La bulle est arrêtée tout de suite, avant la réponse du main : Effacer enchaîne sur la remise
+  // à zéro, et un tour envoyé aussitôt après ne doit pas être pris pour celui-ci.
   const cancel = useCallback(async () => {
     const sid = useChatStore.getState().sessionId;
     if (!sid) return;
-    const chat = api();
-    await chat?.cancel(sid);
+    abandonSession(sid);
     store.cancel();
-    assistantIdBySession.current.delete(sid);
+    await api()?.cancel(sid);
   }, [store]);
+
+  // Effacer pendant une génération l'arrête : sans quoi le tour effacé continuait côté main, et
+  // sa fin clôturait le tour suivant (S16-1-3).
+  const reset = useCallback(() => {
+    if (useChatStore.getState().sessionId) void cancel();
+    store.reset();
+  }, [cancel, store]);
 
   const isStreaming = store.pendingAssistantId !== null;
   const lastError =
@@ -398,7 +213,7 @@ export function useBrainstormChat(): UseBrainstormChat {
   return {
     send,
     cancel,
-    reset: store.reset,
+    reset,
     isStreaming,
     error: lastError,
   };

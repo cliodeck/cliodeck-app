@@ -14,6 +14,7 @@ import type {
   ChatChunk,
   ChatMessage,
   ChatOptions,
+  LLMProvider,
 } from '../../../../backend/core/llm/providers/base.js';
 
 type FakeChat = (messages: ChatMessage[], opts: ChatOptions) => AsyncIterable<ChatChunk>;
@@ -31,6 +32,8 @@ const bench = vi.hoisted(() => ({
   dialogCalls: [] as Array<{ message: string; detail: string }>,
   /** Le faux modèle sait appeler des outils : le catalogue MCP part avec le tour. */
   tools: false,
+  /** Le faux modèle passe par le décorateur du journal d'usage, comme les vrais. */
+  instrumented: false,
 }));
 
 vi.mock('electron', () => ({
@@ -48,22 +51,27 @@ vi.mock('electron', () => ({
 
 vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../../../backend/core/llm/providers/cliodeck-config-adapter.js')>();
+  const { instrumentLLM } = await import('../../../../backend/core/llm/providers/instrument.js');
   return {
     ...original,
     createRegistryFromClioDeckConfig: () => {
       if (bench.configError) throw new Error(bench.configError);
+      const llm = {
+        id: 'fake', name: 'Fake', model: 'fake-model',
+        capabilities: { chat: true, streaming: true, tools: bench.tools },
+        getStatus: () => ({ state: 'ready' }),
+        chat: (messages: ChatMessage[], opts: ChatOptions) => {
+          bench.seenOpts.push(opts);
+          bench.seenMessages.push(messages);
+          if (!bench.provider) throw new Error('bench.provider non défini');
+          return bench.provider(messages, opts);
+        },
+      };
       return {
-        getLLM: () => ({
-          id: 'fake', name: 'Fake', model: 'fake-model',
-          capabilities: { chat: true, streaming: true, tools: bench.tools },
-          getStatus: () => ({ state: 'ready' }),
-          chat: (messages: ChatMessage[], opts: ChatOptions) => {
-            bench.seenOpts.push(opts);
-            bench.seenMessages.push(messages);
-            if (!bench.provider) throw new Error('bench.provider non défini');
-            return bench.provider(messages, opts);
-          },
-        }),
+        getLLM: () =>
+          bench.instrumented
+            ? instrumentLLM(llm as unknown as LLMProvider, 'ollama', 'http://localhost:11434')
+            : llm,
         dispose: async () => undefined,
       };
     },
@@ -82,7 +90,9 @@ import { cloudConsent } from '../../../../backend/security/cloud-consent.js';
 import { historyService } from '../history-service.js';
 import { mcpClientsService } from '../mcp-clients-service.js';
 import { HistoryManager } from '../../../../backend/core/history/HistoryManager.js';
-import { getJournalContext } from '../../../../backend/core/usage-journal/context.js';
+import { getJournalContext, setInferenceSink } from '../../../../backend/core/usage-journal/context.js';
+import type { RecordInferenceInput } from '../../../../backend/core/usage-journal/types.js';
+import { OperationBusyError } from '../cancellable-operation.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -115,15 +125,16 @@ async function* waitForAbort(_messages: ChatMessage[], opts: ChatOptions): Async
   yield { delta: '', done: true, finishReason: 'cancelled' };
 }
 
-function startTurn(opts?: { timeoutMs?: number }): { sessionId: string; sent: Sent[] } {
+function startTurn(opts?: { timeoutMs?: number }, sessionId?: string): { sessionId: string; sent: Sent[] } {
   const { webContents, sent } = captureWebContents();
-  const sessionId = fusionChatService.start({
+  const started = fusionChatService.start({
     webContents,
     messages: [{ role: 'user', content: 'question' }],
     systemPrompt: { language: 'fr' },
     opts,
+    sessionId,
   });
-  return { sessionId, sent };
+  return { sessionId: started, sent };
 }
 
 const WAIT = { timeout: 5_000 };
@@ -152,6 +163,8 @@ afterEach(() => {
   bench.dialogResponse = 0;
   bench.dialogCalls.length = 0;
   bench.tools = false;
+  bench.instrumented = false;
+  setInferenceSink(undefined);
 });
 
 describe('banc du pump de chat', () => {
@@ -224,6 +237,70 @@ describe('banc du pump de chat', () => {
     expect(seen.op?.kind).toBe('chat');
     expect(seen.op?.cancelReason).toBe('timeout');
     await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+  });
+
+  /**
+   * Le renderer choisit l'identifiant et lie son message avant l'appel (L09-6) : tout ce que le tour
+   * émet le porte, y compris l'erreur de configuration émise avant que `start` ne rende la main
+   * (S16-1-20). Témoin du contrat sur lequel repose le correctif, côté renderer.
+   */
+  it('l’identifiant donné par l’appelant porte tout le tour, config_error compris', async () => {
+    const SESSION = '5d1f0c2a-8e4b-4c7d-9a6f-3b2e1d0c9f8a';
+    bench.configError = 'clé API absente';
+    const { sessionId, sent } = startTurn(undefined, SESSION);
+    expect(sessionId).toBe(SESSION);
+    // Émis pendant `start`, avant toute attente : c'est ce qui le faisait perdre au renderer.
+    expect(terminal(sent)?.sessionId).toBe(SESSION);
+    expect(terminal(sent)?.error?.code).toBe('config_error');
+    await vi.waitFor(() => expect(operations.find(SESSION)).toBeNull(), WAIT);
+  });
+
+  it('un identifiant déjà en cours est refusé, et le tour qui le porte continue', async () => {
+    const SESSION = '7a3e9b1c-2d4f-4e6a-8b0c-1f2e3d4c5b6a';
+    bench.provider = waitForAbort;
+    const first = startTurn(undefined, SESSION);
+    await vi.waitFor(() => expect(bench.seenOpts).toHaveLength(1), WAIT);
+
+    expect(() => startTurn(undefined, SESSION)).toThrow(OperationBusyError);
+
+    expect(operations.find(SESSION)?.state).toBe('running');
+    expect(bench.seenOpts[0].signal?.aborted).toBe(false);
+    fusionChatService.cancel(SESSION);
+    await vi.waitFor(() => expect(terminal(first.sent)?.chunk.finishReason).toBe('cancelled'), WAIT);
+    await vi.waitFor(() => expect(operations.find(SESSION)).toBeNull(), WAIT);
+  });
+
+  /**
+   * « Effacer » annule désormais le tour (S16-1-3) : le journal d'usage n'inscrit que ce que le
+   * modèle a produit avant l'annulation, pas la réponse entière que le tour effacé générait jusqu'ici
+   * en arrière-plan.
+   */
+  it('annuler arrête le compte du journal d’usage à ce qui a été produit', async () => {
+    const recorded: RecordInferenceInput[] = [];
+    setInferenceSink((e) => recorded.push(e));
+    bench.instrumented = true;
+    const REST = 'suite de la réponse '.repeat(200);
+    bench.provider = async function* (messages, opts) {
+      yield { delta: 'Début', done: false };
+      if (!opts.signal?.aborted) {
+        await new Promise<void>((resolve) => {
+          opts.signal?.addEventListener('abort', () => resolve(), { once: true });
+        });
+      }
+      if (!opts.signal?.aborted) yield { delta: REST, done: false };
+      yield* waitForAbort(messages, opts);
+    };
+    const { sessionId, sent } = startTurn();
+    await vi.waitFor(() => expect(chunks(sent).some((e) => e.chunk.delta === 'Début')).toBe(true), WAIT);
+
+    fusionChatService.cancel(sessionId);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+
+    const completions = recorded.filter((e) => e.kind === 'completion');
+    expect(completions).toHaveLength(1);
+    // « Début » : 5 caractères, 2 jetons estimés ; la réponse entière en ferait plus de mille.
+    expect(completions[0].completionTokens).toBe(2);
+    expect(chunks(sent).map((e) => e.chunk.delta).join('')).toBe('Début');
   });
 
   it('configuration invalide : config_error, sans appel au fournisseur', async () => {

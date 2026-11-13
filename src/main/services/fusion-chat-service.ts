@@ -425,7 +425,11 @@ export function isFreeMode(sp: FusionChatSystemPromptOptions | undefined): boole
 export interface ChatStartArgs {
   webContents: WebContents;
   messages: ChatMessage[];
-  /** Optional caller-supplied id; otherwise generated. */
+  /**
+   * Optional caller-supplied id; otherwise generated. Le renderer donne le sien pour lier sa bulle
+   * avant l'appel (L09-6). Un identifiant déjà en cours est refusé (`OperationBusyError`) : deux
+   * tours ne partagent jamais un flux.
+   */
   sessionId?: string;
   opts?: {
     /**

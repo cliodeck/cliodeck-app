@@ -761,6 +761,9 @@ export const FusionChatStartSchema = z.object({
   messages: z.array(ChatMessageSchema).min(1, 'messages cannot be empty'),
   opts: z
     .object({
+      // Identifiant du tour, tiré par le renderer pour lier sa bulle avant l'appel : un événement
+      // émis avant la réponse (clé d'API absente) trouve ainsi son message (L09-6).
+      sessionId: z.uuid().optional(),
       model: z.string().optional(),
       temperature: z.number().min(0).max(2).optional(),
       maxTokens: z.number().int().positive().optional(),
