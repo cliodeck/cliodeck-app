@@ -12,18 +12,28 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { EXPORT_TIME_LIMIT_MS } from '@backend/types/export-limits';
 
 /** Ce que chaque test fait varier : le type du projet et le fichier ouvert. */
-const opened = vi.hoisted(() => ({ type: 'article', file: '/tmp/demo/document.md' }));
+const opened = vi.hoisted(() => ({
+  type: 'article',
+  file: '/tmp/demo/document.md',
+  /** Un objet par type, comme le store en garde un : la modale ne se réinitialise pas à chaque rendu. */
+  projects: new Map<string, Record<string, string>>(),
+}));
 
 vi.mock('../../../stores/projectStore', () => ({
-  useProjectStore: () => ({
-    currentProject: {
-      name: 'demo',
-      path: '/tmp/demo',
-      type: opened.type,
-      bibliography: '/tmp/demo/biblio.bib',
-      cslPath: '',
-    },
-  }),
+  useProjectStore: () => {
+    let currentProject = opened.projects.get(opened.type);
+    if (!currentProject) {
+      currentProject = {
+        name: 'demo',
+        path: '/tmp/demo',
+        type: opened.type,
+        bibliography: '/tmp/demo/biblio.bib',
+        cslPath: '',
+      };
+      opened.projects.set(opened.type, currentProject);
+    }
+    return { currentProject };
+  },
 }));
 vi.mock('../../../stores/editorStore', () => ({
   useEditorStore: () => ({
@@ -54,9 +64,12 @@ import { useManuscriptStore } from '../../../stores/manuscriptStore';
 
 interface ExportOutcome {
   success: boolean;
+  outputPath?: string;
   error?: string;
   errorCode?: string;
+  errorParams?: Record<string, string | number>;
   timeLimitMinutes?: number;
+  warnings?: Array<{ code: string; params?: Record<string, string | number> }>;
   unresolvedCitations?: string[];
   missingCsl?: string;
   unusableCsl?: { path: string; reason: 'dependent' | 'unreadable' | 'numeric' };
@@ -609,7 +622,7 @@ it('le menu « Bibliographie » pendant un export Word ne fait pas perdre les ci
   });
   finish({ success: true, unresolvedCitations: ['absente'] });
 
-  expect(await screen.findByTestId('word-export-unresolved')).toBeInTheDocument();
+  expect(await screen.findByTestId('export-unresolved-citations')).toBeInTheDocument();
 });
 
 /**
@@ -660,3 +673,60 @@ describe.each([
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * L07-2 : un export abouti avec des réserves (une image introuvable, remplacée par sa légende)
+ * répond `success: true` et ses avertissements (`warnings`, enveloppe d'`outcomeResponse`). La
+ * modale reste ouverte pour les dire, par `ExportWarnings`, le seul affichage des avertissements
+ * d'export (A27).
+ */
+describe.each(MODALS.filter((m) => m.name !== 'présentation'))(
+  'modale d’export $name : avertissements de l’export',
+  ({ Modal, exportLabel, exportingLabel }) => {
+    it('les dit, et reste ouverte', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const finish = installElectron();
+      const onClose = vi.fn();
+      render(<Host Modal={Modal} onClose={onClose} />);
+      await startExport(exportLabel, exportingLabel);
+
+      finish({
+        success: true,
+        warnings: [{ code: 'export.imagesNotFound', params: { files: 'images/plan.png', count: 1 } }],
+      });
+
+      expect(await screen.findByTestId('export-warning')).toHaveTextContent('messages.export.imagesNotFound');
+      await advance(10_000);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('un chemin de sortie relatif : le succès dit où le main a écrit, dans le projet', async () => {
+      const finish = installElectron();
+      const { container } = render(<Host Modal={Modal} onClose={vi.fn()} />);
+      const output = container.querySelector('input[id$="-export-output"]') as HTMLInputElement;
+      fireEvent.change(output, { target: { value: 'article.out' } });
+      await startExport(exportLabel, exportingLabel);
+
+      finish({ success: true, outputPath: '/tmp/demo/article.out' });
+
+      await waitFor(() => expect(container.querySelector('.export-success')).not.toBeNull());
+      expect(output.value).toBe('/tmp/demo/article.out');
+    });
+
+    it('un échec qui porte son code se dit par sa phrase, pas par la sortie de pandoc', async () => {
+      const finish = installElectron();
+      const { container } = render(<Host Modal={Modal} onClose={vi.fn()} />);
+      await startExport(exportLabel, exportingLabel);
+
+      finish({
+        success: false,
+        error: 'Pandoc failed with code 43:\n! Package svg Error',
+        errorCode: 'export.imageNeedsRsvgConvert',
+        errorParams: { file: 'images/schema.svg' },
+      });
+
+      await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+      expect(container.querySelector('.export-error')).toHaveTextContent('messages.export.imageNeedsRsvgConvert');
+    });
+  }
+);

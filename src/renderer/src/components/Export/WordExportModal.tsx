@@ -6,6 +6,13 @@ import { useEditorStore } from '../../stores/editorStore';
 import { useManuscriptStore } from '../../stores/manuscriptStore';
 import { resolveManuscriptContent } from '../../services/export-manuscript-content';
 import { exportErrorMessage, exportThrownMessage } from './export-error';
+import {
+  ExportWarnings,
+  hasExportWarnings,
+  NO_EXPORT_WARNINGS,
+  readExportWarnings,
+  type ExportWarningsValue,
+} from './ExportWarnings';
 import { startExportReadLimit } from './export-read-limit';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useMountedTimeout } from '../../hooks/useMountedTimeout';
@@ -16,29 +23,6 @@ import {
 } from './ExportCitationSection';
 import { backdropClose } from '../../utils/backdropClose';
 import './PDFExportModal.css'; // Reuse the same CSS
-
-/**
- * `WordExportResult.unusableCsl`, côté main : pourquoi le moteur interne n'a
- * pas appliqué le style du projet, et le message qui le dit.
- */
-const UNUSABLE_CSL_MESSAGES = {
-  dependent: 'export.cslDependent',
-  unreadable: 'export.cslUnreadable',
-  numeric: 'export.cslNumeric',
-} as const;
-
-interface UnusableCsl {
-  path: string;
-  reason: keyof typeof UNUSABLE_CSL_MESSAGES;
-}
-
-/** Le résultat arrive de l'IPC sans type : seule une forme connue s'affiche. */
-function readUnusableCsl(value: unknown): UnusableCsl | null {
-  if (!value || typeof value !== 'object') return null;
-  const { path, reason } = value as { path?: unknown; reason?: unknown };
-  const known = (Object.keys(UNUSABLE_CSL_MESSAGES) as UnusableCsl['reason'][]).find((r) => r === reason);
-  return typeof path === 'string' && known ? { path, reason: known } : null;
-}
 
 interface WordExportModalProps {
   isOpen: boolean;
@@ -63,12 +47,9 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   // La minuterie de succès appelle le `onClose` du parent : démontée, la
   // modale ne doit plus fermer ce qui serait ouvert entre-temps.
   const afterSuccess = useMountedTimeout();
-  const [unresolvedCitations, setUnresolvedCitations] = useState<string[]>([]);
-  // Style du projet introuvable : le document est écrit sans lui.
-  const [missingCsl, setMissingCsl] = useState<string | null>(null);
-  // Sans pandoc, style du projet que le moteur interne ne sait pas appliquer :
-  // le document garde ses clés.
-  const [unusableCsl, setUnusableCsl] = useState<UnusableCsl | null>(null);
+  // Le document est écrit, avec des réserves (clés non résolues, style du
+  // projet introuvable ou inapplicable, image introuvable) : `ExportWarnings` les dit.
+  const [warnings, setWarnings] = useState<ExportWarningsValue>(NO_EXPORT_WARNINGS);
   const [hasTemplate, setHasTemplate] = useState(false);
   const [templatePath, setTemplatePath] = useState<string | null>(null);
   const [citation, setCitation] = useState<ExportCitationValue>({
@@ -173,9 +154,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
     setIsExporting(true);
     setError(null);
     setSuccess(false);
-    setUnresolvedCitations([]);
-    setMissingCsl(null);
-    setUnusableCsl(null);
+    setWarnings(NO_EXPORT_WARNINGS);
     // Verrou posé pour toute la durée : l'assemblage lit les chapitres
     // pendant plusieurs secondes, une renumérotation lancée entre-temps
     // les réécrirait sous lui.
@@ -254,19 +233,16 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         },
       });
 
-      const unresolved: string[] = Array.isArray(result.unresolvedCitations)
-        ? result.unresolvedCitations
-        : [];
-      const cslMissing = typeof result.missingCsl === 'string' ? result.missingCsl : null;
-      const cslUnusable = readUnusableCsl(result.unusableCsl);
-      if (result.success && (unresolved.length > 0 || cslMissing || cslUnusable)) {
-        // Le document est écrit, mais il contient ces clés telles quelles, ou
-        // n'a pas le style du projet : la modale reste ouverte pour que
-        // l'auteur le lise.
+      const reserves = readExportWarnings(result);
+      // Le main résout un chemin relatif contre le projet : le champ, et le
+      // message de succès qui le reprend, disent où le fichier est écrit.
+      if (result.success && typeof result.outputPath === 'string') setOutputPath(result.outputPath);
+      if (result.success && hasExportWarnings(reserves)) {
+        // Le document est écrit, mais il contient des clés telles quelles,
+        // n'a pas le style du projet ou a perdu une image : la modale reste
+        // ouverte pour que l'auteur le lise.
         setSuccess(true);
-        setUnresolvedCitations(unresolved);
-        setMissingCsl(cslMissing);
-        setUnusableCsl(cslUnusable);
+        setWarnings(reserves);
         setIsExporting(false);
       } else if (result.success) {
         setSuccess(true);
@@ -301,9 +277,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
       // Reset state
       setError(null);
       setSuccess(false);
-      setUnresolvedCitations([]);
-      setMissingCsl(null);
-      setUnusableCsl(null);
+      setWarnings(NO_EXPORT_WARNINGS);
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
@@ -447,30 +421,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
             </div>
           )}
 
-          {unresolvedCitations.length > 0 && (
-            <div className="export-error" data-testid="word-export-unresolved">
-              <AlertCircle size={16} />
-              <span>
-                {t('export.word.unresolvedCitations', { keys: unresolvedCitations.join(', ') })}
-              </span>
-            </div>
-          )}
-
-          {missingCsl && (
-            <div className="export-error" data-testid="export-csl-missing">
-              <AlertCircle size={16} />
-              <span>{t('export.cslMissing', { file: missingCsl })}</span>
-            </div>
-          )}
-
-          {unusableCsl && (
-            <div className="export-error" data-testid="export-csl-unusable">
-              <AlertCircle size={16} />
-              <span>
-                {t(UNUSABLE_CSL_MESSAGES[unusableCsl.reason], { file: unusableCsl.path })}
-              </span>
-            </div>
-          )}
+          <ExportWarnings warnings={warnings} />
         </div>
 
         <div className="pdf-export-footer">

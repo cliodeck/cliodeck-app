@@ -2684,6 +2684,12 @@
     "vault": {
       "notConfigured": "Aucun vault n'est lié à ce projet : liez-en un dans les Réglages.",
       "pathMissing": "Le dossier du vault est introuvable : {{path}}. Rebranchez le disque qui le porte, ou liez le vault de nouveau dans les Réglages."
+    },
+    "export": {
+      "imagesNotFound_one": "Image introuvable, remplacée par sa légende : {{files}}. Placez-la dans le dossier du projet (ou dans chapters/ pour un chapitre de livre), ou corrigez son chemin.",
+      "imagesNotFound_other": "Images introuvables, remplacées par leur légende : {{files}}. Placez-les dans le dossier du projet (ou dans chapters/ pour un chapitre de livre), ou corrigez leur chemin.",
+      "imageNeedsRsvgConvert": "L'image SVG {{file}} ne peut pas entrer dans le PDF sans l'outil rsvg-convert, qui n'est pas installé. Installez-le (sous macOS : brew install librsvg), ou enregistrez l'image en PNG, puis relancez l'export.",
+      "imageNotConverted": "L'export PDF ne sait pas lire le format de l'image {{file}}. Enregistrez-la en PNG ou en JPEG, puis relancez l'export."
     }
   }
 }

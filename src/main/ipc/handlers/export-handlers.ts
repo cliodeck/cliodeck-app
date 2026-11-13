@@ -5,9 +5,22 @@ import { ipcMain, BrowserWindow, powerMonitor } from 'electron';
 import { pdfExportService } from '../../services/pdf-export.js';
 import { wordExportService } from '../../services/word-export.js';
 import { revealJsExportService } from '../../services/revealjs-export.js';
-import { watchSystemSleep } from '../../services/export-time-limit.js';
-import { successResponse, errorResponse } from '../utils/error-handler.js';
+import { watchSystemSleep, type ExportResult } from '../../services/export-time-limit.js';
+import { partial } from '../../../../backend/types/outcome.js';
+import { successResponse, errorResponse, outcomeResponse } from '../utils/error-handler.js';
 import { validate, PDFExportSchema, RevealJSExportSchema, WordExportSchema, StringPathSchema } from '../utils/validation.js';
+
+/**
+ * Un export abouti avec des réserves est une réussite partielle (L09-2) : ses avertissements
+ * partent dans l'enveloppe d'`outcomeResponse` (`warnings`), que la modale relit par
+ * `readExportWarnings`. Un échec part tel quel : `errorCode`, `errorParams` et `timeLimitMinutes`
+ * sont déjà ceux que lit `exportErrorMessage`.
+ */
+function exportResponse(result: ExportResult) {
+  if (!result.success) return result;
+  const { success: _success, warnings = [], ...value } = result;
+  return outcomeResponse(partial(value, warnings));
+}
 
 export function setupExportHandlers() {
   watchSystemSleep(powerMonitor);
@@ -43,7 +56,7 @@ export function setupExportHandlers() {
         success: result.success,
         outputPath: result.outputPath,
       });
-      return result;
+      return exportResponse(result);
     } catch (error: unknown) {
       console.error('❌ pdf-export:export error:', error);
       return errorResponse(error);
@@ -71,7 +84,7 @@ export function setupExportHandlers() {
         success: result.success,
         outputPath: result.outputPath,
       });
-      return result;
+      return exportResponse(result);
     } catch (error: unknown) {
       console.error('❌ word-export:export error:', error);
       return errorResponse(error);

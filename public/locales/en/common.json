@@ -2684,6 +2684,12 @@
     "vault": {
       "notConfigured": "No vault is linked to this project: link one in Settings.",
       "pathMissing": "The vault folder cannot be found: {{path}}. Reconnect the drive that holds it, or link the vault again in Settings."
+    },
+    "export": {
+      "imagesNotFound_one": "Image not found, replaced by its caption: {{files}}. Put it in the project folder (or in chapters/ for a book chapter), or correct its path.",
+      "imagesNotFound_other": "Images not found, replaced by their captions: {{files}}. Put them in the project folder (or in chapters/ for a book chapter), or correct their paths.",
+      "imageNeedsRsvgConvert": "The SVG image {{file}} cannot go into the PDF without the rsvg-convert tool, which is not installed. Install it (on macOS: brew install librsvg), or save the image as PNG, then run the export again.",
+      "imageNotConverted": "The PDF export cannot read the format of the image {{file}}. Save it as PNG or JPEG, then run the export again."
     }
   }
 }

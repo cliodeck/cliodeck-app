@@ -13,6 +13,13 @@ import {
 import './PDFExportModal.css';
 
 import { exportErrorMessage, exportThrownMessage } from './export-error';
+import {
+  ExportWarnings,
+  hasExportWarnings,
+  NO_EXPORT_WARNINGS,
+  readExportWarnings,
+  type ExportWarningsValue,
+} from './ExportWarnings';
 import { readOptionalConfig, startExportReadLimit } from './export-read-limit';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useMountedTimeout } from '../../hooks/useMountedTimeout';
@@ -41,8 +48,9 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   // La minuterie de succès appelle le `onClose` du parent : démontée, la
   // modale ne doit plus fermer ce qui serait ouvert entre-temps.
   const afterSuccess = useMountedTimeout();
-  // Style du projet introuvable : le PDF est écrit sans lui.
-  const [missingCsl, setMissingCsl] = useState<string | null>(null);
+  // Le PDF est écrit, avec des réserves (style du projet introuvable, image
+  // introuvable remplacée par sa légende) : `ExportWarnings` les dit.
+  const [warnings, setWarnings] = useState<ExportWarningsValue>(NO_EXPORT_WARNINGS);
   const [dependenciesChecked, setDependenciesChecked] = useState(false);
   const [hasPandoc, setHasPandoc] = useState(false);
   const [hasXelatex, setHasXelatex] = useState(false);
@@ -160,7 +168,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
     setIsExporting(true);
     setError(null);
     setSuccess(false);
-    setMissingCsl(null);
+    setWarnings(NO_EXPORT_WARNINGS);
     // Verrou posé pour toute la durée : l'assemblage lit les chapitres
     // pendant plusieurs secondes, une renumérotation lancée entre-temps
     // les réécrirait sous lui.
@@ -257,11 +265,15 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         },
       });
 
-      if (result.success && typeof result.missingCsl === 'string') {
-        // Le PDF est écrit, mais sans le style du projet : la modale reste
-        // ouverte pour que l'auteur le lise.
+      const reserves = readExportWarnings(result);
+      // Le main résout un chemin relatif contre le projet : le champ, et le
+      // message de succès qui le reprend, disent où le fichier est écrit.
+      if (result.success && typeof result.outputPath === 'string') setOutputPath(result.outputPath);
+      if (result.success && hasExportWarnings(reserves)) {
+        // Le PDF est écrit, mais il lui manque quelque chose (le style du
+        // projet, une image) : la modale reste ouverte pour que l'auteur le lise.
         setSuccess(true);
-        setMissingCsl(result.missingCsl);
+        setWarnings(reserves);
         setIsExporting(false);
       } else if (result.success) {
         setSuccess(true);
@@ -296,7 +308,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
       // Reset state
       setError(null);
       setSuccess(false);
-      setMissingCsl(null);
+      setWarnings(NO_EXPORT_WARNINGS);
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
@@ -478,12 +490,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
             </div>
           )}
 
-          {missingCsl && (
-            <div className="export-error" data-testid="export-csl-missing">
-              <AlertCircle size={16} />
-              <span>{t('export.cslMissing', { file: missingCsl })}</span>
-            </div>
-          )}
+          <ExportWarnings warnings={warnings} />
         </div>
 
         <div className="pdf-export-footer">
