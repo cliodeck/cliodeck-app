@@ -2655,5 +2655,10 @@
     "title": "Ollama demande macOS 14",
     "message": "Vous utilisez macOS {{version}} : Ollama ne peut pas y être installé. Pour une IA locale, il reste les modèles embarqués, plus modestes : dans Paramètres, mode Expert, téléchargez un modèle de génération et le modèle d'embeddings. Sinon, choisissez un fournisseur en ligne.",
     "details": "Sans modèle d'embeddings, vos sources ne peuvent être ni indexées ni interrogées. Le moteur des modèles embarqués est prévu pour macOS 14 : il a répondu sous macOS 12 lors d'un essai, mais rien n'est garanti en dessous. Ce message ne reviendra pas une fois fermé."
+  },
+  "messages": {
+    "errors": {
+      "noResponse": "ClioDeck n'a reçu aucune réponse à cette demande."
+    }
   }
 }
