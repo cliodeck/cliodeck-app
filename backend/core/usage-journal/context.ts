@@ -44,6 +44,8 @@ export interface JournalContext {
   recipeId?: string;
   /** Présent uniquement à l'intérieur d'un `runBatch`. */
   batch?: BatchAccumulator;
+  /** Posé par `runUnrecorded` : les appels de ce scope ne s'inscrivent pas (J11). */
+  unrecorded?: boolean;
 }
 
 const storage = new AsyncLocalStorage<JournalContext>();
@@ -84,6 +86,16 @@ export function originWorkspaceRoot(): string | undefined {
   return storage.getStore()?.workspaceRoot ?? workspaceRootSource?.();
 }
 
+/**
+ * Exécute `fn` hors du journal d'usage : ses appels aux fournisseurs ne s'inscrivent pas. Réservé
+ * aux gestes de l'app sans conséquence méthodologique pour l'auteur, comme le préchauffage du modèle
+ * d'embeddings à l'ouverture du projet (décision de l'auteur, J11). Un appel lancé pour l'auteur, ou
+ * en son nom, s'inscrit toujours.
+ */
+export function runUnrecorded<T>(fn: () => T): T {
+  return runWithJournalContext({ unrecorded: true }, fn);
+}
+
 /** Modifie le contexte courant en place (no-op hors scope). */
 export function patchJournalContext(patch: Partial<JournalContext>): void {
   const ctx = storage.getStore();
@@ -102,8 +114,9 @@ export function setInferenceSink(sink: InferenceSink | undefined): void {
   inferenceSink = sink;
 }
 
-/** Émet un événement factuel vers le sink, sans jamais lever (best-effort). */
+/** Émet un événement factuel vers le sink, sans jamais lever (best-effort). Rien hors journal. */
 export function recordInference(input: RecordInferenceInput): void {
+  if (storage.getStore()?.unrecorded) return;
   try {
     inferenceSink?.(input);
   } catch {

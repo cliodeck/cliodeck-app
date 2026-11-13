@@ -196,19 +196,6 @@ describe('usage-journal provider instrumentation', () => {
     expect(events[0]).toMatchObject({ kind: 'completion', status: 'error' });
   });
 
-  it('complete() annulé rejette, mais reste « ok » au journal, comme un chat() annulé', async () => {
-    const llm = instrumentLLM(
-      new FakeLLM([{ delta: 'Début', done: true, finishReason: 'cancelled' }]),
-      'ollama'
-    );
-    await expect(llm.complete('q')).rejects.toMatchObject({
-      name: 'ProviderCallError',
-      finishReason: 'cancelled',
-    });
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ kind: 'completion', status: 'ok' });
-  });
-
   // Une synthèse coupée chez un fournisseur facturé a déjà produit du texte et annoncé son usage :
   // le journal le garde, comme pour un chat() coupé au même endroit (revue de L09-7).
   it('complete() tombé après du texte garde au journal le texte produit et l’usage annoncé', async () => {
@@ -239,10 +226,11 @@ describe('usage-journal provider instrumentation', () => {
   });
 
   it('un repli enveloppé se résout à travers le décorateur, sans quitter le journal', async () => {
-    const named = (model: string, up: boolean): EmbeddingProvider => {
+    // Nommés comme les vrais : le secours (le modèle embarqué) est inscrit sous son nom (S10-1-11).
+    const named = (id: string, model: string, up: boolean): EmbeddingProvider => {
       const base = new FakeEmbedding();
       return {
-        id: base.id,
+        id,
         name: base.name,
         dimension: base.dimension,
         model,
@@ -253,14 +241,17 @@ describe('usage-journal provider instrumentation', () => {
       };
     };
     const emb = instrumentEmbedding(
-      new FallbackEmbeddingProvider(named('primaire', false), named('secours', true)),
+      new FallbackEmbeddingProvider(
+        named('ollama-embedding', 'primaire', false),
+        named('embedded-embedding', 'secours', true)
+      ),
       'ollama'
     );
     const chosen = await resolveEmbeddingProvider(emb);
     expect(chosen.model).toBe('secours');
     await chosen.embed(['abcd']);
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ kind: 'embedding', provider: 'ollama', model: 'secours' });
+    expect(events[0]).toMatchObject({ kind: 'embedding', provider: 'embedded', model: 'secours', isLocal: true });
 
     const plain = instrumentEmbedding(new FakeEmbedding(), 'ollama');
     expect(await resolveEmbeddingProvider(plain)).toBe(plain);

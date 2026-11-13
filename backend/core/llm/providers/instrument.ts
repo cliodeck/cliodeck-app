@@ -11,8 +11,15 @@
  *  - `LLMProvider.complete()` jette l'usage dans tous les providers → on ré-implémente
  *    `complete()` en consommant le `chat()` interne pour récupérer les tokens.
  *
- * Un tour qui finit par un chunk terminal `error` est une erreur au journal, même sans exception :
- * le contrat de `base.ts` interdit de lever une fois le flux commencé (L09-7).
+ * Le statut est l'issue réelle de l'appel, lue sur le chunk terminal : `error`, `cancelled` (abandon,
+ * ni réussi ni en panne), sinon `ok`, même sans exception : le contrat de `base.ts` interdit de lever
+ * une fois le flux commencé (L09-7, L09-16). Un appel tombé ou annulé sans rien produire ni annoncer
+ * n'a pas de jetons : le fournisseur n'a peut-être jamais reçu le prompt (S06-2-5).
+ *
+ * Derrière un repli (`FallbackLLMProvider`, `FallbackEmbeddingProvider`), l'appel est au fournisseur
+ * retenu, pas à celui de la configuration : le modèle embarqué qui répond ou calcule les vecteurs,
+ * Ollama arrêté, n'est pas inscrit comme Ollama, et sa localité se calcule pour lui, à chaque appel
+ * (S05-1-17, S10-1-11).
  *
  * Agrégation des indexations en masse : à l'intérieur d'un scope `runBatch`, `embed()`
  * accumule dans le contexte au lieu d'émettre un événement par chunk.
@@ -38,24 +45,35 @@ import {
   recordInference,
 } from '../../usage-journal/context.js';
 import { isLocalProvider } from '../../usage-journal/is-local.js';
+import type { InferenceStatus } from '../../usage-journal/types.js';
 import { collectCompletion, ProviderCallError } from './collect.js';
-import { resolveEmbeddingProvider } from './fallback.js';
+import {
+  FallbackEmbeddingProvider,
+  FallbackLLMProvider,
+  resolveEmbeddingProvider,
+} from './fallback.js';
 
 /** Estimation grossière de tokens quand l'API n'en fournit pas (~4 caractères/token). */
 function estimateTokens(chars: number): number {
   return Math.ceil(chars / 4);
 }
 
-class InstrumentedLLM implements LLMProvider {
-  private readonly isLocal: boolean;
+/** Le statut d'un appel fini par ce chunk terminal. La limite de longueur n'est pas une panne. */
+function terminalStatus(finishReason: ChatChunk['finishReason']): InferenceStatus {
+  return finishReason === 'error' || finishReason === 'cancelled' ? finishReason : 'ok';
+}
 
+/** Ce chunk apporte-t-il quelque chose du modèle : texte, raisonnement ou appel d'outil ? */
+function carriesOutput(chunk: ChatChunk): boolean {
+  return chunk.delta.length > 0 || !!chunk.thinking || !!chunk.toolCall;
+}
+
+class InstrumentedLLM implements LLMProvider {
   constructor(
     private readonly inner: LLMProvider,
     private readonly providerId: string,
-    baseUrl?: string
-  ) {
-    this.isLocal = isLocalProvider(providerId, baseUrl, inner.model);
-  }
+    private readonly baseUrl?: string
+  ) {}
 
   get id(): string {
     return this.inner.id;
@@ -88,20 +106,24 @@ class InstrumentedLLM implements LLMProvider {
     const workspaceRoot = originWorkspaceRoot();
     const promptChars = messages.reduce((s, m) => s + m.content.length, 0);
     let completionChars = 0;
+    let produced = false;
     let usage: ChatChunk['usage'];
-    let errored = false;
+    let status: InferenceStatus = 'ok';
     try {
       for await (const chunk of this.inner.chat(messages, opts)) {
         completionChars += chunk.delta.length;
+        if (carriesOutput(chunk)) produced = true;
         if (chunk.usage) usage = chunk.usage;
-        if (chunk.done && chunk.finishReason === 'error') errored = true;
+        // Retenu avant le `yield` : un consommateur qui s'arrête au terminal (`collectCompletion`
+        // lève dessus) ne rend pas la main à cette boucle.
+        if (chunk.done) status = terminalStatus(chunk.finishReason);
         yield chunk;
       }
     } catch (err) {
-      errored = true;
+      status = opts?.signal?.aborted ? 'cancelled' : 'error';
       throw err;
     } finally {
-      this.emitCompletion(start, workspaceRoot, promptChars, completionChars, usage, errored);
+      this.emitCompletion(start, workspaceRoot, promptChars, { completionChars, produced, usage, status });
     }
   }
 
@@ -115,12 +137,14 @@ class InstrumentedLLM implements LLMProvider {
     const workspaceRoot = originWorkspaceRoot();
     const promptChars = prompt.length;
     let completionChars = 0;
+    let produced = false;
     let usage: ChatChunk['usage'];
-    let errored = false;
+    let status: InferenceStatus = 'ok';
     const stream = this.inner.chat([{ role: 'user', content: prompt }], opts);
     async function* tally(): AsyncIterable<ChatChunk> {
       for await (const chunk of stream) {
         completionChars += chunk.delta.length;
+        if (carriesOutput(chunk)) produced = true;
         if (chunk.usage) usage = chunk.usage;
         yield chunk;
       }
@@ -128,62 +152,114 @@ class InstrumentedLLM implements LLMProvider {
     try {
       return (await collectCompletion(this.inner, tally())).text;
     } catch (err) {
-      // Un appel annulé n'est pas une panne : il reste « ok », comme un chat() annulé.
-      errored = !(err instanceof ProviderCallError && err.finishReason === 'cancelled');
+      // Un appel abandonné (« Arrêter », fermeture du projet) est « cancelled », pas une panne (L09-16).
+      status =
+        err instanceof ProviderCallError
+          ? err.finishReason
+          : opts?.signal?.aborted
+            ? 'cancelled'
+            : 'error';
       throw err;
     } finally {
-      this.emitCompletion(start, workspaceRoot, promptChars, completionChars, usage, errored);
+      this.emitCompletion(start, workspaceRoot, promptChars, { completionChars, produced, usage, status });
     }
+  }
+
+  /**
+   * Le fournisseur qui a servi l'appel : derrière un repli, celui qu'il a retenu, lu après son choix.
+   */
+  private servedBy(): string {
+    return this.inner instanceof FallbackLLMProvider ? this.inner.activeId : this.providerId;
   }
 
   private emitCompletion(
     startMs: number,
     workspaceRoot: string | undefined,
     promptChars: number,
-    completionChars: number,
-    usage: ChatChunk['usage'],
-    errored: boolean
+    outcome: {
+      completionChars: number;
+      produced: boolean;
+      usage: ChatChunk['usage'];
+      status: InferenceStatus;
+    }
   ): void {
-    const promptTokens = usage?.promptTokens ?? estimateTokens(promptChars);
-    const completionTokens =
-      usage?.completionTokens ?? estimateTokens(completionChars);
+    const { completionChars, produced, usage, status } = outcome;
+    const provider = this.servedBy();
+    const model = this.inner.model;
+    // Tombé ou annulé avant tout : rien de produit, rien d'annoncé. Ne rien compter plutôt
+    // qu'estimer un prompt que le fournisseur n'a peut-être jamais reçu (S06-2-5).
+    const counted = status === 'ok' || produced || usage !== undefined;
+    const promptTokens = counted
+      ? usage?.promptTokens ?? estimateTokens(promptChars)
+      : undefined;
+    const completionTokens = counted
+      ? usage?.completionTokens ?? estimateTokens(completionChars)
+      : undefined;
     const estimated =
-      usage?.promptTokens === undefined || usage?.completionTokens === undefined;
+      counted && (usage?.promptTokens === undefined || usage?.completionTokens === undefined);
     recordInference({
       kind: 'completion',
-      provider: this.providerId,
-      model: this.inner.model,
+      provider,
+      model,
       durationMs: Math.max(0, Date.now() - startMs),
       promptTokens,
       completionTokens,
-      totalTokens: usage?.totalTokens ?? promptTokens + completionTokens,
+      totalTokens: counted
+        ? usage?.totalTokens ?? (promptTokens ?? 0) + (completionTokens ?? 0)
+        : undefined,
       tokensEstimated: estimated,
-      status: errored ? 'error' : 'ok',
-      isLocal: this.isLocal,
+      status,
+      isLocal: isLocalProvider(provider, this.baseUrl, model),
       workspaceRoot,
     });
   }
 }
 
-class InstrumentedEmbedding implements EmbeddingProvider {
-  private readonly isLocal: boolean;
+/**
+ * L'identifiant de configuration (`ollama`, `embedded`) d'un fournisseur d'embeddings, tiré de son
+ * identifiant de classe (`ollama-embedding`, `embedded-embedding`) : le journal inscrit le premier,
+ * comme pour la génération, dont les deux identifiants se confondent.
+ */
+function embeddingConfigId(classId: string): string {
+  return classId.replace(/-embedding$/, '');
+}
 
+class InstrumentedEmbedding implements EmbeddingProvider {
   constructor(
     private readonly inner: EmbeddingProvider,
     private readonly providerId: string,
     private readonly baseUrl?: string
-  ) {
-    this.isLocal = isLocalProvider(providerId, baseUrl, inner.model);
-  }
+  ) {}
 
   /**
-   * Repli enveloppé : le fournisseur choisi, enveloppé à son tour. Le déballer contournerait le
-   * journal ; ne pas exposer `resolve` laissait un cache rangé par modèle lire la clé du dernier
-   * choix, pas celle du modèle qui produira le vecteur.
+   * Repli enveloppé : le fournisseur choisi, enveloppé à son tour, sous son propre nom. Le déballer
+   * contournerait le journal ; ne pas exposer `resolve` laissait un cache rangé par modèle lire la
+   * clé du dernier choix, pas celle du modèle qui produira le vecteur.
    */
   async resolve(opts: { signal?: AbortSignal } = {}): Promise<EmbeddingProvider> {
     const chosen = await resolveEmbeddingProvider(this.inner, opts.signal);
-    return chosen === this.inner ? this : new InstrumentedEmbedding(chosen, this.providerId, this.baseUrl);
+    if (chosen === this.inner) return this;
+    const { providerId, baseUrl } = this.attribution(chosen.id);
+    return new InstrumentedEmbedding(chosen, providerId, baseUrl);
+  }
+
+  /**
+   * À qui inscrire les vecteurs du fournisseur `classId`, retenu par un repli : le primaire garde
+   * l'identifiant et l'URL de la configuration ; le secours (le modèle embarqué) prend son propre
+   * identifiant, sans l'URL d'Ollama, qui ne dit rien de lui.
+   */
+  private attribution(classId: string): { providerId: string; baseUrl?: string } {
+    const id = embeddingConfigId(classId);
+    return id === this.providerId ? { providerId: this.providerId, baseUrl: this.baseUrl } : { providerId: id };
+  }
+
+  /** Le fournisseur qui a servi l'appel et sa localité : derrière un repli, lus après son choix. */
+  private servedBy(): { provider: string; isLocal: boolean } {
+    const { providerId, baseUrl } =
+      this.inner instanceof FallbackEmbeddingProvider
+        ? this.attribution(this.inner.activeId)
+        : { providerId: this.providerId, baseUrl: this.baseUrl };
+    return { provider: providerId, isLocal: isLocalProvider(providerId, baseUrl, this.inner.model) };
   }
 
   get id(): string {
@@ -216,33 +292,36 @@ class InstrumentedEmbedding implements EmbeddingProvider {
     const start = Date.now();
     const workspaceRoot = originWorkspaceRoot();
     const tokens = texts.reduce((s, t) => s + estimateTokens(t.length), 0);
-    let errored = false;
+    let status: InferenceStatus = 'ok';
     try {
       return await this.inner.embed(texts, opts);
     } catch (err) {
-      errored = true;
+      // Abandonné (« Arrêter », fermeture du projet) : ni réussi, ni en panne (J9, L09-16).
+      status = opts?.signal?.aborted ? 'cancelled' : 'error';
       throw err;
     } finally {
+      const { provider, isLocal } = this.servedBy();
       const ctx = getJournalContext();
       if (ctx?.batch) {
         // Indexation en masse : accumuler, ne pas émettre par chunk.
         ctx.batch.chunkCount += texts.length;
         ctx.batch.totalTokens += tokens;
-        ctx.batch.provider ??= this.providerId;
+        ctx.batch.provider ??= provider;
         ctx.batch.model ??= this.inner.model;
-        ctx.batch.isLocal ??= this.isLocal;
-        if (errored) ctx.batch.anyError = true;
+        ctx.batch.isLocal ??= isLocal;
+        // Un lot ne dit que `ok` ou `error` : un abandon y compte comme une panne, comme avant.
+        if (status !== 'ok') ctx.batch.anyError = true;
       } else {
         recordInference({
           kind: 'embedding',
-          provider: this.providerId,
+          provider,
           model: this.inner.model,
           durationMs: Math.max(0, Date.now() - start),
           totalTokens: tokens,
           tokensEstimated: true,
           chunkCount: texts.length,
-          status: errored ? 'error' : 'ok',
-          isLocal: this.isLocal,
+          status,
+          isLocal,
           workspaceRoot,
         });
       }

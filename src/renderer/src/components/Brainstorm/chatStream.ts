@@ -11,7 +11,8 @@
  *
  * Le store se lit par `getState()` et les messages se traduisent par l'instance i18n : un tour se
  * termine sans qu'aucun composant soit monté. Les événements d'une session qu'aucune bulle
- * n'attend (abandonnée, ou d'un projet quitté) sont ignorés.
+ * n'attend (abandonnée, ou d'un projet quitté) sont ignorés, sauf le modèle de son terminal : une
+ * réponse arrêtée par l'auteur en est signée (S16-1-23).
  */
 
 import i18n from '../../i18n';
@@ -39,6 +40,8 @@ interface ChunkEnv {
     finishReason?: string;
   };
   error?: { code: string; message: string };
+  /** Terminal seulement : le modèle qui a servi le tour (S16-1-23). */
+  model?: string;
 }
 
 export interface FusionChatApi {
@@ -80,6 +83,13 @@ export interface FusionChatApi {
 
 /** La bulle de chaque session en cours. */
 const assistantBySession = new Map<string, string>();
+/**
+ * La bulle de chaque session abandonnée dont le terminal n'est pas encore arrivé. « Arrêter » clôt
+ * la bulle avant la réponse du main : le terminal `cancelled` qui suit n'y pose que son modèle, sans
+ * toucher au tour en cours. Bornée : le terminal d'un tour qui n'a pas démarré n'arrive jamais.
+ */
+const abandonedBySession = new Map<string, string>();
+const MAX_ABANDONED = 16;
 let subscribedTo: FusionChatApi | null = null;
 let unsubscribe: (() => void) | null = null;
 
@@ -115,10 +125,13 @@ function errorMessage(error: { code: string; message: string }): string {
 
 function onChunk(env: ChunkEnv): void {
   const aId = assistantBySession.get(env.sessionId);
-  if (!aId) return;
+  if (!aId) {
+    onAbandonedChunk(env);
+    return;
+  }
   const store = useChatStore.getState();
   if (env.error) {
-    store.finishAssistant(aId, env.chunk.finishReason ?? 'error', errorMessage(env.error));
+    store.finishAssistant(aId, env.chunk.finishReason ?? 'error', errorMessage(env.error), env.model);
     assistantBySession.delete(env.sessionId);
     return;
   }
@@ -127,9 +140,20 @@ function onChunk(env: ChunkEnv): void {
   if (env.chunk.thinking) store.appendThinking(aId, env.chunk.thinking);
   if (env.chunk.delta) store.appendDelta(aId, env.chunk.delta);
   if (env.chunk.done) {
-    store.finishAssistant(aId, env.chunk.finishReason);
+    store.finishAssistant(aId, env.chunk.finishReason, undefined, env.model);
     assistantBySession.delete(env.sessionId);
   }
+}
+
+/**
+ * Un événement d'une session abandonnée : seul son terminal compte, pour le modèle qu'il porte. La
+ * bulle, déjà close, garde son texte et sa fin ; une bulle effacée depuis n'est plus trouvée.
+ */
+function onAbandonedChunk(env: ChunkEnv): void {
+  const aId = abandonedBySession.get(env.sessionId);
+  if (!aId || !(env.chunk.done || env.error)) return;
+  abandonedBySession.delete(env.sessionId);
+  if (env.model) useChatStore.getState().setModel(aId, env.model);
 }
 
 function onContext(env: { sessionId: string; sources: BrainstormSource[] }): void {
@@ -196,7 +220,19 @@ export function bindSession(sessionId: string, assistantId: string): void {
   assistantBySession.set(sessionId, assistantId);
 }
 
-/** La bulle n'attend plus rien de cette session : tour arrêté, effacé, refusé ou d'un projet quitté. */
+/**
+ * La bulle n'attend plus rien de cette session : tour arrêté, effacé, refusé ou d'un projet quitté.
+ * Seul le modèle de son terminal pourra encore y être posé.
+ */
 export function abandonSession(sessionId: string): void {
+  const aId = assistantBySession.get(sessionId);
+  if (aId === undefined) return;
   assistantBySession.delete(sessionId);
+  abandonedBySession.set(sessionId, aId);
+  // La plus ancienne d'abord : l'ordre d'insertion d'une Map.
+  while (abandonedBySession.size > MAX_ABANDONED) {
+    const oldest = abandonedBySession.keys().next().value;
+    if (oldest === undefined) break;
+    abandonedBySession.delete(oldest);
+  }
 }

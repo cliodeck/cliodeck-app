@@ -303,3 +303,31 @@ describe('journal d’usage : sans racine posée par l’appelant, le projet est
     expect(eventsOf(A)[1]).toMatchObject({ kind: 'embedding_batch', workspace: A, corpus: 'obsidian' });
   });
 });
+
+/**
+ * Sans localité donnée par le décorateur, le service la déduit du fournisseur. Il ne connaissait
+ * qu'Ollama : le modèle embarqué, qui ne quitte pas la machine, était compté « cloud » (S10-1-11).
+ */
+describe('journal d’usage : la localité déduite du fournisseur (S10-1-11)', () => {
+  it('le modèle embarqué est local ; témoins : Ollama local, Anthropic distant', () => {
+    usageJournalService.init(A);
+    for (const provider of ['embedded', 'ollama', 'anthropic']) {
+      usageJournalService.record({
+        kind: 'completion',
+        provider,
+        model: 'm',
+        durationMs: 1,
+        tokensEstimated: true,
+        status: 'ok',
+        workspaceRoot: A,
+      });
+    }
+    usageJournalService.close();
+
+    expect(eventsOf(A).map((e) => [e.provider, e.isLocal])).toEqual([
+      ['embedded', true],
+      ['ollama', true],
+      ['anthropic', false],
+    ]);
+  });
+});

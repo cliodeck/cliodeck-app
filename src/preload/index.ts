@@ -1429,6 +1429,8 @@ const api = {
             usage?: Record<string, number>;
           };
           error?: { code: string; message: string };
+          /** Terminal seulement : le modèle qui a servi le tour. */
+          model?: string;
         }) => void
       ) => {
         const listener = (_e: unknown, envelope: unknown): void =>

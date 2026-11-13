@@ -315,6 +315,55 @@ describe('banc du pump de chat', () => {
   });
 });
 
+/**
+ * Le terminal porte le modèle du tour (S16-1-23) : le renderer en signe les brouillons et les
+ * propositions, que le journal d'usage reçoit ensuite. Il les signait d'un modèle deviné dans les
+ * réglages (le modèle Ollama du panneau, même en génération embarquée).
+ */
+describe('le terminal porte le modèle du tour (S16-1-23)', () => {
+  it('fin ordinaire, annulation, délai d’inactivité, panne du fournisseur : le modèle qui a servi', async () => {
+    bench.provider = async function* () {
+      yield { delta: 'Réponse.', done: false };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    const done = startTurn();
+    await vi.waitFor(() => expect(terminal(done.sent)).toBeDefined(), WAIT);
+
+    bench.provider = waitForAbort;
+    const stopped = startTurn();
+    await vi.waitFor(() => expect(bench.seenOpts).toHaveLength(2), WAIT);
+    fusionChatService.cancel(stopped.sessionId);
+    await vi.waitFor(() => expect(terminal(stopped.sent)).toBeDefined(), WAIT);
+
+    const idle = startTurn({ timeoutMs: 30 });
+    await vi.waitFor(() => expect(terminal(idle.sent)).toBeDefined(), WAIT);
+
+    bench.provider = async function* () {
+      yield { delta: '', done: true, finishReason: 'error' };
+    };
+    const failed = startTurn();
+    await vi.waitFor(() => expect(terminal(failed.sent)).toBeDefined(), WAIT);
+
+    expect(
+      [done, stopped, idle, failed].map(({ sent }) => [terminal(sent)?.chunk.finishReason, terminal(sent)?.model])
+    ).toEqual([
+      ['stop', 'fake-model'],
+      ['cancelled', 'fake-model'],
+      ['error', 'fake-model'],
+      ['error', 'fake-model'],
+    ]);
+    // Les morceaux de la réponse ne le portent pas : seul le terminal le dit.
+    expect(chunks(done.sent).filter((e) => !e.chunk.done).every((e) => e.model === undefined)).toBe(true);
+  });
+
+  it('configuration invalide : aucun modèle n’a servi, le terminal n’en nomme aucun', async () => {
+    bench.configError = 'clé API absente';
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(terminal(sent)?.model).toBeUndefined();
+  });
+});
+
 describe('consentement distant : modèle Ollama hébergé (L04-1)', () => {
   const NOTE = 'La longue durée écrase l’événement.';
   const noteHit: ReadingNoteMappedSearchResult = {
@@ -776,6 +825,23 @@ describe('résumé du compacteur dans le tour (S06-1-18)', () => {
     expect(bench.seenOpts[0].signal).toBe(bench.seenOpts[1].signal);
     expect(bench.seenMessages[1].some((m) => m.content.includes('Résumé fidèle.'))).toBe(true);
     await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+  });
+
+  // Le résumé passe par le fournisseur du tour, enveloppé par le journal d'usage. « Arrêter » pendant
+  // le résumé l'inscrivait « ok », comme une réponse rendue (L09-16).
+  it('« Arrêter » pendant le résumé : le résumé s’inscrit « cancelled » au journal d’usage, et rien d’autre', async () => {
+    const recorded: RecordInferenceInput[] = [];
+    setInferenceSink((e) => recorded.push(e));
+    bench.provider = (messages, opts) => (isSummaryCall(messages) ? waitForAbort(messages, opts) : answer());
+    const { sessionId, sent } = startLongTurn();
+    await vi.waitFor(() => expect(bench.seenMessages).toHaveLength(1), WAIT);
+
+    fusionChatService.cancel(sessionId);
+    await vi.waitFor(() => expect(terminal(sent)?.chunk.finishReason).toBe('cancelled'), WAIT);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+
+    expect(bench.seenMessages.map(isSummaryCall)).toEqual([true]);
+    expect(recorded.map((e) => [e.kind, e.status])).toEqual([['completion', 'cancelled']]);
   });
 
   it("délai d'inactivité : un résumé dont rien ne vient le fait tomber, sans appel au modèle ensuite", async () => {

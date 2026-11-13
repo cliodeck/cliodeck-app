@@ -17,7 +17,6 @@ import { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../backend/core/vector-store/EnhancedVectorStore.js';
 import {
   SecondaryRetriever,
-  ACADEMIC_TERMS_FR_TO_EN,
   createExpandQueryFrEn,
 } from '../../../backend/core/rag/retrievers/secondary-retriever.js';
 import { QueryEmbeddingCache } from '../../../backend/core/rag/QueryEmbeddingCache.js';
@@ -405,8 +404,9 @@ export interface RetrievalQuery {
 // Dictionnaire de termes académiques FR→EN pour query expansion.
 // Query expansion + embedding pooling moved to
 // `backend/core/rag/retrievers/secondary-retriever.ts` (fusion 3.11).
-// `ACADEMIC_TERMS_FR_TO_EN` is re-exported from there and consumed
-// below by `warmupDictionaryEmbeddings`.
+// Ses termes ne sont plus embarqués à l'ouverture (J11) : l'expansion embarque la question
+// entière, réécrite, et un terme seul en cache ne servait qu'à une question réduite à ce terme.
+// Ils chargeaient aussi le modèle embarqué de la recherche : `preloadEmbeddedEngine` le fait.
 
 /**
  * Map a retrieved chunk onto the SourceInspector input shape. The
@@ -447,7 +447,6 @@ class RetrievalService {
   private workspaceRoot: string | null = null;
   private vaultStore: ObsidianVaultStore | null = null;
   private manuscriptStore: ManuscriptStore | null = null;
-  private warmupStarted = false;
   /**
    * Cached inspector mode for the current workspace. Refreshed on
    * `configure()` and on explicit `setInspectorMode()` calls (the IPC
@@ -476,11 +475,6 @@ class RetrievalService {
    * Elle restait ouverte jusqu'au redémarrage : la connexion à Ollama n'a pas de délai (J9).
    */
   private storeRelease = new AbortController();
-  /**
-   * Abandonné quand le fournisseur d'embeddings est libéré (fermeture du projet, changement de
-   * réglages) : le préchauffage du dictionnaire, qui embarque avec lui, s'arrête (J9).
-   */
-  private registryRelease = new AbortController();
 
   /**
    * Wire the service to the project-scoped dependencies. Called by
@@ -512,6 +506,7 @@ class RetrievalService {
       this.registry = null;
       this.embedding = null;
     }
+    void this.preloadEmbeddedEngine();
 
     // Invalidate any previously opened vault store — the project may have
     // changed underneath us.
@@ -525,24 +520,42 @@ class RetrievalService {
     manuscriptIndexService.configure(this.workspaceRoot);
     readingNotesIndexService.configure(this.workspaceRoot);
 
-    // Fire-and-forget warmup: pre-embed frequent FR↔EN translations so the
-    // first real query hits a warm cache. Only runs once per process.
-    if (!this.warmupStarted) {
-      this.warmupStarted = true;
-      void this.warmupDictionaryEmbeddings();
-    }
-
     // Refresh the inspector mode for the new workspace. Best-effort —
     // a missing config falls back to `warn`, an unreadable one to `block`.
     void this.refreshInspectorMode();
+  }
+
+  /**
+   * Charge le modèle d'embeddings embarqué de la recherche, sans rien calculer ni envoyer : la
+   * première question n'attend pas son chargement. Ce registre a son propre client llama.cpp (le
+   * partage d'un GGUF entre clients est à venir, L08-16) : `warmup query`, chez `pdfService`, charge
+   * celui de l'indexeur. Les 23 termes du dictionnaire d'expansion, embarqués à la première ouverture,
+   * le chargeaient en passant ; ils ne partent plus (J11).
+   *
+   * Le moteur embarqué seul : Ollama tient son modèle dans son démon, que `warmup query` a chargé, et
+   * le `healthCheck` d'un fournisseur distant peut envoyer un texte (celui de Gemini embarque
+   * « ping »). En réglage « auto », le repli sonde Ollama (la liste de ses modèles, aucun texte).
+   * Rien ne s'inscrit au journal d'usage : aucun embedding n'est calculé.
+   */
+  private async preloadEmbeddedEngine(): Promise<void> {
+    const embedding = this.embedding;
+    if (!embedding) return;
+    try {
+      const chosen = await resolveEmbeddingProvider(embedding);
+      // Registre libéré pendant le sondage (projet fermé, réglages changés) : le modèle chargé ici
+      // resterait à un client que plus rien ne libère avant la sortie de l'app.
+      if (this.embedding !== embedding || chosen.id !== 'embedded-embedding') return;
+      await chosen.healthCheck();
+    } catch (e) {
+      // Best-effort : la première question chargera le modèle, et dira l'échec s'il y en a un.
+      console.warn('[retrieval] préchargement du modèle d’embeddings embarqué impossible :', e);
+    }
   }
 
   private async disposePreviousRegistry(): Promise<void> {
     const prev = this.registry;
     this.registry = null;
     this.embedding = null;
-    this.registryRelease.abort();
-    this.registryRelease = new AbortController();
     if (prev) {
       await prev.dispose().catch(() => undefined);
     }
@@ -685,42 +698,6 @@ class RetrievalService {
   ): Promise<Float32Array> {
     const [vec] = await provider.embed([text], { signal });
     return Float32Array.from(vec);
-  }
-
-  private async warmupDictionaryEmbeddings(): Promise<void> {
-    // Le fournisseur de ce préchauffage libéré, il s'arrête : sa requête est coupée (J9).
-    const signal = this.registryRelease.signal;
-    try {
-      const terms: string[] = [];
-      for (const [fr, ens] of Object.entries(ACADEMIC_TERMS_FR_TO_EN)) {
-        terms.push(fr, ...ens);
-      }
-      let provider: EmbeddingProvider;
-      try {
-        provider = await this.resolveEmbedding(signal);
-      } catch {
-        return;
-      }
-      const providerId = RetrievalService.providerKey(provider);
-      for (const term of terms) {
-        if (queryEmbeddingCache.has(term, providerId)) continue;
-        try {
-          const emb = await RetrievalService.embedQuery(provider, term, signal);
-          queryEmbeddingCache.set(term, emb, providerId);
-        } catch {
-          // Warmup is best-effort: a provider may be unavailable at boot.
-          // Abort silently; real queries will retry on demand.
-          return;
-        }
-      }
-      if (DEBUG) {
-        console.log(
-          `💾 [EMB CACHE] Warmup pre-embedded ${terms.length} dictionary terms`
-        );
-      }
-    } catch (err) {
-      console.warn('[retrieval] dictionary warmup failed:', err);
-    }
   }
 
   /**
