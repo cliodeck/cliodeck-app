@@ -18,6 +18,7 @@ import type { PDFDocument, VectorStoreStatistics } from '../../../backend/types/
 import type { RebuildProgressEvent } from '../../../backend/types/rebuild-progress.js';
 import { ProjectChangedError, type ProjectHandle } from '../../../backend/types/project-handle.js';
 import type { RAGConfig } from '../../../backend/types/config.js';
+import { runUnrecorded } from '../../../backend/core/usage-journal/context.js';
 import { configManager } from './config-manager.js';
 import { retrievalService, type SourceType } from './retrieval-service.js';
 import { extractPdfIsolated } from './pdf-extract-isolated.js';
@@ -290,14 +291,16 @@ class PDFService {
 
   /**
    * Warmup embedding model to reduce first-query latency. `signal` : celui du magasin qui s'ouvre ;
-   * la fermeture du projet coupe un préchauffage resté sans réponse (J9).
+   * la fermeture du projet coupe un préchauffage resté sans réponse (J9). Hors du journal d'usage :
+   * charger le modèle est un geste de l'app, sans conséquence méthodologique pour l'auteur (J11).
    */
   private async warmupEmbeddingModel(signal: AbortSignal): Promise<void> {
-    if (!this.embedding) return;
+    const embedding = this.embedding;
+    if (!embedding) return;
 
     console.log('🔥 [WARMUP] Pre-loading embedding model...');
     try {
-      await this.embedding.embed(['warmup query'], { signal });
+      await runUnrecorded(() => embedding.embed(['warmup query'], { signal }));
       console.log('✅ [WARMUP] Embedding model ready');
     } catch (_e: unknown) {
       // Coupé par la fermeture du projet : rien n'a échoué.

@@ -61,14 +61,43 @@ appel LLM**.
 
 Pour chaque appel : horodatage, durée, type (`completion` | `embedding` |
 `embedding_batch`), provider et modèle, exécution locale ou cloud (`is_local` :
-Ollama, ou provider openai-compatible dont le baseUrl pointe en loopback — llama.cpp,
-LM Studio ; le reste est compté cloud), tokens prompt/réponse (réels quand l'API les
-fournit — Ollama, Anthropic, Gemini, openai-compatible ; Mistral reste estimé à
-~4 caractères/token, `tokens_estimated: true`), contexte applicatif (mode, workspace,
-corpus, recipe), identifiant de session, statut.
+Ollama sur la machine, le modèle embarqué — llama.cpp dans le processus de l'app,
+génération comme embeddings —, ou provider openai-compatible dont le baseUrl pointe en
+loopback — llama.cpp, LM Studio ; le reste est compté cloud), tokens prompt/réponse
+(réels quand l'API les fournit — Ollama, Anthropic, Gemini, openai-compatible ; Mistral
+reste estimé à ~4 caractères/token, `tokens_estimated: true`), contexte applicatif
+(mode, workspace, corpus, recipe), identifiant de session, statut.
+
+Le **statut** est l'issue réelle de l'appel, lue sur le chunk terminal du fournisseur :
+
+- `ok` — l'appel a abouti, y compris une réponse coupée par la limite de longueur ;
+- `error` — le fournisseur a échoué (requête refusée, flux rompu, clé expirée…) ;
+- `cancelled` — l'appel a été abandonné : « Arrêter », fermeture du projet, délai
+  d'inactivité, résumé du compacteur arrêté avec le tour. Ni réussi, ni en panne.
+
+`cancelled` est entré en rc.6 (L09-16) : **un script qui lit l'export en n'attendant que
+`ok` ou `error` doit prévoir cette troisième valeur.** Les lignes écrites avant restent
+telles quelles : un appel annulé y figure en `ok`, un embedding abandonné en `error`.
+Un `embedding_batch` ne dit que `ok` ou `error` : une indexation abandonnée y compte
+comme une panne.
 
 Cas particuliers :
 
+- **Préchauffage du modèle** — à l'ouverture d'un projet, l'app charge le modèle
+  d'embeddings par un appel (`warmup query`) pour que la première question n'attende pas.
+  Ce geste de l'app n'a pas de conséquence méthodologique pour l'auteur : il **n'est pas
+  inscrit** (`runUnrecorded`, J11). Une indexation que l'ouverture lance d'elle-même
+  (notes de lecture, sources primaires à refaire) s'inscrit comme toute indexation. Les
+  23 termes du dictionnaire d'expansion FR↔EN, qui partaient aussi à chaque ouverture, ne
+  sont plus envoyés.
+- **Repli Ollama → modèle embarqué** — en réglage `auto`, un appel de génération est
+  attribué au fournisseur qui a répondu (`embedded` quand Ollama est arrêté), pas à celui
+  de la configuration, et sa localité se calcule pour lui. Les lignes écrites avant
+  restent attribuées à `ollama`. Les embeddings servis par le repli portent encore
+  `ollama` comme fournisseur, avec le nom du modèle embarqué.
+- **Appel tombé ou annulé avant toute réponse** — rien de produit, aucun usage annoncé :
+  l'événement ne porte aucun jeton (`tokens_estimated: false`). Le fournisseur n'a
+  peut-être jamais reçu le prompt ; l'estimer inventait une consommation.
 - **Indexations en masse** — agrégées en un seul `embedding_batch` (compte de chunks +
   total de tokens) par run, via un scope ouvert aux trois frontières d'indexation (PDF,
   Obsidian, Tropy), plutôt qu'un événement par chunk.

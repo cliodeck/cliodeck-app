@@ -45,7 +45,7 @@ const ARCHIVE_WORDS = new Set([...noteOf(0).split(/\W+/), ...noteOf(500).split(/
 
 /**
  * Les textes des archives envoyés au modèle d'embeddings. L'ouverture d'un projet en envoie
- * d'autres, les termes du dictionnaire de la recherche (préchauffage, J11) : ils ne comptent pas.
+ * d'autres, le préchauffage du modèle (`warmup query`) : ils ne comptent pas.
  */
 function archiveTexts(ollama: FakeOllama, model: string): string[] {
   return ollama.embeddedTexts(model).filter((text) => text.split(/\W+/).some((w) => ARCHIVE_WORDS.has(w)));
