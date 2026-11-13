@@ -196,19 +196,6 @@ describe('usage-journal provider instrumentation', () => {
     expect(events[0]).toMatchObject({ kind: 'completion', status: 'error' });
   });
 
-  it('complete() annulé rejette, mais reste « ok » au journal, comme un chat() annulé', async () => {
-    const llm = instrumentLLM(
-      new FakeLLM([{ delta: 'Début', done: true, finishReason: 'cancelled' }]),
-      'ollama'
-    );
-    await expect(llm.complete('q')).rejects.toMatchObject({
-      name: 'ProviderCallError',
-      finishReason: 'cancelled',
-    });
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ kind: 'completion', status: 'ok' });
-  });
-
   // Une synthèse coupée chez un fournisseur facturé a déjà produit du texte et annoncé son usage :
   // le journal le garde, comme pour un chat() coupé au même endroit (revue de L09-7).
   it('complete() tombé après du texte garde au journal le texte produit et l’usage annoncé', async () => {

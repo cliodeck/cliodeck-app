@@ -7,7 +7,9 @@
  * se publie (ADR 0007). Sans baseUrl, Ollama vise la machine. Un provider
  * `openai-compatible` est local quand son baseUrl pointe vers la machine
  * (llama.cpp, LM Studio, vLLM en loopback) — sans baseUrl on le considère
- * cloud. Les autres providers sont cloud.
+ * cloud. Le modèle embarqué (`embedded`, `embedded-embedding` : llama.cpp dans
+ * le processus de l'app) est toujours local (S10-1-11). Les autres providers
+ * sont cloud.
  */
 
 import { isOllamaCloudModel, LOCAL_HOSTS } from '../../security/cloud-consent.js';
@@ -21,6 +23,7 @@ function isLocalUrl(baseUrl: string): boolean {
 }
 
 export function isLocalProvider(providerId: string, baseUrl?: string, model?: string): boolean {
+  if (providerId === 'embedded' || providerId === 'embedded-embedding') return true;
   if (providerId === 'ollama') {
     return (!baseUrl || isLocalUrl(baseUrl)) && !isOllamaCloudModel(model);
   }

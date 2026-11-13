@@ -122,6 +122,15 @@ export class FallbackLLMProvider implements LLMProvider {
   }
 
   /**
+   * L'identifiant du fournisseur retenu au dernier sondage (le primaire avant tout sondage). Lu à la
+   * fin d'un appel, il nomme celui qui a répondu : le journal d'usage l'inscrit à la place de
+   * l'identifiant configuré, qui attribuait à Ollama les réponses du modèle embarqué (S05-1-17).
+   */
+  get activeId(): string {
+    return this.picker.current().id;
+  }
+
+  /**
    * Capacités du dénominateur commun : annoncer les outils parce que le
    * primaire les gère ferait échouer la boucle d'agent le jour où le repli
    * sert. On n'annonce que ce qui vaut dans les deux cas.

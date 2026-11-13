@@ -33,7 +33,12 @@ export type InferenceKind =
   | 'embedding_batch'
   | 'mcp_session';
 
-export type InferenceStatus = 'ok' | 'error';
+/**
+ * Issue réelle de l'appel. `cancelled` : abandonné (« Arrêter », fermeture du projet, délai
+ * d'inactivité), ni réussi ni en panne. Une réponse coupée par la limite de longueur reste `ok`.
+ * Un `embedding_batch` ne dit que `ok` ou `error`.
+ */
+export type InferenceStatus = 'ok' | 'error' | 'cancelled';
 
 export type Verdict = 'worth_it' | 'not_worth_it' | 'unsure' | 'pending';
 

@@ -389,7 +389,7 @@ describe('repli Ollama → moteur embarqué de la génération (« auto ») — 
   });
 });
 
-describe('journal d’usage : un embedding abandonné n’est pas compté comme réussi', () => {
+describe('journal d’usage : un embedding abandonné est inscrit « cancelled », ni réussi ni en panne (L09-16)', () => {
   let events: RecordInferenceInput[];
 
   beforeEach(() => {
@@ -400,7 +400,7 @@ describe('journal d’usage : un embedding abandonné n’est pas compté comme 
     setInferenceSink(undefined);
   });
 
-  it('moteur embarqué, abandonné pendant sa passe : un événement en erreur, pas « ok »', async () => {
+  it('moteur embarqué, abandonné pendant sa passe : un événement « cancelled », pas « ok »', async () => {
     const held = heldEmbeddingClient();
     const embedder = instrumentEmbedding(
       new EmbeddedEmbeddingProvider({ modelPath: MODEL_PATH, dimension: 4, client: held.client }),
@@ -415,10 +415,10 @@ describe('journal d’usage : un embedding abandonné n’est pas compté comme 
     await outcome;
 
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ kind: 'embedding', status: 'error' });
+    expect(events[0]).toMatchObject({ kind: 'embedding', status: 'cancelled' });
   });
 
-  it('Ollama, abandonné pendant la requête : un événement en erreur (témoin)', async () => {
+  it('Ollama, abandonné pendant la requête : un événement « cancelled » (témoin)', async () => {
     const seen = silentFetch();
     const embedder = instrumentEmbedding(
       new OllamaEmbeddingProvider({ model: 'nomic-embed-text', dimension: 768, baseUrl: 'http://mock.ollama' }),
@@ -433,6 +433,6 @@ describe('journal d’usage : un embedding abandonné n’est pas compté comme 
     await outcome;
 
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ kind: 'embedding', status: 'error' });
+    expect(events[0]).toMatchObject({ kind: 'embedding', status: 'cancelled' });
   });
 });

@@ -778,6 +778,23 @@ describe('résumé du compacteur dans le tour (S06-1-18)', () => {
     await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
   });
 
+  // Le résumé passe par le fournisseur du tour, enveloppé par le journal d'usage. « Arrêter » pendant
+  // le résumé l'inscrivait « ok », comme une réponse rendue (L09-16).
+  it('« Arrêter » pendant le résumé : le résumé s’inscrit « cancelled » au journal d’usage, et rien d’autre', async () => {
+    const recorded: RecordInferenceInput[] = [];
+    setInferenceSink((e) => recorded.push(e));
+    bench.provider = (messages, opts) => (isSummaryCall(messages) ? waitForAbort(messages, opts) : answer());
+    const { sessionId, sent } = startLongTurn();
+    await vi.waitFor(() => expect(bench.seenMessages).toHaveLength(1), WAIT);
+
+    fusionChatService.cancel(sessionId);
+    await vi.waitFor(() => expect(terminal(sent)?.chunk.finishReason).toBe('cancelled'), WAIT);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+
+    expect(bench.seenMessages.map(isSummaryCall)).toEqual([true]);
+    expect(recorded.map((e) => [e.kind, e.status])).toEqual([['completion', 'cancelled']]);
+  });
+
   it("délai d'inactivité : un résumé dont rien ne vient le fait tomber, sans appel au modèle ensuite", async () => {
     bench.provider = (messages, opts) => (isSummaryCall(messages) ? waitForAbort(messages, opts) : answer());
     const { sessionId, sent } = startLongTurn({ timeoutMs: 30 });

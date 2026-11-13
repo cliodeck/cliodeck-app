@@ -35,6 +35,7 @@ import {
   type AdjudicationSummary,
 } from '../../../backend/core/usage-journal/aggregate.js';
 import { localDateKey } from '../../../backend/core/usage-journal/annotate.js';
+import { isLocalProvider } from '../../../backend/core/usage-journal/is-local.js';
 import type {
   DecisionDraft,
   InferenceEvent,
@@ -61,9 +62,6 @@ export interface TodayView {
   summary: UsageSummary;
   decisions: UsageDecision[];
 }
-
-/** Providers exécutés localement (le reste = cloud). */
-const LOCAL_PROVIDERS = new Set(['ollama']);
 
 const DEFAULT_INACTIVITY_MS = 30 * 60 * 1000; // §7 : fenêtre par défaut 30 min
 const FLUSH_INTERVAL_MS = 750;
@@ -321,7 +319,8 @@ class UsageJournalService {
       kind: input.kind,
       provider: input.provider,
       model: input.model,
-      isLocal: input.isLocal ?? LOCAL_PROVIDERS.has(input.provider),
+      // La règle du décorateur et du CLI : le modèle embarqué est local (S10-1-11).
+      isLocal: input.isLocal ?? isLocalProvider(input.provider),
       promptTokens: input.promptTokens,
       completionTokens: input.completionTokens,
       totalTokens: input.totalTokens,
