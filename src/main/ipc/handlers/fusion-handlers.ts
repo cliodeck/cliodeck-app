@@ -469,16 +469,24 @@ export function setupFusionHandlers(): void {
         think: rawOptsObj.think,
         timeoutMs: rawOptsObj.timeoutMs,
       };
-      const sessionId = fusionChatService.start({
-        webContents: event.sender,
-        messages,
-        opts,
-        retrievalOptions: rawOptsObj.retrievalOptions,
-        systemPrompt: rawOptsObj.systemPrompt,
-        enabledTools: Array.isArray(rawOptsObj.enabledTools)
-          ? rawOptsObj.enabledTools.filter((s): s is string => typeof s === 'string')
-          : undefined,
-      });
+      // Un identifiant déjà en cours est refusé par le registre des opérations : le refus se répond,
+      // il ne se jette pas au renderer, qui finit sa bulle avec.
+      let sessionId: string;
+      try {
+        sessionId = fusionChatService.start({
+          webContents: event.sender,
+          messages,
+          sessionId: rawOptsObj.sessionId,
+          opts,
+          retrievalOptions: rawOptsObj.retrievalOptions,
+          systemPrompt: rawOptsObj.systemPrompt,
+          enabledTools: Array.isArray(rawOptsObj.enabledTools)
+            ? rawOptsObj.enabledTools.filter((s): s is string => typeof s === 'string')
+            : undefined,
+        });
+      } catch (e) {
+        return errorResponse(e as Error);
+      }
       return successResponse({ sessionId });
     }
   );
