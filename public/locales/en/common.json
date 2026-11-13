@@ -877,7 +877,8 @@
       "noHints": "No .cliohints set. Add one at {{path}} to inject durable context into every prompt.",
       "obsidianVault": "Obsidian vault",
       "vaultReady": "Index ready at {{path}}",
-      "vaultNotIndexed": "Not indexed yet — link a vault from Settings.",
+      "vaultNotLinked": "No vault linked — link one from Settings.",
+      "vaultNotIndexed": "Vault linked, not indexed yet — run “Index” from Settings.",
       "vaultChecking": "checking…",
       "vaultUnavailable": "Vault status unavailable for now.",
       "recipesHeading": "Recipes ({{count}})",
@@ -1517,7 +1518,11 @@
       "export": "Export",
       "delete": "Delete",
       "confirmDelete": "Click to confirm deletion",
-      "noCustom": "No custom modes"
+      "noCustom": "No custom modes",
+      "importFailed": "The mode could not be imported",
+      "exportFailed": "The mode could not be exported",
+      "deleteFailed": "The mode could not be deleted",
+      "duplicateFailed": "The mode could not be duplicated"
     },
     "warning": {
       "modelTooSmall": "Current model may be too small for this mode",
@@ -1880,7 +1885,9 @@
     "delete": "Delete",
     "importObsidian": "Import from Obsidian vault",
     "importFailed": "Vault import failed",
-    "importNoVault": "No vault is linked to this project: link one in Settings.",
+    "importDone_one": "{{count}} vault note added to ideas",
+    "importDone_other": "{{count}} vault notes added to ideas",
+    "importNothingNew": "No new notes: the vault is empty, or its notes are already among your ideas.",
     "importNotLoaded": "This project's ideas are not loaded yet: nothing was imported. Run the import again once the list is shown.",
     "relatedIdeas": "Related ideas",
     "removeLink": "Remove the link"
@@ -1903,8 +1910,10 @@
     "action": "Open exporter"
   },
   "statusBar": {
-    "mcpTooltip": "MCP: {{ready}}/{{total}} ready",
-    "vaultTooltip": "Vault: {{count}} notes",
+    "mcpTooltip_one": "MCP: {{ready}}/{{total}} ready",
+    "mcpTooltip_other": "MCP: {{ready}}/{{total}} ready",
+    "vaultTooltip_one": "Vault: {{count}} note",
+    "vaultTooltip_other": "Vault: {{count}} notes",
     "indexing": "Indexing",
     "indexingTooltip": "Indexing: {{current}}/{{total}} documents",
     "syncing": "Sync",
@@ -2659,6 +2668,10 @@
   "messages": {
     "errors": {
       "noResponse": "ClioDeck received no answer to this request."
+    },
+    "vault": {
+      "notConfigured": "No vault is linked to this project: link one in Settings.",
+      "pathMissing": "The vault folder cannot be found: {{path}}. Reconnect the drive that holds it, or link the vault again in Settings."
     }
   }
 }

@@ -96,7 +96,8 @@ import { importVaultAsIdeas } from '../../../../backend/integrations/obsidian/ob
 import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import { runBatch, runWithJournalContext } from '../../../../backend/core/usage-journal/context.js';
 import type { ChatMessage } from '../../../../backend/core/llm/providers/base.js';
-import { successResponse, errorResponse } from '../utils/error-handler.js';
+import { successResponse, errorResponse, outcomeResponse } from '../utils/error-handler.js';
+import { failed } from '../../../../backend/types/outcome.js';
 
 interface VaultConfigBlock {
   path?: string;
@@ -880,13 +881,6 @@ export function setupFusionHandlers(): void {
     if (!root) return noProject();
     try {
       const dbPath = obsidianStorePath(root);
-      let exists = false;
-      try {
-        await fs.access(dbPath);
-        exists = true;
-      } catch {
-        exists = false;
-      }
       let vaultPath: string | null = null;
       try {
         const cfg = await readWorkspaceConfig(root);
@@ -896,7 +890,13 @@ export function setupFusionHandlers(): void {
         // inviterait à en lier un, et l'écriture serait refusée.
         if (!(e instanceof WorkspaceConfigError) || e.kind !== 'absent') throw e;
       }
-      return successResponse({ indexed: exists, dbPath, vaultPath });
+      // Lu toutes les 30 s par la barre d'état : une bascule pendant l'attente ne lit ni la base du
+      // projet quitté, ni celle du suivant. Le compte se fait d'un bloc, sans attente.
+      if (projectManager.getCurrentProjectPath() !== root) return errorResponse('project-changed');
+      // `brain.db` est partagé et naît avec le projet : seules les notes du vault lié disent l'index
+      // (S09-1-14), pas celles d'un vault d'avant « Changer de vault », restées dans l'index.
+      const noteCount = ObsidianVaultStore.countNotes(dbPath, vaultPath);
+      return successResponse({ indexed: noteCount > 0, noteCount, dbPath, vaultPath });
     } catch (e) {
       return errorResponse(e as Error);
     }
@@ -1041,11 +1041,13 @@ export function setupFusionHandlers(): void {
     try {
       const cfg = await readOrInitWorkspaceConfig(root);
       const vaultPath = (cfg.vault as VaultConfigBlock | undefined)?.path;
+      // Des codes, que le renderer traduit (`messages.vault.*`) : la phrase anglaise s'affichait
+      // telle quelle (S16-1-16).
       if (!vaultPath) {
-        return errorResponse('no_vault_configured');
+        return outcomeResponse(failed('no_vault_configured', 'vault.notConfigured'));
       }
       if (!fsSync.existsSync(vaultPath)) {
-        return errorResponse('vault path no longer exists');
+        return outcomeResponse(failed('vault path no longer exists', 'vault.pathMissing', { path: vaultPath }));
       }
       const imported = await importVaultAsIdeas(vaultPath, { maxFiles: opts.maxFiles ?? 500 });
       return successResponse({

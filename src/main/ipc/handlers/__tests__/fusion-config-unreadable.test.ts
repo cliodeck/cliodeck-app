@@ -62,7 +62,8 @@ vi.mock('../../../services/mcp-clients-service.js', () => ({
   },
 }));
 vi.mock('../../../../../backend/integrations/obsidian/ObsidianVaultStore.js', () => ({
-  ObsidianVaultStore: { purgeObsidianData: h.purge },
+  // `fusion:vault:status` compte les notes indexées : aucun index ici.
+  ObsidianVaultStore: { purgeObsidianData: h.purge, countNotes: () => 0 },
 }));
 vi.mock('../../../services/tropy-service.js', () => ({ tropyService: {} }));
 vi.mock('../../../services/pdf-service.js', () => ({ pdfService: {} }));

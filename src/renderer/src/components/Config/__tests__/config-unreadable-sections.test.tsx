@@ -193,6 +193,15 @@ describe('VaultConfigSection', () => {
     expect(screen.queryByText('vault.labels.noVaultLinked')).toBeNull();
   });
 
+  it('le projet a changé pendant la lecture : un texte pour l’auteur, jamais le code project-changed', async () => {
+    installFusion({ vault: vault({ status: vi.fn().mockResolvedValue({ success: false, error: 'project-changed' }) }) });
+    render(<VaultConfigSection />);
+    fireEvent.click(screen.getByText('vault.title'));
+
+    expect(await screen.findByText('vault.errors.statusFailed')).toBeTruthy();
+    expect(screen.queryByText('project-changed')).toBeNull();
+  });
+
   it('délier refusé : le motif reste à l’écran, même si l’état se lit encore', async () => {
     const unlink = vi.fn().mockResolvedValue({ success: false, error: REASON });
     const status = vi.fn().mockResolvedValue({ success: true, indexed: true, dbPath: '/db', vaultPath: '/Notes' });

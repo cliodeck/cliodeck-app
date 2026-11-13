@@ -877,7 +877,8 @@
       "noHints": "Keine .cliohints-Datei vorhanden. Fügen Sie eine unter {{path}} hinzu, um dauerhaften Kontext in jeden Prompt einzufügen.",
       "obsidianVault": "Obsidian-Vault",
       "vaultReady": "Index bereit unter {{path}}",
-      "vaultNotIndexed": "Noch nicht indiziert — verknüpfen Sie einen Vault in den Einstellungen.",
+      "vaultNotLinked": "Kein Vault verknüpft — verknüpfen Sie einen in den Einstellungen.",
+      "vaultNotIndexed": "Vault verknüpft, noch nicht indiziert — starten Sie „Indizieren“ in den Einstellungen.",
       "vaultChecking": "Prüfung läuft…",
       "vaultUnavailable": "Vault-Status derzeit nicht verfügbar.",
       "recipesHeading": "Rezepte ({{count}})",
@@ -1517,7 +1518,11 @@
       "export": "Exportieren",
       "delete": "Löschen",
       "confirmDelete": "Zum Bestätigen klicken",
-      "noCustom": "Keine benutzerdefinierten Modi"
+      "noCustom": "Keine benutzerdefinierten Modi",
+      "importFailed": "Der Modus konnte nicht importiert werden",
+      "exportFailed": "Der Modus konnte nicht exportiert werden",
+      "deleteFailed": "Der Modus konnte nicht gelöscht werden",
+      "duplicateFailed": "Der Modus konnte nicht dupliziert werden"
     },
     "warning": {
       "modelTooSmall": "Das aktuelle Modell ist möglicherweise zu klein für diesen Modus",
@@ -1880,7 +1885,9 @@
     "delete": "Löschen",
     "importObsidian": "Aus Obsidian-Vault importieren",
     "importFailed": "Vault-Import nicht möglich",
-    "importNoVault": "Mit diesem Projekt ist kein Vault verknüpft: Verknüpfen Sie einen in den Einstellungen.",
+    "importDone_one": "{{count}} Notiz aus dem Vault zu den Ideen hinzugefügt",
+    "importDone_other": "{{count}} Notizen aus dem Vault zu den Ideen hinzugefügt",
+    "importNothingNew": "Keine neuen Notizen: Der Vault ist leer, oder seine Notizen sind bereits unter Ihren Ideen.",
     "importNotLoaded": "Die Ideen dieses Projekts sind noch nicht geladen: Es wurde nichts importiert. Starten Sie den Import erneut, sobald die Liste angezeigt wird.",
     "relatedIdeas": "Verwandte Ideen",
     "removeLink": "Verknüpfung entfernen"
@@ -1903,8 +1910,10 @@
     "action": "Exporter öffnen"
   },
   "statusBar": {
-    "mcpTooltip": "MCP: {{ready}}/{{total}} bereit",
-    "vaultTooltip": "Vault: {{count}} Notizen",
+    "mcpTooltip_one": "MCP: {{ready}}/{{total}} bereit",
+    "mcpTooltip_other": "MCP: {{ready}}/{{total}} bereit",
+    "vaultTooltip_one": "Vault: {{count}} Notiz",
+    "vaultTooltip_other": "Vault: {{count}} Notizen",
     "indexing": "Indexierung",
     "indexingTooltip": "Indexierung: {{current}}/{{total}} Dokumente",
     "syncing": "Sync",
@@ -2659,6 +2668,10 @@
   "messages": {
     "errors": {
       "noResponse": "ClioDeck hat auf diese Anfrage keine Antwort erhalten."
+    },
+    "vault": {
+      "notConfigured": "Mit diesem Projekt ist kein Vault verknüpft: Verknüpfen Sie einen in den Einstellungen.",
+      "pathMissing": "Der Vault-Ordner ist nicht auffindbar: {{path}}. Schließen Sie das Laufwerk wieder an, auf dem er liegt, oder verknüpfen Sie den Vault in den Einstellungen erneut."
     }
   }
 }

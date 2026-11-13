@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { CollapsibleSection } from '../common/CollapsibleSection';
 import { useModeStore } from '../../stores/modeStore';
+import { useDialogStore } from '../../stores/dialogStore';
+import { translateMessage } from '../../utils/translate-message';
 import type { ResolvedMode } from '../../../../../backend/types/mode';
 import './ModeManagerSection.css';
 
@@ -32,7 +34,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
 export const ModeManagerSection: React.FC = () => {
   const { t, i18n } = useTranslation('common');
   const lang = (i18n.language?.substring(0, 2) as 'fr' | 'en') || 'fr';
-  const { modes, isLoadingModes, loadModes, deleteCustomMode, importMode, exportMode } =
+  const { modes, isLoadingModes, loadModes, saveCustomMode, deleteCustomMode, importMode, exportMode } =
     useModeStore();
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
@@ -59,10 +61,23 @@ export const ModeManagerSection: React.FC = () => {
   const globalModes = modes.filter((m) => m.source === 'global');
   const projectModes = modes.filter((m) => m.source === 'project');
 
+  /**
+   * Un refus du main se dit, avec sa raison (S06-1-14) : un mode refusé à l'import fermait le
+   * dialogue sans un mot, et la liste restait la même.
+   */
+  const alertFailure = (title: string, error: unknown) =>
+    useDialogStore
+      .getState()
+      .showAlert(translateMessage(t, error instanceof Error ? error : { message: String(error) }), title);
+
   const handleDelete = async (mode: ResolvedMode) => {
     if (deleteConfirm === mode.metadata.id) {
-      await deleteCustomMode(mode.metadata.id, mode.source as 'global' | 'project');
       setDeleteConfirm(null);
+      try {
+        await deleteCustomMode(mode.metadata.id, mode.source as 'global' | 'project');
+      } catch (error) {
+        await alertFailure(t('modes.manager.deleteFailed'), error);
+      }
     } else {
       setDeleteConfirm(mode.metadata.id);
       setTimeout(() => setDeleteConfirm(null), 3000);
@@ -70,11 +85,19 @@ export const ModeManagerSection: React.FC = () => {
   };
 
   const handleImport = async (target: 'global' | 'project') => {
-    await importMode(target);
+    try {
+      await importMode(target);
+    } catch (error) {
+      await alertFailure(t('modes.manager.importFailed'), error);
+    }
   };
 
   const handleExport = async (modeId: string) => {
-    await exportMode(modeId);
+    try {
+      await exportMode(modeId);
+    } catch (error) {
+      await alertFailure(t('modes.manager.exportFailed'), error);
+    }
   };
 
   const handleDuplicate = async (mode: ResolvedMode) => {
@@ -92,10 +115,10 @@ export const ModeManagerSection: React.FC = () => {
       };
       delete duplicated.source;
       delete duplicated.filePath;
-      await window.electron.mode.save(duplicated, 'global');
-      await loadModes();
+      await saveCustomMode(duplicated, 'global');
     } catch (error) {
       console.error('Failed to duplicate mode:', error);
+      await alertFailure(t('modes.manager.duplicateFailed'), error);
     }
   };
 
