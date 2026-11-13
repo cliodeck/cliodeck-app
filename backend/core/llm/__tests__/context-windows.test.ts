@@ -12,6 +12,10 @@ import {
   clampNumCtx,
   NUM_CTX_MAX,
   NUM_CTX_MIN,
+  EMBEDDED_CONTEXT_SIZE,
+  embeddedInputBudget,
+  embeddedReplyTokens,
+  maxExtractsForWindow,
 } from '../context-windows';
 
 describe('getContextWindow', () => {
@@ -109,5 +113,35 @@ describe('clampNumCtx — bornes de sécurité de num_ctx', () => {
   it('connaît la fenêtre native de Qwen 3.5 (256K), avant la règle qwen3 générique', () => {
     expect(getContextWindow('qwen3.5:35b')).toBe(262_144);
     expect(getContextWindow('qwen3:8b')).toBe(131_072);
+  });
+});
+
+/**
+ * Le moteur embarqué crée un contexte de 4 096 jetons (Q36) : le compacteur, le plafond d'extraits
+ * et la coupe des consignes lisent la même valeur (S05-1-16).
+ */
+describe('fenêtre du moteur embarqué', () => {
+  it('4 096 jetons, et un budget d’entrée qui laisse la réponse et le gabarit', () => {
+    expect(EMBEDDED_CONTEXT_SIZE).toBe(4096);
+    // 4 096 − 409 (gabarit, décalage) − 1 024 (réponse).
+    expect(embeddedInputBudget(4096)).toBe(2663);
+    // Une réponse plus longue prend sur l'entrée.
+    expect(embeddedInputBudget(4096, 1500)).toBe(2187);
+  });
+
+  // Une recette pouvait demander 4 000 jetons de réponse : le budget d'entrée devenait négatif, et
+  // chaque appel au modèle embarqué était refusé. La réponse ne prend jamais plus de la moitié.
+  it('la réponse ne prend jamais plus de la moitié de la fenêtre : le budget d’entrée reste positif', () => {
+    expect(embeddedReplyTokens(4096)).toBe(1024);
+    expect(embeddedReplyTokens(4096, 1500)).toBe(1500);
+    expect(embeddedReplyTokens(4096, 4000)).toBe(2048);
+    expect(embeddedReplyTokens(4096, 0)).toBe(1024);
+    expect(embeddedInputBudget(4096, 4000)).toBe(1639);
+  });
+
+  it('4 extraits à 4 096, 9 à 8 192, jamais moins d’un', () => {
+    expect(maxExtractsForWindow(4096)).toBe(4);
+    expect(maxExtractsForWindow(8192)).toBe(9);
+    expect(maxExtractsForWindow(1024)).toBe(1);
   });
 });

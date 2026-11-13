@@ -34,12 +34,15 @@ import type { ManuscriptStance } from '../../../backend/types/mode.js';
 import { readingNotesIndexService } from './reading-notes-index-service.js';
 import { projectManager } from './project-manager.js';
 import {
+  documentsOfHits,
   retrievalService,
+  withSelectedCounts,
   type ManuscriptMappedSearchResult,
   type MultiSourceSearchResult,
   type ReadingNoteMappedSearchResult,
   type SelectedDocumentLabel,
 } from './retrieval-service.js';
+import { selectWithOwnTextBands, type OwnTextBands } from './retrieval-quota.js';
 import { mcpClientsService } from './mcp-clients-service.js';
 import type { ToolDescriptor } from '../../../backend/core/llm/providers/base.js';
 import { type RAGExplanation } from '../../../backend/types/chat-source.js';
@@ -262,8 +265,17 @@ import {
 import { ContextCompactor } from '../../../backend/core/context-mgmt/compactor.js';
 import {
   clampNumCtx,
+  EMBEDDED_CONTEXT_SIZE,
+  embeddedInputBudget,
   getContextWindow,
+  maxExtractsForWindow,
 } from '../../../backend/core/llm/context-windows.js';
+import {
+  activeLLMId,
+  embeddedTokenizerOf,
+  untilAborted,
+} from '../../../backend/core/llm/providers/fallback.js';
+import type { EmbeddedTokenizer } from '../../../backend/core/llm/EmbeddedLLMClient.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -411,11 +423,153 @@ export function resolveTurnOptions(
     temperature: opts?.temperature,
     maxTokens: opts?.maxTokens,
     numCtx: local ? (opts?.numCtx ?? clampNumCtx(cfg.ollamaNumCtx)) : undefined,
-    topP: local ? opts?.topP : undefined,
+    // Le moteur embarqué prend aussi le top-p du panneau (S05-1-25) : il était à 0,85 en dur.
+    topP: local || servesEmbedded(cfg) ? opts?.topP : undefined,
     topK: local ? opts?.topK : undefined,
     repeatPenalty: local ? opts?.repeatPenalty : undefined,
     think: local ? opts?.think : undefined,
   };
+}
+
+/** Génération confiée au modèle embarqué par les réglages (« embarqué », modèle téléchargé). */
+function servesEmbedded(cfg: LLMConfig): boolean {
+  return (cfg.backend ?? 'ollama') === 'ollama' && cfg.generationProvider === 'embedded' && !!cfg.embeddedModelPath;
+}
+
+/** La fenêtre d'un tour, et le nombre d'extraits qu'elle laisse lire au modèle quand elle est petite. */
+export interface TurnWindow {
+  /** Budget du compacteur, et fenêtre affichée dans l'explication. */
+  contextWindow: number;
+  /** Plafond d'extraits ; absent quand la fenêtre n'en impose aucun. */
+  maxExtracts?: number;
+}
+
+const EMBEDDED_TURN_WINDOW: TurnWindow = {
+  contextWindow: EMBEDDED_CONTEXT_SIZE,
+  maxExtracts: maxExtractsForWindow(EMBEDDED_CONTEXT_SIZE),
+};
+
+/**
+ * La fenêtre du tour (S05-1-16). Le moteur embarqué crée un contexte de 4 096 jetons, mais la
+ * fenêtre se lisait sur le nom du modèle (Qwen 2.5 : 32 768) : le compacteur ne se déclenchait
+ * jamais avant le débordement, et autant d'extraits partaient que le réglage en demandait, llama.cpp
+ * coupant le reste en silence.
+ *
+ * - Réglage « embarqué » : la fenêtre du moteur embarqué, et son plafond d'extraits.
+ * - Réglage « auto » avec un modèle embarqué : le repli sonde Ollama, et la fenêtre est celle du
+ *   fournisseur retenu (`activeLLMId`, lu à travers le décorateur du journal d'usage). Le sondage
+ *   est celui que le premier appel du tour aurait fait : son choix reste en cache pour lui
+ *   (`PROBE_TTL_MS`). Il n'a pas de signal au contrat ; seule l'attente du tour s'arrête avec
+ *   « Arrêter », et le sondage va à son terme (borné par le délai d'en-têtes d'undici, 300 s), comme
+ *   pour `FallbackLLMProvider.chat` (J9). `healthCheck` ne passe pas par le journal d'usage.
+ * - Sinon : la fenêtre du modèle, `num_ctx` du tour en tête (Ollama), comme avant.
+ */
+export async function resolveTurnWindow(args: {
+  cfg: LLMConfig;
+  llm: LLMProvider;
+  activeModel: string;
+  numCtx?: number;
+  signal?: AbortSignal;
+}): Promise<TurnWindow> {
+  const { cfg, llm, activeModel, numCtx, signal } = args;
+  const ofModel: TurnWindow = { contextWindow: getContextWindow(activeModel, numCtx) };
+  if (servesEmbedded(cfg)) return EMBEDDED_TURN_WINDOW;
+  const auto =
+    (cfg.backend ?? 'ollama') === 'ollama' &&
+    (cfg.generationProvider ?? 'auto') === 'auto' &&
+    !!cfg.embeddedModelPath;
+  if (!auto) return ofModel;
+  try {
+    await untilAborted(llm.healthCheck(), signal);
+  } catch {
+    // Arrêté pendant le sondage : le tour finit annulé, sans rien demander au modèle.
+    if (signal?.aborted) return ofModel;
+  }
+  return activeLLMId(llm) === 'embedded' ? EMBEDDED_TURN_WINDOW : ofModel;
+}
+
+/** Les extraits d'un tour, par canal : sources, manuscrit, notes de lecture. */
+export interface ReadExtracts {
+  hits: MultiSourceSearchResult[];
+  own: ManuscriptMappedSearchResult[];
+  notes: ReadingNoteMappedSearchResult[];
+}
+
+function countExtracts(read: ReadExtracts): number {
+  return read.hits.length + read.own.length + read.notes.length;
+}
+
+/**
+ * La question que le moteur embarqué recevra : les messages de l'utilisateur restés sans réponse en
+ * fin de conversation, réunis comme `EmbeddedLLMClient` les réunit. Les tours vides n'y entrent pas
+ * (`runChatTurn` les retire).
+ */
+function embeddedQuestionOf(messages: ChatMessage[]): string {
+  const turns = messages.filter(
+    (m) => (m.role === 'user' || m.role === 'assistant') && m.content.trim().length > 0
+  );
+  let end = turns.length;
+  while (end > 0 && turns[end - 1].role === 'user') end--;
+  return turns
+    .slice(end)
+    .map((m) => m.content)
+    .join('\n\n');
+}
+
+/**
+ * Jetons gardés en réserve : consignes et extraits sont mesurés dans l'ordre où le moteur les
+ * réunit, mais un message système qui suivrait la conversation viendrait après le bloc, et un texte
+ * recollé se tokenise parfois à un ou deux jetons près.
+ */
+const EXTRACTS_FIT_MARGIN = 8;
+
+/**
+ * Les extraits que le modèle embarqué lira en entier (revue de L08-4). Le moteur reçoit les
+ * consignes du mode, les indications du projet et le bloc des extraits en un seul rôle système,
+ * avec la question, dans un budget fixe (`embeddedInputBudget`) ; ce qui dépasse, sa coupe le retire
+ * par la fin, au jeton, sans rien dire. Ici, les extraits qui ne tiendraient pas sont retirés avant
+ * d'être montrés, un à un, mesurés au tokeniseur du modèle : le panneau des sources et l'explication
+ * disent alors ce que le modèle lit.
+ *
+ * À chaque retrait, la sélection est refaite (`selectWithOwnTextBands`) sur le nombre d'extraits qui
+ * reste, avec la bande que la politique donnerait à une recherche de cette taille (`bandsFor`) : les
+ * sources les moins pertinentes partent d'abord, et la voix de l'auteur garde sa place (une à partir
+ * de deux extraits, aucune pour un seul ; plus pour une question de rappel ou une portée « seul »).
+ */
+export function fitExtractsToWindow<B extends { systemPrompt: string }>(args: {
+  found: ReadExtracts;
+  blocksFor: (read: ReadExtracts) => B;
+  /** Les messages système qui précèdent le bloc des extraits : mode, indications. */
+  fixedSystem: string[];
+  question: string;
+  budget: number;
+  tokenizer: EmbeddedTokenizer;
+  bandsFor: (extracts: number) => OwnTextBands;
+}): { read: ReadExtracts; blocks: B } {
+  const { found, blocksFor, fixedSystem, question, budget, tokenizer, bandsFor } = args;
+  const questionTokens = tokenizer.tokenize(question).length;
+  const fits = (block: string): boolean =>
+    tokenizer.tokenize([...fixedSystem, block].join('\n\n')).length + questionTokens + EXTRACTS_FIT_MARGIN <=
+    budget;
+  let read = found;
+  let blocks = blocksFor(read);
+  let left = countExtracts(read);
+  while (left > 0 && !fits(blocks.systemPrompt)) {
+    const kept = new Set<object>(
+      selectWithOwnTextBands<
+        MultiSourceSearchResult | ManuscriptMappedSearchResult | ReadingNoteMappedSearchResult
+      >([...read.hits, ...read.own, ...read.notes], left - 1, bandsFor(left - 1))
+    );
+    read = {
+      hits: read.hits.filter((h) => kept.has(h)),
+      own: read.own.filter((h) => kept.has(h)),
+      notes: read.notes.filter((h) => kept.has(h)),
+    };
+    // Jamais plus que demandé : la boucle finit.
+    left = countExtracts(read);
+    blocks = blocksFor(read);
+  }
+  return { read, blocks };
 }
 
 /**
@@ -764,6 +918,9 @@ class FusionChatService {
     // deux parlent de la même fenêtre.
     const turnOpts = resolveTurnOptions(cfg, args.opts);
     const numCtx = turnOpts.numCtx;
+    // La fenêtre du modèle qui répondra : celle du contexte llama.cpp quand c'est le modèle embarqué,
+    // avec le plafond d'extraits qu'elle impose (L08-4). En « auto », un sondage d'Ollama le dit.
+    const turnWindow = await resolveTurnWindow({ cfg, llm, activeModel, numCtx, signal: op.signal });
 
     // Build a context compactor (fusion 1.3) sized to the active chat
     // model. Engine runs `compactor.compact(messages)` at the start of
@@ -778,8 +935,9 @@ class FusionChatService {
       // When the caller explicitly sized `num_ctx` for this turn, honour
       // that as the compaction budget — otherwise the compactor would
       // assume the model's full advertised window and let the prompt
-      // overflow the smaller per-call allocation.
-      contextWindow: getContextWindow(activeModel, numCtx),
+      // overflow the smaller per-call allocation. Le modèle embarqué :
+      // la fenêtre du contexte llama.cpp (`resolveTurnWindow`).
+      contextWindow: turnWindow.contextWindow,
       summarizeOptions: summarizeOptionsFor(turnOpts),
     });
 
@@ -857,7 +1015,14 @@ class FusionChatService {
             const manuscriptOnly = sourceType === 'manuscript';
             const notesOnly = sourceType === 'readingNotes';
             const ownOnly = manuscriptOnly || notesOnly;
-            const topK = options?.topK ?? configManager.getRAGConfig().topK;
+            const requestedTopK = options?.topK ?? configManager.getRAGConfig().topK;
+            // Plafond de la fenêtre (L08-4) : le modèle embarqué ne lit pas plus d'extraits que sa
+            // fenêtre n'en tient. La recherche n'en demande pas davantage, si bien que le panneau des
+            // sources montre ce que le modèle a lu ; les bandes de l'auteur se calculent sur lui.
+            const topK =
+              turnWindow.maxExtracts !== undefined
+                ? Math.min(requestedTopK, turnWindow.maxExtracts)
+                : requestedTopK;
             // Le manuscrit : ce que l'auteur a déjà écrit. Sa place dans le
             // tour est une politique (manuscript-policy.ts, palier 2) :
             // question de rappel > portée > case « Mon manuscrit » > posture
@@ -865,7 +1030,7 @@ class FusionChatService {
             const recall = detectManuscriptIntent(lastUser);
             const notesRecall = detectReadingNotesIntent(lastUser);
             const stances = await resolveOwnTextStances(args.systemPrompt?.modeId);
-            const manuscript = resolveManuscriptPolicy({
+            const manuscriptInput = {
               enabled: manuscriptIndexService.isEnabled(),
               requested: options?.includeManuscript,
               sourceType,
@@ -873,8 +1038,8 @@ class FusionChatService {
               collectionKeys: options?.collectionKeys,
               stance: stances.manuscript,
               recallIntent: recall.intent,
-              topK,
-            });
+            };
+            const manuscript = resolveManuscriptPolicy({ ...manuscriptInput, topK });
             // Cinquième corpus : les notes de lecture — l'autre voix de
             // l'auteur. Leur existence pour ce tour tient à l'index
             // (`rag.indexReadingNotes`) et au consentement d'envoi hors d'un
@@ -892,14 +1057,14 @@ class FusionChatService {
                   { kind: 'reading-notes', consent: readingNotesIndexService.cloudConsent() }
                 )
               ).allowed;
-            const readingNotes = resolveReadingNotesPolicy({
+            const readingNotesInput = {
               enabled: notesAvailable,
               requested: options?.includeReadingNotes,
               sourceType,
               stance: stances.readingNotes,
               recallIntent: notesRecall.intent,
-              topK,
-            });
+            };
+            const readingNotes = resolveReadingNotesPolicy({ ...readingNotesInput, topK });
             // Texte de l'auteur seul demandé mais écarté (index désactivé,
             // consentement absent) : rien à chercher ailleurs, et chercher
             // quand même embarquerait la question pour jeter les résultats
@@ -921,7 +1086,7 @@ class FusionChatService {
               readingNoteSlots: readingNotes.slots,
               documentIds: options?.documentIds,
               collectionKeys: options?.collectionKeys,
-              topK: options?.topK,
+              topK,
               // Celui du tour : « Arrêter » coupe l'embedding de la question (J9).
               signal,
             });
@@ -1005,24 +1170,92 @@ class FusionChatService {
                   retrievalService.describeDocuments(options?.documentIds ?? []),
                   promptLang
                 );
-            // Manuscrit seul : pas d'en-tête « aucune source », qui dirait au
-            // modèle que bibliographie et archives ont été interrogées en vain
-            // alors qu'elles ne l'ont pas été ; la consigne du bloc manuscrit
-            // porte alors le périmètre. Sources en échec sans extrait : pas
-            // d'en-tête non plus (elles n'ont pas répondu « rien »), mais le
-            // texte de l'utilisateur qui suit garde son préambule — sinon le
-            // modèle peut le citer comme une source.
-            const sourcesBlock = ownOnly
-              ? ''
-              : effectiveHits.length === 0 && someFailed
-                ? ownHits.length + noteHits.length > 0
-                  ? CONTEXT_TEXT[promptLang].ownPassagesNotSources
-                  : ''
-                : formatContextAsSystemPrompt(effectiveHits, promptLang, {
-                    ownBlocksFollow: ownHits.length + noteHits.length > 0,
-                  });
-            const manuscriptBlock = formatManuscriptContext(ownHits, promptLang, manuscript.wording);
-            const notesBlock = formatReadingNotesContext(noteHits, promptLang, readingNotes.wording);
+            const retrievalNotes = formatRetrievalNotes(status, { noHits, ownOnly }, promptLang);
+            const ownFound = ownHits.length + noteHits.length;
+            const blocksFor = (read: ReadExtracts) => {
+              const text = CONTEXT_TEXT[promptLang];
+              // Manuscrit seul : pas d'en-tête « aucune source », qui dirait au
+              // modèle que bibliographie et archives ont été interrogées en vain
+              // alors qu'elles ne l'ont pas été ; la consigne du bloc manuscrit
+              // porte alors le périmètre. Sources en échec sans extrait : pas
+              // d'en-tête non plus (elles n'ont pas répondu « rien »), mais le
+              // texte de l'utilisateur qui suit garde son préambule — sinon le
+              // modèle peut le citer comme une source. Sources trouvées, mais
+              // toutes retirées par la fenêtre du modèle embarqué : elles ont
+              // répondu, et « aucun extrait ne correspond » ferait dire au
+              // modèle qu'elles se taisent (revue de L08-4).
+              const ownCount = read.own.length + read.notes.length;
+              const sourcesBlock = ownOnly
+                ? ''
+                : read.hits.length === 0 && effectiveHits.length > 0
+                  ? ownCount > 0
+                    ? `${text.sourcesUnread} ${text.ownPassagesNotSources}`
+                    : text.sourcesUnread
+                  : read.hits.length === 0 && someFailed
+                    ? ownCount > 0
+                      ? text.ownPassagesNotSources
+                      : ''
+                    : formatContextAsSystemPrompt(read.hits, promptLang, {
+                        ownBlocksFollow: ownCount > 0,
+                      });
+              const manuscriptBlock = formatManuscriptContext(read.own, promptLang, manuscript.wording);
+              const notesBlock = formatReadingNotesContext(read.notes, promptLang, readingNotes.wording);
+              // Plus rien ne reste, et le texte de l'utilisateur avait répondu : le dire aussi, sans
+              // quoi une question de rappel ou une portée « seul » recevrait une réponse sans le moindre
+              // avertissement. Quand des sources restent, la règle ordinaire du `topK` vaut.
+              const ownUnread =
+                ownFound > 0 && countExtracts(read) === 0 ? `\n${text.ownTextUnread}` : '';
+              return {
+                sourcesBlock,
+                manuscriptBlock,
+                notesBlock,
+                systemPrompt:
+                  scopeBlock + sourcesBlock + manuscriptBlock + notesBlock + ownUnread + retrievalNotes,
+              };
+            };
+
+            // Les extraits que le modèle lira (L08-4). Le plafond de la recherche est fixe, les
+            // consignes ne le sont pas : un mode bavard, les indications du projet (`context.md`,
+            // jusqu'à 32 000 caractères) ou un texte qui se découpe mal (OCR) en laissent tenir
+            // moins dans la fenêtre du modèle embarqué. Ceux qui ne tiendraient pas sont retirés
+            // ici, mesurés au tokeniseur du modèle, avant que le panneau des sources et
+            // l'explication ne les montrent : la coupe des consignes (`fitSystemToWindow`) les
+            // effaçait sans rien dire.
+            const found: ReadExtracts = { hits: effectiveHits, own: ownHits, notes: noteHits };
+            const tokenizer =
+              turnWindow.maxExtracts !== undefined ? await embeddedTokenizerOf(llm, signal) : null;
+            const { read, blocks } = tokenizer
+              ? fitExtractsToWindow({
+                  found,
+                  blocksFor,
+                  // Les consignes du mode et les indications, telles que le moteur les placera
+                  // au-dessus des extraits (`runChatTurn`), puis la question.
+                  fixedSystem: [
+                    ...(systemPromptConfig?.customText?.trim() ? [systemPromptConfig.customText] : []),
+                    ...messages.filter((m) => m.role === 'system').map((m) => m.content),
+                  ],
+                  question: embeddedQuestionOf(messages),
+                  budget: embeddedInputBudget(EMBEDDED_CONTEXT_SIZE, turnOpts.maxTokens),
+                  tokenizer,
+                  // La bande de l'auteur, recalculée sur ce qui reste.
+                  bandsFor: (n) => ({
+                    manuscript: resolveManuscriptPolicy({ ...manuscriptInput, topK: n }).slots,
+                    readingNotes: resolveReadingNotesPolicy({ ...readingNotesInput, topK: n }).slots,
+                  }),
+                })
+              : { read: found, blocks: blocksFor(found) };
+            const foundCount = countExtracts(found);
+            const readCount = countExtracts(read);
+            if (readCount < foundCount) {
+              console.warn(
+                `[fusion-chat] ${foundCount - readCount} extrait(s) retiré(s) pour tenir dans la fenêtre de ` +
+                  `${EMBEDDED_CONTEXT_SIZE} jetons du modèle embarqué : ${readCount} lu(s) sur ${foundCount}`
+              );
+            }
+            // Le plafond se dit quand il a retiré quelque chose : à la recherche (`topK`), ou ici.
+            const extractsCap =
+              readCount < foundCount ? readCount : topK < requestedTopK ? topK : undefined;
+            const { sourcesBlock, manuscriptBlock, notesBlock } = blocks;
             const contextChars = {
               total:
                 scopeBlock.length +
@@ -1058,19 +1291,36 @@ class FusionChatService {
             };
 
             return {
-              systemPrompt:
-                scopeBlock +
-                sourcesBlock +
-                manuscriptBlock +
-                notesBlock +
-                formatRetrievalNotes(status, { noHits, ownOnly }, promptLang),
+              systemPrompt: blocks.systemPrompt,
               sources: [
-                ...hitsToSources(effectiveHits, groupEventsByChunk(securityEvents)),
-                ...manuscriptHitsToSources(ownHits),
-                ...readingNoteHitsToSources(noteHits),
+                ...hitsToSources(read.hits, groupEventsByChunk(securityEvents)),
+                ...manuscriptHitsToSources(read.own),
+                ...readingNoteHitsToSources(read.notes),
               ],
               explanation: {
-                search: { ...stats.search, contextChars, retrievalStatus: status },
+                search: {
+                  ...stats.search,
+                  // Les extraits retirés par la fenêtre ne comptent ni par corpus ni par document :
+                  // l'explication dit ce que le modèle a lu, comme le panneau des sources. « Résultats
+                  // trouvés » (`totalResults`) et `hitCount` restent ce que la recherche a rendu.
+                  ...(readCount < foundCount
+                    ? {
+                        documents: documentsOfHits(read.hits),
+                        ...(stats.search.corpora
+                          ? {
+                              corpora: withSelectedCounts(stats.search.corpora, [
+                                ...read.hits,
+                                ...read.own,
+                                ...read.notes,
+                              ]),
+                            }
+                          : {}),
+                      }
+                    : {}),
+                  contextChars,
+                  retrievalStatus: status,
+                  ...(extractsCap !== undefined ? { extractsCap } : {}),
+                },
                 ...(compressionSlice ? { compression: compressionSlice } : {}),
                 timing: {
                   ...stats.timing,
@@ -1514,6 +1764,13 @@ interface ContextText {
   /** Préambule du texte de l'utilisateur quand aucune source ne le précède. */
   ownPassagesNotSources: string;
   /**
+   * Des extraits des sources ont été trouvés, mais la fenêtre du modèle embarqué n'en laisse tenir
+   * aucun (L08-4) : jamais `noSources`, qui ferait dire au modèle que les sources se taisent.
+   */
+  sourcesUnread: string;
+  /** Même chose pour le texte de l'utilisateur : manuscrit et notes de lecture trouvés, aucun transmis. */
+  ownTextUnread: string;
+  /**
    * Recherche en échec (S04-2-1), choisie par le statut affiché (`formatRetrievalNotes`). Un corpus
    * tenté au moins en échec, et aucun extrait rendu : la consigne d'une recherche qui a levé, celle du
    * moteur, mot pour mot.
@@ -1553,6 +1810,10 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
       'Aucun extrait des sources interrogées (bibliographie, archives, notes) ne correspond à cette question. Si elle porte sur une source, dis-le.',
     ownPassagesNotSources:
       "Les passages qui suivent, s'il y en a, sont le texte de l'utilisateur ou ses notes de lecture : ne les présente JAMAIS comme le contenu d'une source.",
+    sourcesUnread:
+      'Des extraits des sources interrogées ont été trouvés pour cette question, mais aucun n’a pu t’être transmis : ils ne tiennent pas dans ta fenêtre de contexte. Dis-le à l’utilisateur : ne conclus pas que ses sources ne disent rien sur la question et ne fabrique pas de citations.',
+    ownTextUnread:
+      "Des passages du texte de l’utilisateur (manuscrit, notes de lecture) ont été trouvés pour cette question, mais aucun n’a pu t’être transmis : ils ne tiennent pas dans ta fenêtre de contexte. Dis-le-lui : ne conclus pas qu’il n’a rien écrit sur la question et ne cite aucun passage.",
     searchFailed: RETRIEVAL_FAILED_TEXT.fr,
     someSearchesFailed:
       'Certaines recherches dans les sources ont échoué pour ce tour : les éléments disponibles peuvent être incomplets. Dis à l’utilisateur qu’une partie de ses sources n’a pas pu être consultée : ne conclus pas qu’une information en est absente, ne prétends pas avoir consulté les corpus en échec et ne fabrique pas de citations.',
@@ -1609,6 +1870,10 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
       'No excerpt from the searched sources (bibliography, archives, notes) matches this question. If it is about a source, say so.',
     ownPassagesNotSources:
       "The passages that follow, if any, are the user's own text or their reading notes: NEVER present them as the content of a source.",
+    sourcesUnread:
+      'Excerpts from the searched sources were found for this question, but none could be passed to you: they do not fit in your context window. Tell the user so: do not conclude that their sources say nothing about the question, and do not invent citations.',
+    ownTextUnread:
+      "Passages from the user's own text (manuscript, reading notes) were found for this question, but none could be passed to you: they do not fit in your context window. Tell the user so: do not conclude that they have written nothing about the question, and do not cite any passage.",
     searchFailed: RETRIEVAL_FAILED_TEXT.en,
     someSearchesFailed:
       'Some source searches failed for this turn: the available evidence may be incomplete. Tell the user that part of their sources could not be searched: do not conclude that something is absent from them, do not imply that the failed sources were consulted, and do not invent citations.',

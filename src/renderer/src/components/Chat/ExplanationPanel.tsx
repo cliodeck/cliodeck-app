@@ -58,6 +58,17 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
               : t('chat.explanation.retrievalFailed', 'La recherche de sources a échoué.')}
         </div>
       )}
+      {/* Des extraits trouvés, aucun lu : la fenêtre du modèle les a tous retirés (L08-4). Le panneau
+          des sources est vide ; sans ceci, on croirait que la recherche n'a rien trouvé. */}
+      {explanation.search.extractsCap === 0 && (
+        <div role="status" className="retrieval-warning" data-status="unread">
+          <AlertTriangle size={14} aria-hidden="true" />
+          {t(
+            'chat.explanation.extractsUnread',
+            'Des extraits ont été trouvés, mais aucun ne tient dans la fenêtre de contexte du modèle avec les consignes : la réponse ne s’appuie sur aucun d’eux. Des consignes de projet plus courtes leur feraient place.'
+          )}
+        </div>
+      )}
       <button
         className="explanation-toggle"
         onClick={() => setShowExplanation(!showExplanation)}
@@ -78,6 +89,15 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
             <ul>
               <li><strong>{t('chat.explanation.resultsFound', 'Résultats trouvés:')}</strong> {explanation.search.totalResults} {t('chat.explanation.chunks', 'chunks')}</li>
               <li><strong>{t('chat.explanation.duration', 'Durée:')}</strong> {explanation.search.searchDurationMs}ms {explanation.search.cacheHit && t('chat.explanation.cacheHitSuffix', '(cache)')}</li>
+              {/* La fenêtre du modèle a réduit le nombre d'extraits demandé (le modèle embarqué) :
+                  le modèle n'en a pas lu davantage, et les sources affichées sont celles-là. */}
+              {explanation.search.extractsCap !== undefined && (
+                <li data-testid="explanation-extracts-cap">
+                  <strong>{t('chat.explanation.extractsCapLabel', "Plafond d'extraits:")}</strong>{' '}
+                  {explanation.search.extractsCap}{' '}
+                  {t('chat.explanation.extractsCapReason', '(fenêtre de contexte du modèle)')}
+                </li>
+              )}
               {corpora ? (
                 <li data-testid="explanation-corpora">
                   <strong>{t('chat.explanation.corporaLabel', 'Par corpus:')}</strong>{' '}

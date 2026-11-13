@@ -26,6 +26,7 @@ import type {
   ProviderStatus,
 } from './base.js';
 import { collectCompletion } from './collect.js';
+import type { EmbeddedTokenizer } from '../EmbeddedLLMClient.js';
 
 /** Durée de validité d'un sondage du primaire. */
 const PROBE_TTL_MS = 15_000;
@@ -40,7 +41,7 @@ function usable(status: ProviderStatus): boolean {
  * `promise`, ou le rejet par la raison de `signal` dès qu'il s'avorte. Seule l'attente de l'appelant
  * est coupée : ce que `promise` attend continue (J9).
  */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return promise;
   if (signal.aborted) return Promise.reject(signal.reason);
   return new Promise<T>((resolve, reject) => {
@@ -153,6 +154,15 @@ export class FallbackLLMProvider implements LLMProvider {
   async healthCheck(): Promise<ProviderStatus> {
     const chosen = await this.picker.pick();
     return chosen.healthCheck();
+  }
+
+  /**
+   * Le tokeniseur du fournisseur qui servira l'appel, quand c'est le modèle embarqué ; `null`
+   * sinon. Le choix est celui du sondage en cache (`PROBE_TTL_MS`), celui que l'appel suivant fera :
+   * sondé au besoin, sans rien inscrire au journal d'usage. L'abandon n'arrête que l'attente (J9).
+   */
+  async embeddedTokenizer(signal?: AbortSignal): Promise<EmbeddedTokenizer | null> {
+    return embeddedTokenizerOf(await this.picker.pick(signal), signal);
   }
 
   /**
@@ -285,4 +295,37 @@ export function resolveEmbeddingProvider(
     ).resolve({ signal });
   }
   return Promise.resolve(provider);
+}
+
+/**
+ * L'identifiant du fournisseur qui sert les appels de `provider` : derrière un repli
+ * (`FallbackLLMProvider`), celui qu'il a retenu au dernier sondage ; sinon le sien. Passe à travers
+ * le décorateur du journal d'usage (`instrumentLLM`), qui enveloppe toujours le repli dans le vrai
+ * registre : un `instanceof FallbackLLMProvider` ne le voit jamais.
+ */
+export function activeLLMId(provider: LLMProvider): string {
+  const candidate = provider as LLMProvider & { activeId?: unknown };
+  return typeof candidate.activeId === 'string' ? candidate.activeId : provider.id;
+}
+
+/** Ce que porte un fournisseur qui sait mesurer ses entrées : le modèle embarqué, et ce qui l'enveloppe. */
+interface MeasuresEmbeddedInput {
+  embeddedTokenizer(signal?: AbortSignal): Promise<EmbeddedTokenizer | null>;
+}
+
+/**
+ * Le tokeniseur du modèle embarqué quand c'est lui qui servira les appels de `provider`, `null`
+ * sinon (Ollama, cloud, ou modèle embarqué qui ne se charge pas). Passe à travers le décorateur du
+ * journal d'usage et le repli, comme `activeLLMId` ; derrière un repli, sonde Ollama au besoin. Sert
+ * à mesurer ce qui tiendra dans la fenêtre de 4 096 jetons avant de l'envoyer (L08-4). L'abandon de
+ * `signal` rejette par sa raison ; un sondage ou un chargement partis vont à leur terme (J9).
+ */
+export function embeddedTokenizerOf(
+  provider: LLMProvider,
+  signal?: AbortSignal
+): Promise<EmbeddedTokenizer | null> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  const candidate = provider as LLMProvider & Partial<MeasuresEmbeddedInput>;
+  if (typeof candidate.embeddedTokenizer !== 'function') return Promise.resolve(null);
+  return untilAborted(candidate.embeddedTokenizer(signal), signal);
 }

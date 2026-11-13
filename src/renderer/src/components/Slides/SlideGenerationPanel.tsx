@@ -20,6 +20,13 @@ export const SlideGenerationPanel: React.FC = () => {
   const [streamedContent, setStreamedContent] = useState('');
   const [isDone, setIsDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Part du document que le modèle a lue, en pour cent, quand il n'a pas pu tout lire : le modèle
+   * embarqué ne lit que ce qui tient dans sa fenêtre de contexte (L08-4).
+   */
+  const [sourceReadPercent, setSourceReadPercent] = useState<number | null>(null);
+  /** Références de la bibliographie que le modèle embarqué a reçues, quand toutes n'ont pas tenu. */
+  const [bibliographyCut, setBibliographyCut] = useState<{ kept: number; total: number } | null>(null);
   const [hasSelection, setHasSelection] = useState(false);
   // Modèle réellement utilisé par la génération (remonté par l'IPC) — porté
   // par la proposition d'application (source.model, contrat Phase 4).
@@ -71,6 +78,8 @@ export const SlideGenerationPanel: React.FC = () => {
     setIsDone(false);
     setStreamedContent('');
     setError(null);
+    setSourceReadPercent(null);
+    setBibliographyCut(null);
 
     // Remove previous listeners
     cleanupRef.current.forEach((fn) => fn());
@@ -81,18 +90,29 @@ export const SlideGenerationPanel: React.FC = () => {
       setStreamedContent((prev) => prev + chunk);
     });
 
-    const removeDone = window.electron.slides.onStreamDone(({ content, cancelled }) => {
+    const removeDone = window.electron.slides.onStreamDone(({ content, cancelled, sourceCut, bibliographyCut: bibCut }) => {
       // Replace streamed raw content with the post-processed (normalised) version
       if (content) {
         setStreamedContent(content);
       }
+      if (sourceCut && sourceCut.totalChars > 0) {
+        // Un peu de lu ne s'affiche pas « 0 % » ; rien de lu, jamais « 1 % ».
+        const percent = Math.round((100 * sourceCut.readChars) / sourceCut.totalChars);
+        setSourceReadPercent(sourceCut.readChars > 0 ? Math.max(1, percent) : 0);
+      }
+      if (bibCut) setBibliographyCut(bibCut);
       setIsGenerating(false);
       setIsDone(!cancelled);
     });
 
-    const removeError = window.electron.slides.onStreamError(({ error: errMsg }) => {
+    const removeError = window.electron.slides.onStreamError(({ error: errMsg, code }) => {
       setIsGenerating(false);
-      setError(errMsg);
+      // Le refus du modèle embarqué a son texte : le message du moteur est en anglais.
+      setError(
+        code === 'embedded_prompt_too_long'
+          ? t('slides.generate.embeddedPromptTooLong')
+          : errMsg || t('slides.generate.unknownError')
+      );
     });
 
     cleanupRef.current = [removeStream, removeDone, removeError];
@@ -112,7 +132,9 @@ export const SlideGenerationPanel: React.FC = () => {
         // bloqué sur « génération en cours ».
         if (res?.success === false) {
           setIsGenerating(false);
-          setError(res.error ?? t('slides.generate.unknownError'));
+          // Une panne dite par le flux (`slides:stream-error`) l'a déjà été, traduite : la réponse
+          // brute de l'IPC, qui la suit, ne la remplace pas.
+          setError((said) => said ?? res.error ?? t('slides.generate.unknownError'));
           return;
         }
         if (res?.model) setGeneratedModel(res.model);
@@ -166,6 +188,8 @@ export const SlideGenerationPanel: React.FC = () => {
     setStreamedContent('');
     setIsDone(false);
     setError(null);
+    setSourceReadPercent(null);
+    setBibliographyCut(null);
   };
 
   return (
@@ -238,6 +262,20 @@ export const SlideGenerationPanel: React.FC = () => {
               readOnly
               rows={14}
             />
+          </div>
+        )}
+
+        {/* Le modèle n'a lu que le début du document */}
+        {sourceReadPercent !== null && (
+          <div className="sgp-notice">
+            {t('slides.generate.sourceCut', { percent: sourceReadPercent })}
+          </div>
+        )}
+
+        {/* Le modèle n'a reçu que les premières références de la bibliographie */}
+        {bibliographyCut !== null && (
+          <div className="sgp-notice">
+            {t('slides.generate.bibliographyCut', { kept: bibliographyCut.kept, total: bibliographyCut.total })}
           </div>
         )}
       </div>

@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import { EmbeddedProvider, EmbeddedEmbeddingProvider } from '../embedded.js';
 import { FallbackLLMProvider, FallbackEmbeddingProvider } from '../fallback.js';
 import { clioDeckConfigToRegistryConfig } from '../cliodeck-config-adapter.js';
-import type { EmbeddedLLMClient } from '../../EmbeddedLLMClient.js';
+import type { EmbeddedChatRequest, EmbeddedLLMClient } from '../../EmbeddedLLMClient.js';
 import type {
   ChatChunk,
   EmbeddingProvider,
@@ -30,6 +30,8 @@ function fakeClient(opts: {
   deltas?: string[];
   throwsOn?: 'load' | 'stream';
   dims?: number;
+  /** Chaque demande de génération reçue par le client. */
+  requests?: EmbeddedChatRequest[];
 }): EmbeddedLLMClient {
   const { loads = true, deltas = ['bon', 'jour'], dims = 768 } = opts;
   const client = {
@@ -47,7 +49,8 @@ function fakeClient(opts: {
     async generateEmbedding() {
       return new Float32Array(dims).fill(0.1);
     },
-    async *generateResponseStream() {
+    async *generateChat(request: EmbeddedChatRequest) {
+      opts.requests?.push(request);
       if (opts.throwsOn === 'stream') throw new Error('generation exploded');
       for (const d of deltas) yield d;
     },
@@ -129,6 +132,40 @@ describe('EmbeddedProvider', () => {
     expect(chunks[chunks.length - 1].finishReason).toBe('error');
   });
 
+  // S05-1-25 : la conversation était aplatie en un prompt et un « contexte » de lignes
+  // « Question : … / Réponse : … », et les options du tour n'arrivaient pas au client.
+  it('transmet les consignes, les tours, la question et les options du tour, chacun à part', async () => {
+    const requests: EmbeddedChatRequest[] = [];
+    const p = new EmbeddedProvider({ modelPath: MODEL_PATH, client: fakeClient({ requests }) });
+    const controller = new AbortController();
+    await collect(
+      p.chat(
+        [
+          { role: 'system', content: 'Mode : état de l’art.' },
+          { role: 'system', content: '[1] type : bibliographie' },
+          { role: 'user', content: 'Qui était Jules Durand ?' },
+          { role: 'assistant', content: 'Un syndicaliste [1].' },
+          { role: 'user', content: 'Et son procès ?' },
+        ],
+        { temperature: 0, topP: 0.9, maxTokens: 512, signal: controller.signal }
+      )
+    );
+    expect(requests).toEqual([
+      {
+        system: 'Mode : état de l’art.\n\n[1] type : bibliographie',
+        history: [
+          { role: 'user', content: 'Qui était Jules Durand ?' },
+          { role: 'assistant', content: 'Un syndicaliste [1].' },
+        ],
+        prompt: 'Et son procès ?',
+        temperature: 0,
+        topP: 0.9,
+        maxTokens: 512,
+        signal: controller.signal,
+      },
+    ]);
+  });
+
   it('un échec de chargement peut être retenté (modèle re-téléchargé)', async () => {
     let attempts = 0;
     const flaky = {
@@ -199,7 +236,7 @@ function disposableClient(): { client: EmbeddedLLMClient; loads: { embedding: nu
       if (!loaded) throw new Error('Embedded embedding model not initialized. Call initializeEmbedding() first.');
       return new Float32Array(768).fill(0.1);
     },
-    async *generateResponseStream() {
+    async *generateChat() {
       if (!loaded) throw new Error('Model not initialized');
       yield 'bonjour';
     },

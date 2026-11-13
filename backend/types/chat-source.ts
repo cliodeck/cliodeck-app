@@ -57,6 +57,13 @@ export interface RAGExplanation {
       manuscript: number;
       readingNotes: number;
     };
+    /**
+     * Plafond d'extraits imposé par la fenêtre du modèle (le moteur embarqué : 4 096 jetons), quand
+     * il a réduit le nombre demandé : à la recherche (4 au plus), puis, mesurés au tokeniseur, ceux
+     * que les consignes et les indications du projet ne laissaient pas tenir. C'est le nombre
+     * d'extraits que le modèle a lus, et le panneau des sources montre ceux-là (L08-4).
+     */
+    extractsCap?: number;
   };
   compression?: {
     enabled: boolean;

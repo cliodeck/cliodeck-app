@@ -1100,12 +1100,22 @@ const api = {
       ipcRenderer.on('slides:stream', listener);
       return () => ipcRenderer.removeListener('slides:stream', listener);
     },
-    onStreamDone: (callback: (result: { content: string; cancelled?: boolean }) => void) => {
+    onStreamDone: (
+      callback: (result: {
+        content: string;
+        cancelled?: boolean;
+        /** Le modèle embarqué n'a lu que le début du document (sa fenêtre de contexte, L08-4). */
+        sourceCut?: { readChars: number; totalChars: number };
+        /** Il n'a reçu que les premières références de la bibliographie (même raison). */
+        bibliographyCut?: { kept: number; total: number };
+      }) => void
+    ) => {
       const listener = (_event: any, result: any) => callback(result);
       ipcRenderer.on('slides:stream-done', listener);
       return () => ipcRenderer.removeListener('slides:stream-done', listener);
     },
-    onStreamError: (callback: (error: { error: string }) => void) => {
+    /** `code` : celui du fournisseur (`embedded_prompt_too_long`…), que le panneau traduit. */
+    onStreamError: (callback: (error: { error: string; code?: string }) => void) => {
       const listener = (_event: any, error: any) => callback(error);
       ipcRenderer.on('slides:stream-error', listener);
       return () => ipcRenderer.removeListener('slides:stream-error', listener);

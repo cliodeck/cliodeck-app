@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  fitExtractsToWindow,
   formatContextAsSystemPrompt,
   formatManuscriptContext,
   formatReadingNotesContext,
@@ -9,6 +10,7 @@ import {
   readingNoteHitsToSources,
   resolvePromptLanguage,
   resolveTurnOptions,
+  resolveTurnWindow,
   retrievalStatus,
   shouldIncludeManuscript,
   summarizeOptionsFor,
@@ -21,6 +23,8 @@ import type {
 import type { LLMConfig } from '../../../../backend/types/config.js';
 import type { MultiSourceSearchResult } from '../retrieval-service.js';
 import { runChatTurn } from '../chat-engine.js';
+import { manuscriptSlots } from '../retrieval-quota.js';
+import { recallSlots } from '../manuscript-policy.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -495,13 +499,20 @@ describe('resolveTurnOptions — ce qui est propre à Ollama reste chez Ollama',
     expect(r.maxTokens).toBe(512);
   });
 
-  it('traite le modèle embarqué comme un fournisseur non-Ollama', () => {
+  it('traite le modèle embarqué comme un fournisseur non-Ollama, top-p du panneau excepté', () => {
     const embedded: LLMConfig = {
       ...ollama,
       generationProvider: 'embedded',
       embeddedModelPath: '/models/q.gguf',
     };
-    expect(resolveTurnOptions(embedded, opts).numCtx).toBeUndefined();
+    const r = resolveTurnOptions(embedded, opts);
+    expect(r.numCtx).toBeUndefined();
+    expect(r.topK).toBeUndefined();
+    expect(r.repeatPenalty).toBeUndefined();
+    // S05-1-25 : le moteur embarqué gardait 0,85 en dur, quel que soit le panneau.
+    expect(r.topP).toBe(0.85);
+    expect(resolveTurnOptions(embedded, { ...opts, topP: 0.6 }).topP).toBe(0.6);
+    expect(r.temperature).toBe(0.1);
   });
 });
 
@@ -533,5 +544,122 @@ describe('summarizeOptionsFor — la fenêtre du tour, chez Ollama seulement', (
     const options = summarizeOptionsFor(resolveTurnOptions(claude, { numCtx: 32_768 }));
     expect(options).not.toHaveProperty('numCtx');
     expect(options.temperature).toBe(0);
+  });
+});
+
+/**
+ * La fenêtre du tour (L08-4) : seul le modèle embarqué a la sienne, et seul le réglage « auto » avec
+ * un modèle embarqué sonde Ollama pour savoir qui répondra. Ollama explicite et les fournisseurs
+ * cloud gardent celle d'avant (`num_ctx` du tour en tête, S06-1-18), sans sondage ni plafond.
+ */
+describe('resolveTurnWindow — la fenêtre du modèle qui répondra', () => {
+  const base: LLMConfig = {
+    backend: 'ollama',
+    ollamaURL: 'http://127.0.0.1:11434',
+    ollamaEmbeddingModel: 'nomic-embed-text',
+    ollamaChatModel: 'qwen3:32b',
+    embeddedModelPath: '/models/q.gguf',
+    embeddedModelId: 'qwen2.5-0.5b',
+  };
+  let probes = 0;
+  const llm = {
+    id: 'ollama',
+    healthCheck: async () => {
+      probes += 1;
+      return { state: 'ready' as const };
+    },
+  } as unknown as LLMProvider;
+
+  it('Ollama explicite et cloud : la fenêtre du modèle, sans sondage ni plafond', async () => {
+    probes = 0;
+    const ollama = { ...base, generationProvider: 'ollama' as const };
+    expect(await resolveTurnWindow({ cfg: ollama, llm, activeModel: 'qwen3:32b', numCtx: 16_384 })).toEqual({
+      contextWindow: 16_384,
+    });
+    const claude: LLMConfig = { ...base, backend: 'claude', claudeAPIKey: 'k', generationProvider: 'embedded' };
+    expect(await resolveTurnWindow({ cfg: claude, llm, activeModel: 'claude-sonnet-4-6' })).toEqual({
+      contextWindow: 200_000,
+    });
+    // « embarqué » sans modèle téléchargé : l'adaptateur sert Ollama.
+    const noModel: LLMConfig = { ...base, generationProvider: 'embedded', embeddedModelPath: undefined };
+    expect((await resolveTurnWindow({ cfg: noModel, llm, activeModel: 'qwen3:32b' })).maxExtracts).toBeUndefined();
+    expect(probes).toBe(0);
+  });
+
+  it('embarqué : 4 096 et 4 extraits, sans sondage', async () => {
+    probes = 0;
+    const embedded = { ...base, generationProvider: 'embedded' as const };
+    expect(await resolveTurnWindow({ cfg: embedded, llm, activeModel: 'qwen2.5-0.5b' })).toEqual({
+      contextWindow: 4096,
+      maxExtracts: 4,
+    });
+    expect(probes).toBe(0);
+  });
+});
+
+/**
+ * Les extraits que le modèle embarqué lira (revue de L08-4) : retirés un à un, mesurés, avant d'être
+ * montrés. Un jeton par mot ici ; chaque extrait pèse 100 mots, les consignes 50.
+ */
+describe('fitExtractsToWindow — ce qui ne tient pas part avant d’être montré', () => {
+  const tokenizer = {
+    tokenize: (text: string) => text.match(/\S+/g) ?? [],
+    detokenize: (tokens: readonly unknown[]) => tokens.map(String).join(' '),
+  };
+  const body = (tag: string) => Array.from({ length: 99 }, () => tag).join(' ');
+  const source = (i: number, similarity: number) =>
+    ({ sourceType: 'secondary', similarity, chunk: { content: `S${i} ${body('s')}` }, document: { title: `S${i}` } }) as unknown as MultiSourceSearchResult;
+  const own = (i: number, similarity: number) =>
+    ({ sourceType: 'manuscript', similarity, chunk: { content: `M${i} ${body('m')}` } }) as unknown as ManuscriptMappedSearchResult;
+  const blocksFor = (read: { hits: MultiSourceSearchResult[]; own: ManuscriptMappedSearchResult[] }) => ({
+    systemPrompt: [...read.hits, ...read.own].map((h) => h.chunk.content).join('\n'),
+  });
+  const fixedSystem = [Array.from({ length: 50 }, () => 'consigne').join(' ')];
+  const ids = (read: { hits: MultiSourceSearchResult[]; own: ManuscriptMappedSearchResult[] }) =>
+    [...read.hits, ...read.own].map((h) => h.chunk.content.split(' ')[0]);
+  // Trois sources et un passage du manuscrit, comme une recherche à 4 extraits (bande d'une place).
+  const found = {
+    hits: [source(1, 0.8), source(2, 0.7), source(3, 0.6)],
+    own: [own(1, 0.95)],
+    notes: [] as ReadingNoteMappedSearchResult[],
+  };
+  const fit = (budget: number, bandsFor = (n: number) => ({ manuscript: manuscriptSlots(n) })) =>
+    fitExtractsToWindow({ found, blocksFor, fixedSystem, question: 'Qui ?', budget, tokenizer, bandsFor });
+
+  it('tout tient : rien ne part', () => {
+    expect(ids(fit(1000).read)).toEqual(['S1', 'S2', 'S3', 'M1']);
+  });
+
+  it('les sources les moins pertinentes partent d’abord ; la voix de l’auteur garde sa place tant qu’il en reste deux', () => {
+    // 50 + 1 + 8 de réserve : trois extraits tiennent dans 360, deux dans 260, un dans 160.
+    expect(ids(fit(360).read)).toEqual(['S1', 'S2', 'M1']);
+    expect(ids(fit(260).read)).toEqual(['S1', 'M1']);
+    // Un seul extrait : la seule place va aux sources.
+    expect(ids(fit(160).read)).toEqual(['S1']);
+    expect(ids(fit(100).read)).toEqual([]);
+  });
+
+  it('question de rappel : le manuscrit garde ses places, les sources partent', () => {
+    const recall = {
+      hits: [source(1, 0.8)],
+      own: [own(1, 0.95), own(2, 0.9), own(3, 0.85)],
+      notes: [] as ReadingNoteMappedSearchResult[],
+    };
+    const { read } = fitExtractsToWindow({
+      found: recall,
+      blocksFor,
+      fixedSystem,
+      question: 'Qu’ai-je écrit ?',
+      // Trois extraits : 50 + 300 + 3 + 8 de réserve.
+      budget: 361,
+      tokenizer,
+      bandsFor: (n) => ({ manuscript: recallSlots(n) }),
+    });
+    expect(ids(read)).toEqual(['S1', 'M1', 'M2']);
+  });
+
+  it('les blocs rendus sont ceux des extraits gardés', () => {
+    const { read, blocks } = fit(260);
+    expect(blocks.systemPrompt).toBe(blocksFor(read).systemPrompt);
   });
 });

@@ -809,6 +809,9 @@
       "searchHeading": "Recherche",
       "resultsFound": "Résultats trouvés:",
       "duration": "Durée:",
+      "extractsCapLabel": "Plafond d'extraits:",
+      "extractsCapReason": "(fenêtre de contexte du modèle)",
+      "extractsUnread": "Des extraits ont été trouvés, mais aucun ne tient dans la fenêtre de contexte du modèle avec les consignes : la réponse ne s’appuie sur aucun d’eux. Des consignes de projet plus courtes leur feraient place.",
       "cacheHitSuffix": "(cache)",
       "sourceTypeLabel": "Type de sources:",
       "sourceTypePrimary": "Sources primaires (Tropy)",
@@ -896,6 +899,7 @@
     "streamIncomplete": "Le modèle a échoué : la connexion s'est fermée avant la fin de la réponse.",
     "maxToolTurns": "Le modèle a enchaîné les appels d'outils MCP sans donner de réponse : le tour s'est arrêté à la limite. Reformulez la question, ou désactivez des outils MCP.",
     "emptyResponse": "Le modèle a échoué : le fournisseur a renvoyé une réponse vide.",
+    "embeddedPromptTooLong": "La question est trop longue pour la fenêtre de contexte du modèle embarqué : raccourcissez-la, ou choisissez un autre modèle dans les Paramètres.",
     "providerNoCause": "Le modèle a échoué : le fournisseur a interrompu la réponse sans donner de cause.",
     "truncated": "Réponse tronquée : le modèle a atteint la longueur maximale de réponse.",
     "waitingForModel": "Le modèle lit encore le prompt · {{elapsed}} min écoulées · interruption automatique à {{limit}} min",
@@ -1245,7 +1249,10 @@
       "append": "Ajouter à la fin",
       "output": "Résultat",
       "noContent": "Aucun contenu à transformer.",
-      "unknownError": "Erreur inconnue lors de la génération."
+      "unknownError": "Erreur inconnue lors de la génération.",
+      "embeddedPromptTooLong": "Les consignes de génération des slides ne laissent pas de place au document dans la fenêtre de contexte du modèle embarqué : choisissez un autre modèle dans les Paramètres.",
+      "sourceCut": "Le modèle embarqué n'a lu que le début du document (environ {{percent}} %) : la suite dépasse sa fenêtre de contexte. Pour la couvrir, sélectionnez-en un passage.",
+      "bibliographyCut": "Références de la bibliographie reçues par le modèle embarqué, dans la limite de sa fenêtre de contexte : {{kept}} sur {{total}}. Les slides ne peuvent pas citer les autres."
     },
     "navigator": {
       "count": "{{count}} slide",

@@ -1,5 +1,8 @@
 import { BrowserWindow } from 'electron';
 import { getSlideGenerationPrompt } from '../../../backend/core/llm/SystemPrompts.js';
+import { EMBEDDED_CONTEXT_SIZE, embeddedInputBudget } from '../../../backend/core/llm/context-windows.js';
+import { fitTextToTokens, type EmbeddedTokenizer } from '../../../backend/core/llm/EmbeddedLLMClient.js';
+import { embeddedTokenizerOf } from '../../../backend/core/llm/providers/fallback.js';
 import { logger } from '../utils/logger.js';
 
 // ── Post-processing: normalise any LLM output into reveal.js format ─────
@@ -131,6 +134,111 @@ function normaliseToRevealFormat(raw: string): string {
   return parts.join('\n\n').trim();
 }
 
+// ── Fenêtre du modèle embarqué ──────────────────────────────────────────
+
+/**
+ * Jetons gardés en réserve : consignes, demande et document sont comptés séparément, et un texte
+ * recollé se tokenise parfois à quelques jetons près de la somme de ses morceaux.
+ */
+const FIT_MARGIN_TOKENS = 16;
+
+/** La part du document que le modèle a lue, quand il n'a pas pu tout lire. */
+export interface SlidesSourceCut {
+  readChars: number;
+  totalChars: number;
+}
+
+/** Les références de la bibliographie que le modèle a reçues, quand toutes n'ont pas tenu. */
+export interface SlidesBibliographyCut {
+  kept: number;
+  total: number;
+}
+
+/** Le modèle a fini en erreur : son code (`embedded_prompt_too_long`…) va au panneau, qui le traduit. */
+class SlidesGenerationError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string
+  ) {
+    super(message);
+    this.name = 'SlidesGenerationError';
+  }
+}
+
+/**
+ * Place minimale du document, en jetons (un millier de caractères en français). En deçà, le modèle
+ * produirait des diapositives sans le document : un gabarit générique, donné pour réussi.
+ */
+const MIN_SOURCE_TOKENS = 300;
+
+/**
+ * Ce que le modèle embarqué lit de la demande, dans sa fenêtre de 4 096 jetons (L08-4). Le moteur ne
+ * coupe jamais la question, et la bibliographie comme le document y sont : sans cette mesure, un
+ * document de plus de 9 000 caractères environ était refusé, et, juste en deçà, ce sont les
+ * consignes des diapositives, en rôle système, qui partaient.
+ *
+ * Le document passe d'abord (revue de L08-4) : la bibliographie n'a que la place qu'il laisse, et au
+ * moins un tiers, jamais ce qui lui ôterait son minimum. Elle passait entière avant lui, et 50
+ * références de taille courante (2 214 jetons, mesuré) ne lui laissaient plus rien. Elle perd ses
+ * dernières entrées ; le document, sa fin, marquée « […] », comme le moteur le faisait avant L08-4.
+ * Les deux coupes se disent au panneau.
+ */
+function fitSlidesRequest(args: {
+  source: string;
+  bibLines: string[];
+  /** Les références du projet : les lignes n'en reprennent que les 50 premières. */
+  bibTotal: number;
+  system: string;
+  promptFor: (bibLines: string[], source: string) => string;
+  tokenizer: EmbeddedTokenizer;
+}): { source: string; bibLines: string[]; cut?: SlidesSourceCut; bibliographyCut?: SlidesBibliographyCut } {
+  const { source, bibLines, bibTotal, system, promptFor, tokenizer } = args;
+  const count = (text: string): number => tokenizer.tokenize(text).length;
+  const systemTokens = count(system);
+  const bare = count(promptFor([], ''));
+  const available = embeddedInputBudget(EMBEDDED_CONTEXT_SIZE) - systemTokens - bare - FIT_MARGIN_TOKENS;
+  if (available < MIN_SOURCE_TOKENS) {
+    throw new SlidesGenerationError(
+      `The slide-generation instructions leave ${Math.max(0, available)} tokens for the document in the embedded model's ` +
+        `${EMBEDDED_CONTEXT_SIZE}-token context window.`,
+      'embedded_prompt_too_long'
+    );
+  }
+
+  // La bibliographie : ce que le document laisse, au moins un tiers de la place, jamais son minimum.
+  const bibRoom = Math.min(
+    available - MIN_SOURCE_TOKENS,
+    Math.max(Math.floor(available / 3), available - count(source))
+  );
+  const bibCost = (n: number): number => count(promptFor(bibLines.slice(0, n), '')) - bare;
+  // Le plus grand nombre d'entrées, prises dans l'ordre, qui tient : le coût croît avec lui.
+  let kept = bibLines.length;
+  if (bibCost(kept) > bibRoom) {
+    let low = 0;
+    let high = kept - 1;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (bibCost(mid) <= bibRoom) low = mid;
+      else high = mid - 1;
+    }
+    kept = low;
+  }
+  const keptLines = bibLines.slice(0, kept);
+
+  const room = embeddedInputBudget(EMBEDDED_CONTEXT_SIZE) - systemTokens - count(promptFor(keptLines, '')) - FIT_MARGIN_TOKENS;
+  const keptSource = fitTextToTokens(source, room, tokenizer);
+  // Ce qui a été lu, sans la marque de coupe.
+  const readChars = keptSource.endsWith('[…]')
+    ? keptSource.slice(0, -'[…]'.length).trimEnd().length
+    : keptSource.length;
+  return {
+    source: keptSource,
+    bibLines: keptLines,
+    ...(keptSource === source ? {} : { cut: { readChars, totalChars: source.length } }),
+    ...(kept < bibLines.length ? { bibliographyCut: { kept, total: bibTotal } } : {}),
+  };
+}
+
 // ── Service ─────────────────────────────────────────────────────────────
 
 export class SlidesGenerationService {
@@ -196,29 +304,49 @@ export class SlidesGenerationService {
     };
     const t = i18n[language] ?? i18n.fr;
 
-    // Build bibliography section if citations are provided
-    let bibliographySection = '';
-    if (citations && citations.length > 0) {
-      const bibLines = citations
-        .slice(0, 50) // cap to avoid overloading context
-        .map((c) => `- [@${c.id}] ${c.author} (${c.year}). *${c.title}*`)
-        .join('\n');
-      bibliographySection = `\n\n${t.bibHeader} :\n${bibLines}`;
-    }
+    // Bibliography lines, if citations are provided
+    const bibLines = (citations ?? [])
+      .slice(0, 50) // cap to avoid overloading context
+      .map((c) => `- [@${c.id}] ${c.author} (${c.year}). *${c.title}*`);
 
-    const prompt = `${t.intro} :${bibliographySection}\n\n---\n${sourceText}\n---\n\n${t.go}`;
+    const promptFor = (lines: string[], source: string): string => {
+      const bibliographySection = lines.length > 0 ? `\n\n${t.bibHeader} :\n${lines.join('\n')}` : '';
+      return `${t.intro} :${bibliographySection}\n\n---\n${source}\n---\n\n${t.go}`;
+    };
 
     let fullResponse = '';
+    const llm = this.llm;
 
     try {
       logger.info('slides', 'generateSlides:start', { textLength: sourceText.length, language });
 
+      // Le modèle embarqué (réglage « embarqué », ou « auto » Ollama arrêté) ne lit que ce qui tient
+      // dans sa fenêtre : le document et la bibliographie y sont mesurés, et coupés par la fin. Les
+      // autres reçoivent tout.
+      const tokenizer = await embeddedTokenizerOf(llm, signal);
+      const fitted: ReturnType<typeof fitSlidesRequest> = tokenizer
+        ? fitSlidesRequest({
+            source: sourceText,
+            bibLines,
+            bibTotal: citations?.length ?? 0,
+            system: systemPrompt,
+            promptFor,
+            tokenizer,
+          })
+        : { source: sourceText, bibLines };
+      if (fitted.cut) {
+        logger.warn('slides', 'generateSlides:source-cut', { ...fitted.cut });
+      }
+      if (fitted.bibliographyCut) {
+        logger.warn('slides', 'generateSlides:bibliography-cut', { ...fitted.bibliographyCut });
+      }
+
       // Stream via the typed provider. Single system+user turn,
       // per-token forwarding to the renderer, signal-driven cancellation.
-      const iter = this.llm.chat(
+      const iter = llm.chat(
         [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt },
+          { role: 'user', content: promptFor(fitted.bibLines, fitted.source) },
         ],
         { temperature: 0.3, signal }
       );
@@ -231,13 +359,23 @@ export class SlidesGenerationService {
           fullResponse += chunk.delta;
           window.webContents.send('slides:stream', chunk.delta);
         }
+        // Le contrat des fournisseurs : une panne finit le flux par un terminal `error`, sans lever.
+        // Sans cette lecture, un refus du modèle devenait un résultat vide, « terminé » sans un mot.
+        if (chunk.done && chunk.finishReason === 'error' && !signal.aborted) {
+          const cause = llm.getStatus().lastError;
+          throw new SlidesGenerationError(cause?.message ?? 'Slide generation failed', cause?.code);
+        }
         if (chunk.done) break;
       }
 
       // Post-process: normalise LLM output to reveal.js format
       const normalised = normaliseToRevealFormat(fullResponse);
 
-      window.webContents.send('slides:stream-done', { content: normalised });
+      window.webContents.send('slides:stream-done', {
+        content: normalised,
+        ...(fitted.cut ? { sourceCut: fitted.cut } : {}),
+        ...(fitted.bibliographyCut ? { bibliographyCut: fitted.bibliographyCut } : {}),
+      });
       logger.info('slides', 'generateSlides:done', { outputLength: normalised.length });
 
       return normalised;
@@ -247,8 +385,10 @@ export class SlidesGenerationService {
         window.webContents.send('slides:stream-done', { content: normalised, cancelled: true });
         return normalised;
       }
-      logger.error('slides', 'generateSlides:error', { error: (error instanceof Error ? error.message : String(error)) });
-      window.webContents.send('slides:stream-error', { error: (error instanceof Error ? error.message : String(error)) });
+      const message = error instanceof Error ? error.message : String(error);
+      const code = error instanceof SlidesGenerationError ? error.code : undefined;
+      logger.error('slides', 'generateSlides:error', { error: message, ...(code ? { code } : {}) });
+      window.webContents.send('slides:stream-error', { error: message, ...(code ? { code } : {}) });
       throw error;
     } finally {
       this.abortController = null;

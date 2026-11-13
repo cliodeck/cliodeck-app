@@ -118,6 +118,47 @@ export function getContextWindow(
 }
 
 /**
+ * Fenêtre du contexte llama.cpp que crée le moteur embarqué (`EmbeddedLLMClient`), quel que soit
+ * le modèle : les Qwen 2.5 en annoncent 32 768, mais le contexte réellement alloué fait 4 096
+ * jetons (décision Q36, vérifiée sur un Mac Intel sous macOS 12). Une seule source pour le client,
+ * le compacteur et le plafond d'extraits (S05-1-16) : le compacteur supposait 32 768 et ne protégeait
+ * jamais la fenêtre réelle.
+ */
+export const EMBEDDED_CONTEXT_SIZE = 4096;
+
+/**
+ * Longueur de réponse qu'un appel au moteur embarqué réserve dans sa fenêtre : celle demandée, un
+ * quart de la fenêtre par défaut, jamais plus de la moitié. Sans cette borne, une recette qui
+ * demandait 4 000 jetons rendait le budget d'entrée négatif, et chaque appel était refusé.
+ */
+export function embeddedReplyTokens(window: number, maxTokens?: number): number {
+  const asked = maxTokens !== undefined && maxTokens > 0 ? maxTokens : Math.floor(window / 4);
+  return Math.min(asked, Math.floor(window / 2));
+}
+
+/**
+ * Jetons d'entrée (consignes, extraits et question) qu'un appel au moteur embarqué peut envoyer :
+ * la fenêtre, moins un dixième pour le gabarit de conversation et la marge de décalage de
+ * llama.cpp, moins la réponse (`embeddedReplyTokens`). Au-delà, node-llama-cpp coupe la fin de la
+ * question ou lève « Failed to compress chat history ».
+ */
+export function embeddedInputBudget(window: number, maxTokens?: number): number {
+  return window - Math.floor(window / 10) - embeddedReplyTokens(window, maxTokens);
+}
+
+/**
+ * Nombre d'extraits qui tiennent dans le budget d'entrée d'une fenêtre : 650 jetons pour les
+ * consignes du mode et la question, 480 par extrait de 1 500 caractères (3,35 caractères par
+ * jeton, mesuré en français). 4 extraits à 4 096, 9 à 8 192 ; jamais moins d'un. C'est un
+ * plafond pour la recherche : des consignes plus longues (indications du projet, mode bavard) ou
+ * un texte qui se découpe mal (OCR) en laissent passer moins, et le tour retire alors, avant de les
+ * montrer, les extraits que le modèle ne lirait pas (`fusion-chat-service`, L08-4).
+ */
+export function maxExtractsForWindow(window: number): number {
+  return Math.max(1, Math.floor((embeddedInputBudget(window) - 650) / 480));
+}
+
+/**
  * Bornes de sécurité pour `num_ctx` (fenêtre demandée à Ollama par appel).
  *
  * Elles ne décrivent PAS ce qu'un modèle sait faire — c'est la longueur
