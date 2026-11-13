@@ -800,7 +800,7 @@ class FusionChatService {
     // hits reach this adapter.
     const retriever: ChatEngineRetriever<BrainstormSource> | undefined = projectPath
       ? {
-          async search(lastUser, options?: ChatEngineRetrievalOptions) {
+          async search(lastUser, options?: ChatEngineRetrievalOptions, signal?: AbortSignal) {
             // Strict routing per the 7-case truth table (see
             // `resolveRetrievalArgs`). `sourceType === 'vault'` means Obsidian
             // only: `corporaInScope` adds no source corpus, and the policies
@@ -878,6 +878,8 @@ class FusionChatService {
               documentIds: options?.documentIds,
               collectionKeys: options?.collectionKeys,
               topK: options?.topK,
+              // Celui du tour : « Arrêter » coupe l'embedding de la question (J9).
+              signal,
             });
             const ownHits = manuscriptHits ?? [];
             const noteHits = readingNoteHits ?? [];

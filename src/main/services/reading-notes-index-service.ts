@@ -175,6 +175,12 @@ export class ReadingNotesIndexService {
    * s'arrête dès qu'elle a changé (S02-1-13) : un autre projet, ou le même rouvert.
    */
   private opening = 0;
+  /**
+   * Abandonné par `detachStore` avec l'ouverture qu'il compte : la requête d'embedding d'une passe du
+   * projet quitté est coupée. Sans délai côté Ollama, elle restait ouverte jusqu'au redémarrage de
+   * l'app (J9).
+   */
+  private openingRelease = new AbortController();
 
   constructor(
     private readonly deps: ReadingNotesIndexDeps = {
@@ -201,6 +207,8 @@ export class ReadingNotesIndexService {
     const previous = this.store;
     const pending = this.running;
     this.opening += 1;
+    this.openingRelease.abort();
+    this.openingRelease = new AbortController();
     this.store = null;
     this.rerun = null;
     if (!previous) return;
@@ -312,7 +320,9 @@ export class ReadingNotesIndexService {
     // Sans elle, un appel lancé après la bascule prenait la racine du journal ouvert.
     const workspaceRoot = this.workspaceRoot;
     const opening = this.opening;
-    const pass = (): Promise<ReadingNotesIndexReport> => this.indexProject(embedder, force, workspaceRoot, opening);
+    const signal = this.openingRelease.signal;
+    const pass = (): Promise<ReadingNotesIndexReport> =>
+      this.indexProject(embedder, force, workspaceRoot, opening, signal);
     return workspaceRoot ? runWithJournalContext({ workspaceRoot }, pass) : pass();
   }
 
@@ -320,7 +330,8 @@ export class ReadingNotesIndexService {
     embedder: EmbeddingProvider,
     force: boolean,
     workspaceRoot: string | null,
-    opening: number
+    opening: number,
+    signal: AbortSignal
   ): Promise<ReadingNotesIndexReport> {
     const started = Date.now();
     const report: ReadingNotesIndexReport = {
@@ -443,7 +454,8 @@ export class ReadingNotesIndexService {
         const header = readingNoteHeader(record);
         const vectors = await this.embedNote(
           embedder,
-          chunks.map((c) => `${header}\n\n${c.content}`)
+          chunks.map((c) => `${header}\n\n${c.content}`),
+          signal
         );
         if (projectChanged()) {
           abandoned = PROJECT_CHANGED;
@@ -555,9 +567,13 @@ export class ReadingNotesIndexService {
   }
 
   /** Les vecteurs d'une note, ou ce qui a empêché le fournisseur de les rendre. */
-  private async embedNote(embedder: EmbeddingProvider, texts: string[]): Promise<Float32Array[] | string> {
+  private async embedNote(
+    embedder: EmbeddingProvider,
+    texts: string[],
+    signal: AbortSignal
+  ): Promise<Float32Array[] | string> {
     try {
-      const vectors = await this.embedBatched(embedder, texts);
+      const vectors = await this.embedBatched(embedder, texts, signal);
       return vectors.length === texts.length
         ? vectors
         : `provider returned ${vectors.length} vectors for ${texts.length} chunks`;
@@ -566,10 +582,14 @@ export class ReadingNotesIndexService {
     }
   }
 
-  private async embedBatched(embedder: EmbeddingProvider, texts: string[]): Promise<Float32Array[]> {
+  private async embedBatched(
+    embedder: EmbeddingProvider,
+    texts: string[],
+    signal: AbortSignal
+  ): Promise<Float32Array[]> {
     const out: Float32Array[] = [];
     for (let i = 0; i < texts.length; i += EMBEDDING_BATCH_SIZE) {
-      const vectors = await embedder.embed(texts.slice(i, i + EMBEDDING_BATCH_SIZE));
+      const vectors = await embedder.embed(texts.slice(i, i + EMBEDDING_BATCH_SIZE), { signal });
       for (const v of vectors) out.push(Float32Array.from(v));
     }
     return out;

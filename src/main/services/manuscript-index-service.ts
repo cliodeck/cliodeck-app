@@ -135,6 +135,12 @@ class ManuscriptIndexService {
    * en vol n'est plus celle qu'on attend.
    */
   private opening = 0;
+  /**
+   * Abandonné par `forgetProject` avec l'ouverture qu'il compte : la requête d'embedding d'une passe
+   * du projet quitté est coupée. Sans délai côté Ollama, elle restait ouverte jusqu'au redémarrage
+   * de l'app (J9).
+   */
+  private openingRelease = new AbortController();
 
   /**
    * Rattache le service à un projet. Fermer le store précédent est
@@ -160,6 +166,8 @@ class ManuscriptIndexService {
    */
   private forgetProject(): void {
     this.opening += 1;
+    this.openingRelease.abort();
+    this.openingRelease = new AbortController();
     this.detachStore();
     this.rerun = null;
     this.lastReport = null;
@@ -377,14 +385,17 @@ class ManuscriptIndexService {
    */
   private runIndex(embedder: EmbeddingProvider, opening: number): Promise<ManuscriptIndexReport> {
     const workspaceRoot = this.workspaceRoot;
-    const pass = (): Promise<ManuscriptIndexReport> => this.indexProject(embedder, workspaceRoot, opening);
+    const signal = this.openingRelease.signal;
+    const pass = (): Promise<ManuscriptIndexReport> =>
+      this.indexProject(embedder, workspaceRoot, opening, signal);
     return workspaceRoot ? runWithJournalContext({ workspaceRoot }, pass) : pass();
   }
 
   private async indexProject(
     embedder: EmbeddingProvider,
     workspaceRoot: string | null,
-    opening: number
+    opening: number,
+    signal: AbortSignal
   ): Promise<ManuscriptIndexReport> {
     const started = Date.now();
     const report = emptyReport();
@@ -494,8 +505,10 @@ class ManuscriptIndexService {
 
       let vectors: Float32Array[];
       try {
-        vectors = await this.embedBatched(embedder, chunks.map((c) => c.content));
+        vectors = await this.embedBatched(embedder, chunks.map((c) => c.content), signal);
       } catch (e) {
+        // Requête coupée par la fermeture du projet : un abandon, pas un échec du chapitre.
+        if (abandoned()) return abandon();
         // Provider absent (Ollama éteint) : on laisse l'index en l'état
         // plutôt que d'écrire un chapitre à moitié embarqué.
         report.failures.push({
@@ -586,12 +599,13 @@ class ManuscriptIndexService {
 
   private async embedBatched(
     embedder: EmbeddingProvider,
-    texts: string[]
+    texts: string[],
+    signal: AbortSignal
   ): Promise<Float32Array[]> {
     const out: Float32Array[] = [];
     for (let i = 0; i < texts.length; i += EMBEDDING_BATCH_SIZE) {
       const batch = texts.slice(i, i + EMBEDDING_BATCH_SIZE);
-      const vectors = await embedder.embed(batch);
+      const vectors = await embedder.embed(batch, { signal });
       for (const v of vectors) out.push(Float32Array.from(v));
     }
     return out;

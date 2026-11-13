@@ -47,7 +47,7 @@ function asStringArray(v: unknown): string[] | undefined {
   return undefined;
 }
 
-const searchHandler: StepHandler = async (step, _ctx): Promise<StepResult> => {
+const searchHandler: StepHandler = async (step, ctx): Promise<StepResult> => {
   const source = asString(step.with.source, 'both');
   const query = asString(step.with.query).trim();
   const limit = asNumber(step.with.limit) ?? 20;
@@ -80,6 +80,8 @@ const searchHandler: StepHandler = async (step, _ctx): Promise<StepResult> => {
     topK: limit,
     sourceType,
     collectionKeys,
+    // Celui de la recette : l'arrêter coupe l'embedding de la requête (J9).
+    signal: ctx.signal,
   });
 
   const results = hits.map((h) => ({

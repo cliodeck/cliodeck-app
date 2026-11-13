@@ -124,6 +124,44 @@ function held(provider: FakeEmbedder): HeldEmbedder {
   });
 }
 
+interface SilentEmbedder extends FakeEmbedder {
+  /** Résolue quand la première demande est partie. */
+  entered: Promise<void>;
+  /** Le signal reçu par chaque demande. */
+  signals: Array<AbortSignal | undefined>;
+  /** Libère une demande que rien n'a coupée (le défaut) : seulement pour finir le test. */
+  release: () => void;
+}
+
+/**
+ * Un fournisseur qui se comporte comme `fetch` devant un Ollama figé (J9) : sa première demande ne
+ * répond jamais, et rejette par la raison de son signal quand il s'avorte.
+ */
+function silent(provider: FakeEmbedder): SilentEmbedder {
+  const embed = provider.embed.bind(provider);
+  let enter = (): void => undefined;
+  let release = (): void => undefined;
+  const entered = new Promise<void>((resolve) => (enter = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const signals: Array<AbortSignal | undefined> = [];
+  return Object.assign(provider, {
+    entered,
+    signals,
+    release,
+    async embed(texts: string[], opts?: { signal?: AbortSignal }): Promise<number[][]> {
+      signals.push(opts?.signal);
+      if (signals.length === 1) {
+        enter();
+        await new Promise<void>((resolve, reject) => {
+          void released.then(resolve);
+          opts?.signal?.addEventListener('abort', () => reject(opts.signal?.reason), { once: true });
+        });
+      }
+      return embed(texts);
+    },
+  });
+}
+
 function writeNote(root: string, file: string, frontMatter: string, body: string): string {
   const dir = path.join(root, READING_NOTES_DIR);
   fs.mkdirSync(dir, { recursive: true });
@@ -426,6 +464,30 @@ describe.skipIf(!sqliteAvailable)('ReadingNotesIndexService — un autre projet 
     // La passe suivante de A, elle, embarque la note revue.
     expect(await service.index(fakeEmbedder())).toMatchObject({ indexed: 1, unchanged: 1, removed: 0 });
     expect(notesOf(tmp).hits('revue')).toBe(1);
+  });
+
+  /**
+   * L'embedding d'une note ne revient pas (Ollama qui charge un modèle sans fin) et l'historien ferme
+   * le projet : la passe s'arrêtait à son retour, mais sa requête restait ouverte jusqu'au
+   * redémarrage de l'app (J9). La fermeture la coupe.
+   */
+  it('fermeture du projet pendant l’embedding d’une note : la requête est coupée, la passe s’arrête', async () => {
+    await indexedA();
+    reviseBraudel();
+    const embedder = silent(fakeEmbedder());
+
+    const pass = service.index(embedder);
+    await embedder.entered;
+    service.clear();
+    try {
+      await vi.waitFor(() => expect(embedder.signals[0]?.aborted).toBe(true), { timeout: 1_000 });
+    } finally {
+      embedder.release();
+    }
+    const report = await pass;
+
+    expect(report.abandoned).toBe('project-changed');
+    expect(notesOf(tmp).hits('revue')).toBe(0);
   });
 
   it('A → B → A pendant la lecture du dossier : rien n’est écrit, ni dans A ni dans B', async () => {

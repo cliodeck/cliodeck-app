@@ -35,6 +35,11 @@ export interface PdfIndexerDeps {
   embeddingProvider: EmbeddingProvider;
   ragConfig: RAGConfig;
   summarizerConfig: SummarizerConfigLike;
+  /**
+   * Abandonné quand le magasin de l'indexeur est rendu (fermeture du projet) : chaque embedding de
+   * l'indexation, extraits et résumé, le reçoit, et une requête restée sans réponse est coupée (J9).
+   */
+  signal?: AbortSignal;
 }
 
 export class PdfIndexer {
@@ -57,7 +62,7 @@ export class PdfIndexer {
     const embeddingFn = async (text: string): Promise<Float32Array> => {
       const safeText =
         text.length > EMBED_CHAR_CAP ? text.slice(0, EMBED_CHAR_CAP) : text;
-      const [vec] = await deps.embeddingProvider.embed([safeText]);
+      const [vec] = await deps.embeddingProvider.embed([safeText], { signal: deps.signal });
       return Float32Array.from(vec);
     };
 
