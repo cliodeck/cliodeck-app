@@ -923,6 +923,64 @@ describe('chat-engine — le résumé du compacteur appartient au tour (S06-1-18
     expect(provider.answerCalls[0]).toEqual(history);
   });
 
+  // Les appels d'outils et leurs résultats tombent dans les tours récents, ancrés sur la dernière
+  // question : d'un passage de la boucle d'outils à l'autre, le milieu à résumer ne change pas. Un
+  // résumé vide ou en panne était redemandé à chaque passage (jusqu'à six fois par question, avec
+  // « Compression du contexte… » à chaque fois et tout le milieu relu par un modèle local).
+  it.each([
+    ['vide', 'stop'],
+    ['en panne', 'error'],
+  ] as const)(
+    'un résumé %s n’est pas redemandé aux passages suivants de la boucle d’outils',
+    async (_label, finishReason) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const events: string[] = [];
+        const provider = summarizingProvider(
+          events,
+          async function* () {
+            yield { delta: '', done: true, finishReason };
+          },
+          async function* (call) {
+            if (call <= 3) {
+              yield { delta: '', toolCall: { id: `c${call}`, name: 'search', arguments: '{}' } };
+              yield { delta: '', done: true, finishReason: 'tool_call' };
+              return;
+            }
+            yield { delta: 'Trouvé.' };
+            yield { delta: '', done: true, finishReason: 'stop' };
+          }
+        );
+        const phases: string[] = [];
+        const history = longHistory();
+        const done: ChatChunk[] = [];
+        await runChatTurn({
+          provider,
+          messages: history,
+          compactor: compactorFor(provider),
+          tools: [{ name: 'search', description: 'cherche', parameters: { type: 'object' } }],
+          toolHandler: { call: async () => ({ ok: true, result: { hits: 0 } }) },
+          hooks: { onStatus: (s) => phases.push(s.phase), onDone: (chunk) => done.push(chunk) },
+        });
+        expect(events).toEqual([
+          'chat:summary',
+          'chat:answer',
+          'chat:answer',
+          'chat:answer',
+          'chat:answer',
+        ]);
+        // « Compression du contexte… » ne revient pas après la première réponse.
+        expect(phases).toContain('compressing');
+        expect(phases.slice(phases.indexOf('generating'))).not.toContain('compressing');
+        // La conversation entière part à chaque passage, sans résumé.
+        expect(provider.answerCalls[3].slice(0, history.length)).toEqual(history);
+        expect(done).toEqual([{ delta: '', done: true, finishReason: 'stop' }]);
+      } finally {
+        warn.mockRestore();
+      }
+    }
+  );
+
   it('après un compactage au second passage, la phase de génération se redit', async () => {
     // Le premier passage reste sous le seuil ; le résultat d'outil le fait franchir au second.
     const events: string[] = [];
