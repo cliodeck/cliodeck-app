@@ -12,10 +12,11 @@
  *   envoi vers l'éditeur en proposition).
  *
  * Les deux montages sont mutuellement exclusifs (le panneau droit est
- * masqué en mode brainstorm — MainLayout `!isBrainstorm`). Un double
- * montage accidentel resterait sans double-dispatch : dans
- * useBrainstormChat, seule l'instance qui a émis `send` connaît le mapping
- * session→assistant (refs locales), l'autre ignore les événements.
+ * masqué en mode brainstorm — MainLayout `!isBrainstorm`). Le flux du chat
+ * ne dépend d'aucun d'eux : un seul abonnement pour l'app, dans
+ * `chatStream.ts` (L09-6). Démonter ce composant pendant une génération
+ * (onglet Journal, autre mode) n'en perd rien, et un double montage
+ * accidentel ne dédoublerait rien.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -250,6 +251,9 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     const onStatus = w.electron?.fusion?.chat?.onStatus;
     if (!onStatus) return;
     const unsub = onStatus((env) => {
+      // Seul le tour en cours parle : un tour effacé ou arrêté affichait encore ses phases dans le
+      // bandeau du suivant (S16-1-21).
+      if (env.sessionId !== useChatStore.getState().sessionId) return;
       const phase = env.status.phase;
       const label = env.status.label ?? phase;
       if (phase === 'generating') setFirstTokenSeen(true);

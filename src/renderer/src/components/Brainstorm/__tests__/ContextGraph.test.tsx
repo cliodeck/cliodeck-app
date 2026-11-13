@@ -180,12 +180,16 @@ describe('ContextGraph dans AssistantChat, qui se rend à chaque jeton', () => {
   let emitChunk: ChunkCb = () => {};
   let emitContext: ContextCb = () => {};
   let sessions = 0;
-  let start: Mock<() => Promise<{ success: boolean; sessionId: string }>>;
+  let start: Mock<(messages: unknown, opts?: { sessionId?: string }) => Promise<{ success: boolean; sessionId: string }>>;
 
   beforeEach(() => {
     graphRenders.count = 0;
     sessions = 0;
-    start = vi.fn(async () => ({ success: true, sessionId: `sess-${++sessions}` }));
+    // Rend l'identifiant que le renderer lui donne, comme le main (L09-6).
+    start = vi.fn(async (_messages: unknown, opts?: { sessionId?: string }) => ({
+      success: true,
+      sessionId: opts?.sessionId ?? `sess-${++sessions}`,
+    }));
     (window as unknown as { electron: unknown }).electron = {
       fusion: {
         chat: {
@@ -210,7 +214,7 @@ describe('ContextGraph dans AssistantChat, qui se rend à chaque jeton', () => {
     fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
     await waitFor(() => expect(start).toHaveBeenCalledTimes(before + 1));
     await waitFor(() => expect(useChatStore.getState().pendingAssistantId).not.toBeNull());
-    const sessionId = `sess-${sessions}`;
+    const sessionId = start.mock.calls.at(-1)?.[1]?.sessionId ?? `sess-${sessions}`;
     await act(async () => { emitContext({ sessionId, sources: docs.map(source) }); });
     for (let i = 0; i < tokens; i += 1) {
       await act(async () => { emitChunk({ sessionId, chunk: { delta: `mot${i} ` } }); });

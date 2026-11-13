@@ -48,6 +48,8 @@ interface MockApi {
   _emitContext: CtxCb;
   _emitTool: ToolCb;
   _emitExplanation: ExplCb;
+  /** L'identifiant du dernier tour, celui que le renderer a donné à `start` (L09-6). */
+  session: string;
 }
 
 function installFusionMock(): MockApi {
@@ -56,7 +58,10 @@ function installFusionMock(): MockApi {
   let toolCb: ToolCb = () => {};
   let explCb: ExplCb = () => {};
   const api = {
-    start: vi.fn(async () => ({ success: true, sessionId: 'sess-b-1' })),
+    start: vi.fn(async (_messages: unknown, opts?: { sessionId?: string }) => ({
+      success: true,
+      sessionId: opts?.sessionId ?? 'sess-b-1',
+    })),
     cancel: vi.fn(async () => ({ success: true, cancelled: true })),
     onChunk: vi.fn((cb: ChunkCb) => {
       chunkCb = cb;
@@ -86,6 +91,11 @@ function installFusionMock(): MockApi {
   Object.defineProperty(api, '_emitContext', { get: () => ctxCb });
   Object.defineProperty(api, '_emitTool', { get: () => toolCb });
   Object.defineProperty(api, '_emitExplanation', { get: () => explCb });
+  Object.defineProperty(api, 'session', {
+    get: () =>
+      (api.start.mock.calls.at(-1) as [unknown, { sessionId?: string }?] | undefined)?.[1]?.sessionId ??
+      'sess-b-1',
+  });
   return api as unknown as MockApi;
 }
 
@@ -111,10 +121,10 @@ describe('AssistantChat full (fusion step 6)', () => {
     });
 
     act(() => {
-      api._emitChunk({ sessionId: 'sess-b-1', chunk: { delta: 'Hi!' } });
+      api._emitChunk({ sessionId: api.session, chunk: { delta: 'Hi!' } });
     });
     act(() => {
-      api._emitChunk({ sessionId: 'sess-b-1', chunk: { delta: '', done: true, finishReason: 'stop' } });
+      api._emitChunk({ sessionId: api.session, chunk: { delta: '', done: true, finishReason: 'stop' } });
     });
 
     await waitFor(() => {
@@ -134,7 +144,7 @@ describe('AssistantChat full (fusion step 6)', () => {
 
     act(() => {
       api._emitTool({
-        sessionId: 'sess-b-1',
+        sessionId: api.session,
         callId: 'call-1',
         name: 'searchObsidian',
         status: 'started',
@@ -143,7 +153,7 @@ describe('AssistantChat full (fusion step 6)', () => {
     });
     act(() => {
       api._emitTool({
-        sessionId: 'sess-b-1',
+        sessionId: api.session,
         callId: 'call-1',
         name: 'searchObsidian',
         status: 'done',
@@ -152,7 +162,7 @@ describe('AssistantChat full (fusion step 6)', () => {
       });
     });
     act(() => {
-      api._emitChunk({ sessionId: 'sess-b-1', chunk: { delta: 'done', done: true, finishReason: 'stop' } });
+      api._emitChunk({ sessionId: api.session, chunk: { delta: 'done', done: true, finishReason: 'stop' } });
     });
 
     await waitFor(() => {
@@ -192,10 +202,10 @@ describe('AssistantChat full (fusion step 6)', () => {
       },
     };
     act(() => {
-      api._emitExplanation({ sessionId: 'sess-b-1', explanation });
+      api._emitExplanation({ sessionId: api.session, explanation });
     });
     act(() => {
-      api._emitChunk({ sessionId: 'sess-b-1', chunk: { delta: 'x', done: true, finishReason: 'stop' } });
+      api._emitChunk({ sessionId: api.session, chunk: { delta: 'x', done: true, finishReason: 'stop' } });
     });
 
     // Collapsed by default — the toggle is present.
@@ -217,10 +227,10 @@ describe('AssistantChat full (fusion step 6)', () => {
     await waitFor(() => expect(api.start).toHaveBeenCalled());
     await waitFor(() => expect(useChatStore.getState().pendingAssistantId).not.toBeNull());
     act(() => {
-      api._emitContext({ sessionId: 'sess-b-1', sources });
+      api._emitContext({ sessionId: api.session, sources });
     });
     act(() => {
-      api._emitChunk({ sessionId: 'sess-b-1', chunk: { delta: 'x', done: true, finishReason: 'stop' } });
+      api._emitChunk({ sessionId: api.session, chunk: { delta: 'x', done: true, finishReason: 'stop' } });
     });
     return screen.findByTestId('sources-summary');
   }

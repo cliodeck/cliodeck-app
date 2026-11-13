@@ -44,6 +44,8 @@ interface MockApi {
   // Test handles:
   _emitChunk: ChunkCb;
   _emitStatus: (env: { sessionId: string; status: { phase: string; label?: string } }) => void;
+  /** L'identifiant du dernier tour, celui que le renderer a donné à `start` (L09-6). */
+  session: string;
 }
 
 function installFusionMock(
@@ -56,7 +58,10 @@ function installFusionMock(
   let statusCb: (env: { sessionId: string; status: { phase: string; label?: string } }) => void =
     () => {};
   const api = {
-    start: vi.fn(async () => ({ success: true, sessionId: 'sess-test-1' })),
+    start: vi.fn(async (_messages: unknown, opts?: { sessionId?: string }) => ({
+      success: true,
+      sessionId: opts?.sessionId ?? 'sess-test-1',
+    })),
     cancel: vi.fn(async () => ({ success: true, cancelled: true })),
     onChunk: vi.fn((cb: ChunkCb) => {
       chunkCb = cb;
@@ -81,6 +86,11 @@ function installFusionMock(
   });
   Object.defineProperty(api, '_emitStatus', {
     get: () => statusCb,
+  });
+  Object.defineProperty(api, 'session', {
+    get: () =>
+      (api.start.mock.calls.at(-1) as [unknown, { sessionId?: string }?] | undefined)?.[1]?.sessionId ??
+      'sess-test-1',
   });
   return api as unknown as MockApi;
 }
@@ -110,10 +120,10 @@ describe('AssistantChat panel (fusion step 5)', () => {
 
     // Emit a delta then done.
     act(() => {
-      api._emitChunk({ sessionId: 'sess-test-1', chunk: { delta: 'Salut !' } });
+      api._emitChunk({ sessionId: api.session, chunk: { delta: 'Salut !' } });
     });
     act(() => {
-      api._emitChunk({ sessionId: 'sess-test-1', chunk: { delta: '', done: true, finishReason: 'stop' } });
+      api._emitChunk({ sessionId: api.session, chunk: { delta: '', done: true, finishReason: 'stop' } });
     });
 
     await waitFor(() => {
@@ -137,7 +147,7 @@ describe('AssistantChat panel (fusion step 5)', () => {
 
     act(() => {
       api._emitStatus({
-        sessionId: 'sess-test-1',
+        sessionId: api.session,
         status: { phase: 'retrieving', label: 'Recherche en cours' },
       });
     });
@@ -149,12 +159,44 @@ describe('AssistantChat panel (fusion step 5)', () => {
 
     act(() => {
       api._emitStatus({
-        sessionId: 'sess-test-1',
+        sessionId: api.session,
         status: { phase: 'generating', label: 'Génération' },
       });
     });
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toContain('Génération');
+    });
+  });
+
+  /**
+   * Un tour effacé continuait d'afficher ses phases dans le bandeau du tour suivant (S16-1-21) :
+   * seul le statut de la session en cours s'affiche.
+   */
+  it('ignore le statut d’une autre session que celle en cours', async () => {
+    const api = installFusionMock();
+    render(<AssistantChat variant="panel" />);
+
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'question' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(useChatStore.getState().pendingAssistantId).not.toBeNull());
+
+    act(() => {
+      api._emitStatus({
+        sessionId: 'session-effacee',
+        status: { phase: 'retrieving', label: 'Recherche du tour effacé' },
+      });
+    });
+    expect(screen.queryByText(/Recherche du tour effacé/)).toBeNull();
+
+    act(() => {
+      api._emitStatus({
+        sessionId: useChatStore.getState().sessionId ?? '',
+        status: { phase: 'retrieving', label: 'Recherche du tour en cours' },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toContain('Recherche du tour en cours');
     });
   });
 

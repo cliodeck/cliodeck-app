@@ -319,9 +319,10 @@ export const useChatStore = create<State>((set) => ({
   },
 
   finishAssistant: (assistantId, finishReason, error) => {
+    // Seule la fin du tour en cours le clôt : celle d'un tour effacé, arrivée après l'envoi du
+    // suivant, ôtait à celui-ci son bouton Stop et sa session (S16-1-3).
     set((s) => ({
-      sessionId: null,
-      pendingAssistantId: null,
+      ...(assistantId === s.pendingAssistantId && { sessionId: null, pendingAssistantId: null }),
       messages: s.messages.map((m) =>
         m.id === assistantId
           ? {
