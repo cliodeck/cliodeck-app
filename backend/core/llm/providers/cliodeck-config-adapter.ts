@@ -44,6 +44,15 @@ const OLLAMA_EMBEDDING_DIMS: Record<string, number> = {
  */
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
 
+/**
+ * Modèle OpenAI d'un champ laissé vide, lu par le registre et par `resolveActiveChatModel`.
+ * `gpt-4o-mini` ferme le 14 janvier 2027 (page des dépréciations d'OpenAI, lue le 2026-11-13), et
+ * son remplaçant désigné, `gpt-6-luna`, n'accepte les outils en Chat Completions qu'avec
+ * `reasoning_effort: "none"` : le changer demande d'abord de décider ce que le fournisseur fait des
+ * outils MCP pour la famille GPT-6. À faire avant cette date.
+ */
+export const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+
 export interface AdapterOptions {
   dimensionOverride?: number;
 }
@@ -160,7 +169,7 @@ export function clioDeckConfigToRegistryConfig(
       return {
         llm: {
           provider: 'openai-compatible',
-          model: cfg.openaiModel || 'gpt-4o-mini',
+          model: cfg.openaiModel || DEFAULT_OPENAI_MODEL,
           apiKey: cfg.openaiAPIKey,
           baseUrl: 'https://api.openai.com/v1',
         },
@@ -215,7 +224,7 @@ export function resolveActiveChatModel(cfg: ClioDeckLLMConfig): string {
     case 'claude':
       return cfg.claudeModel || 'claude-sonnet-4-6';
     case 'openai':
-      return cfg.openaiModel || 'gpt-4o-mini';
+      return cfg.openaiModel || DEFAULT_OPENAI_MODEL;
     case 'mistral':
       return cfg.mistralModel || 'mistral-large-latest';
     case 'gemini':

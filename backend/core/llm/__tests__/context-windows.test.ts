@@ -55,6 +55,16 @@ describe('getContextWindow', () => {
     expect(getContextWindow('gemini-3.1-pro-preview')).toBe(1_048_576);
   });
 
+  // Gemini 4, stable et sans date de fermeture : « Context window (unified input and output token
+  // limit) 1,048,576 » sur la fiche de chaque modèle (aistudio.google.com/docs/models/gemini-4-carbon,
+  // gemini-4-hydrogen, gemini-4-argon, lues le 2026-11-13). Sans entrée, la règle `/gemini/` de repli
+  // donnait 32 000, et le compacteur résumait dès 22 400 jetons environ.
+  it('matches Gemini 4 models (1 048 576 tokens)', () => {
+    expect(getContextWindow('gemini-4-carbon')).toBe(1_048_576);
+    expect(getContextWindow('gemini-4-hydrogen')).toBe(1_048_576);
+    expect(getContextWindow('gemini-4-argon')).toBe(1_048_576);
+  });
+
   // « 1,050,000 context window » (developers.openai.com/api/docs/models/gpt-6-luna, lue le
   // 2026-11-13) ; la page des modèles donne « 1.05M » à toute la famille. Sans entrée : 8 192.
   it('matches OpenAI GPT-6 family', () => {

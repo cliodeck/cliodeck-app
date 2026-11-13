@@ -62,6 +62,9 @@ const TABLE: readonly Entry[] = [
   { pattern: /mistral/i, window: 32_000 },
 
   // Google Gemini
+  // Gemini 4 (carbon, hydrogen, argon), stable : « Context window (unified input and output token
+  // limit) 1,048,576 » sur la fiche de chaque modèle (lues le 2026-11-13).
+  { pattern: /gemini-4/i, window: 1_048_576 },
   // Gemini 3 (3.1 Pro, 3.5 Flash-Lite, 3.6 et 3.8 Flash) : « Input token limit 1,048,576 » sur la
   // fiche de chaque modèle (lues le 2026-11-13). Sans cette entrée, la règle `/gemini/` de repli
   // donnait 32 000 et le compacteur résumait bien trop tôt.

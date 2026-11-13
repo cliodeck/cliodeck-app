@@ -55,6 +55,16 @@ export function isOpenAIReasoningModel(model: string): boolean {
   return /^(?:o\d|gpt-[5-9])/i.test(model);
 }
 
+/**
+ * Réserve de raisonnement ajoutée au budget d'un modèle de raisonnement. Pour eux,
+ * `max_completion_tokens` compte le texte visible et les jetons de raisonnement, et la limite peut
+ * tomber « before any visible output tokens are produced » : une étape de recette à 800 jetons
+ * rendait alors un texte vide, sans erreur. Le guide du raisonnement d'OpenAI (lu le 2026-11-13)
+ * recommande « reserving at least 25,000 tokens for reasoning and outputs ». Le budget demandé par
+ * l'appelant reste celui du texte visible.
+ */
+export const OPENAI_REASONING_TOKEN_RESERVE = 25_000;
+
 export class OpenAICompatibleProvider implements LLMProvider {
   readonly id: string = 'openai-compatible';
   readonly name: string = 'OpenAI-compatible';
@@ -129,7 +139,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
         return base;
       }),
       ...(reasoning
-        ? { max_completion_tokens: opts.maxTokens }
+        ? {
+            max_completion_tokens:
+              opts.maxTokens === undefined
+                ? undefined
+                : opts.maxTokens + OPENAI_REASONING_TOKEN_RESERVE,
+          }
         : { temperature: opts.temperature, top_p: opts.topP, max_tokens: opts.maxTokens }),
       stop: opts.stop,
       stream: true,

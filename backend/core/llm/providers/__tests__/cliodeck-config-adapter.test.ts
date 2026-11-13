@@ -3,6 +3,7 @@ import {
   applyChatModelOverride,
   clioDeckConfigToRegistryConfig,
   createRegistryFromClioDeckConfig,
+  DEFAULT_OPENAI_MODEL,
   isLocalOllamaGeneration,
   resolveActiveChatModel,
 } from '../cliodeck-config-adapter.js';
@@ -110,6 +111,16 @@ describe('ClioDeck LLMConfig → Registry adapter (3.2)', () => {
       geminiModel: 'gemini-2.5-flash-lite',
     });
     expect(r.llm.model).toBe('gemini-2.5-flash-lite');
+  });
+
+  // Le défaut OpenAI n'a qu'une copie, comme celui de Gemini : le jour où il change (`gpt-4o-mini`
+  // ferme le 14 janvier 2027), le registre et la fenêtre du compacteur changent ensemble.
+  it('openai sans modèle saisi : le même défaut pour le registre et le compacteur', () => {
+    const cfg: LLMConfig = { ...base, backend: 'openai', openaiAPIKey: 'sk-test' };
+    const r = clioDeckConfigToRegistryConfig(cfg);
+    expect(r.llm.model).toBe(DEFAULT_OPENAI_MODEL);
+    expect(resolveActiveChatModel(cfg)).toBe(DEFAULT_OPENAI_MODEL);
+    expect(getContextWindow(resolveActiveChatModel(cfg))).toBe(128_000);
   });
 
   it('keeps embeddings on ollama by default even when backend is cloud', () => {

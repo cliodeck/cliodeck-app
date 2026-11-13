@@ -189,8 +189,7 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
                 />
                 <div className="config-description">
                   <small>
-                    {t('llm.model.examples')} <code>gpt-4o-mini</code>, <code>gpt-4o</code>,{' '}
-                    <code>gpt-6-luna</code>
+                    {t('llm.model.examples')} <code>gpt-4o-mini</code>, <code>gpt-4o</code>
                   </small>
                 </div>
               </div>

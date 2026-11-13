@@ -38,6 +38,23 @@ const CLOSED = [
   'gpt-4-turbo',
 ];
 
+/**
+ * Modèles d'OpenAI dont l'appel d'outils est refusé en Chat Completions, l'API que parle
+ * `OpenAICompatibleProvider`, sous l'effort de raisonnement par défaut (`medium`) : le fournisseur
+ * joint les outils MCP dès qu'un serveur est prêt, et chaque tour serait refusé. Source :
+ * developers.openai.com/api/docs/guides/latest-model, lue le 2026-11-13 : « GPT-6 Sol and GPT-6
+ * Luna support function calling in Chat Completions only with `reasoning_effort: "none"` », et
+ * « GPT-6 Astra, GPT-6.1 Sol, and GPT-6.1 Terra support Chat Completions, but tool calling requires
+ * Responses ». Tant que ce cas n'est pas traité, aucun exemple ne doit y mener.
+ */
+const TOOLS_REFUSED_IN_CHAT_COMPLETIONS = [
+  'gpt-6-luna',
+  'gpt-6-sol',
+  'gpt-6-astra',
+  'gpt-6.1-sol',
+  'gpt-6.1-terra',
+];
+
 const base: LLMConfig = {
   backend: 'ollama',
   ollamaURL: 'http://127.0.0.1:11434',
@@ -84,4 +101,11 @@ describe('LLMConfigSection — modèles proposés pour les backends en ligne', (
       expect(placeholder).toBe(resolveActiveChatModel({ ...base, backend }));
     });
   }
+
+  it('openai : aucun exemple dont l’appel d’outils est refusé en Chat Completions', () => {
+    const { placeholder, examples } = modelField('openai');
+    expect(
+      [placeholder, ...examples].filter((id) => TOOLS_REFUSED_IN_CHAT_COMPLETIONS.includes(id))
+    ).toEqual([]);
+  });
 });

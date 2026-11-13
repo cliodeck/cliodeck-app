@@ -82,7 +82,7 @@ describe('OpenAICompatibleProvider — paramètres des modèles de raisonnement'
       expect(body).not.toHaveProperty('temperature');
       expect(body).not.toHaveProperty('top_p');
       expect(body).not.toHaveProperty('max_tokens');
-      expect(body.max_completion_tokens).toBe(800);
+      expect(body.max_completion_tokens).toBe(800 + 25_000);
       expect(body.messages.map((m) => m.role)).toEqual(['developer', 'user']);
       expect(body.messages[0].content).toBe('Tu es un assistant de recherche en histoire.');
     });
@@ -92,6 +92,56 @@ describe('OpenAICompatibleProvider — paramètres des modèles de raisonnement'
     const body = await sentBody(openai('gpt-6-luna'), { temperature: 0, topP: undefined, maxTokens: undefined });
     expect(body).not.toHaveProperty('temperature');
     expect(body).not.toHaveProperty('max_completion_tokens');
+  });
+
+  /**
+   * `max_completion_tokens` compte aussi les jetons de raisonnement (« including visible output
+   * tokens and reasoning tokens », référence de Chat Completions ; « This might occur before any
+   * visible output tokens are produced », guide du raisonnement, lus le 2026-11-13). Une étape de
+   * recette qui demande 800 jetons (`revue-zotero.yaml`) pouvait rendre un texte vide, sans erreur :
+   * une fin par la limite n'est pas une panne. Le guide recommande « reserving at least 25,000
+   * tokens for reasoning and outputs » : la réserve s'ajoute au budget du texte visible.
+   */
+  it('gpt-5-mini, étape de recette à 800 jetons : le budget visible plus la réserve de raisonnement', async () => {
+    const body = await sentBody(openai('gpt-5-mini'), { maxTokens: 800 });
+    expect(body.max_completion_tokens).toBe(25_800);
+  });
+
+  it('un modèle qui n’est pas de raisonnement garde le budget demandé, sans réserve', async () => {
+    const body = await sentBody(openai('gpt-4o-mini'), { maxTokens: 800 });
+    expect(body.max_tokens).toBe(800);
+  });
+
+  /**
+   * Comportement retenu dans cette PR, faute de décision (suivi) : les outils partent tels quels,
+   * sans `reasoning_effort`. OpenAI refuse ce tour (« GPT-6 Sol and GPT-6 Luna support function
+   * calling in Chat Completions only with `reasoning_effort: "none"` », guide « latest-model », lu le
+   * 2026-11-13 ; effort par défaut `medium`), et la cause s'affiche depuis L09-7. C'est pourquoi les
+   * Réglages ne proposent aucun modèle GPT-6 en exemple. Le jour où le suivi est traité (effort
+   * `none` quand des outils partent, ou outils selon le modèle comme pour Ollama), ce test change.
+   */
+  it('gpt-6-luna avec des outils MCP : outils joints, sans reasoning_effort ni température', async () => {
+    const body = await sentBody(openai('gpt-6-luna'), {
+      tools: [
+        {
+          name: 'zotero__search',
+          description: '[zotero] Recherche dans la bibliothèque',
+          parameters: { type: 'object', properties: { q: { type: 'string' } } },
+        },
+      ],
+    });
+    expect(body.tools).toEqual([
+      {
+        type: 'function',
+        function: {
+          name: 'zotero__search',
+          description: '[zotero] Recherche dans la bibliothèque',
+          parameters: { type: 'object', properties: { q: { type: 'string' } } },
+        },
+      },
+    ]);
+    expect(body).not.toHaveProperty('reasoning_effort');
+    expect(body).not.toHaveProperty('temperature');
   });
 
   it('la règle suit le modèle du tour (`opts.model`), pas celui de la construction', async () => {
