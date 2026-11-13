@@ -3,6 +3,7 @@ import { runChatTurn, type ChatEngineRetriever } from '../chat-engine.js';
 import type {
   ChatChunk,
   ChatMessage,
+  ChatOptions,
   LLMProvider,
 } from '../../../../backend/core/llm/providers/base.js';
 import type { RAGExplanation } from '../../../../backend/types/chat-source.js';
@@ -664,5 +665,99 @@ describe('chat-engine — « Arrêter » pendant la recherche (J9)', () => {
     expect(errors).toEqual([]);
     expect(explanations.map((e) => e.search.retrievalStatus)).not.toContain('failed');
     expect(providerCalls).toBe(0);
+  });
+});
+
+/**
+ * Plafond des tours d'outils (S06-1-4). Un modèle qui redemande un outil à chaque passage atteignait
+ * le sixième tour : ses outils partaient, leurs résultats n'étaient jamais relus, et le tour finissait
+ * en « stop » sans un mot — une bulle vide présentée comme une réponse. Au dernier tour permis, les
+ * outils demandés ne partent plus, et le tour finit sur une erreur que l'interface traduit. Arrêté
+ * entre-temps (« Arrêter », délai, fermeture du projet), il finit annulé : le plafond n'y est pour rien.
+ */
+describe('chat-engine — plafond des tours d’outils (S06-1-4)', () => {
+  const TOOLS = [{ name: 'search', description: 'cherche', parameters: { type: 'object' } }];
+
+  /**
+   * Un modèle qui redemande l'outil à chaque passage, sans jamais répondre. Comme un vrai fournisseur,
+   * il finit en `cancelled` si le signal est coupé avant la fin de son message ; `between` tombe entre
+   * la demande d'outil et cette fin.
+   */
+  function insistentProvider(calls: { n: number }, between?: (n: number) => void): LLMProvider {
+    const provider = makeFakeProvider([]);
+    provider.chat = async function* (_messages: ChatMessage[], opts?: ChatOptions) {
+      calls.n += 1;
+      if (opts?.signal?.aborted) {
+        yield { delta: '', done: true, finishReason: 'cancelled' };
+        return;
+      }
+      yield { delta: '', toolCall: { id: `c${calls.n}`, name: 'search', arguments: '{"q":"Chiappe"}' } };
+      between?.(calls.n);
+      yield { delta: '', done: true, finishReason: opts?.signal?.aborted ? 'cancelled' : 'tool_call' };
+    };
+    return provider;
+  }
+
+  it('au dernier tour permis, les outils demandés ne partent pas : erreur max_tool_turns, aucun stop silencieux', async () => {
+    const calls = { n: 0 };
+    let runs = 0;
+    const done: ChatChunk[] = [];
+    const errors: Array<{ code: string; message: string }> = [];
+    await runChatTurn({
+      provider: insistentProvider(calls),
+      messages: [{ role: 'user', content: 'Cherche Chiappe.' }],
+      tools: TOOLS,
+      toolHandler: { call: async () => { runs += 1; return { ok: true, result: { hits: 0 } }; } },
+      hooks: { onDone: (chunk) => done.push(chunk), onError: (err) => errors.push(err) },
+    });
+    expect(calls.n).toBe(6);
+    expect(runs).toBe(5);
+    expect(errors.map((e) => e.code)).toEqual(['max_tool_turns']);
+    expect(done).toEqual([{ delta: '', done: true, finishReason: 'error' }]);
+  });
+
+  it('arrêté pendant le dernier tour permis : cancelled, ni max_tool_turns ni outil de plus', async () => {
+    const controller = new AbortController();
+    const calls = { n: 0 };
+    let runs = 0;
+    const done: ChatChunk[] = [];
+    const errors: Array<{ code: string; message: string }> = [];
+    await runChatTurn({
+      provider: insistentProvider(calls, (n) => { if (n === 6) controller.abort(); }),
+      messages: [{ role: 'user', content: 'Cherche Chiappe.' }],
+      signal: controller.signal,
+      tools: TOOLS,
+      toolHandler: { call: async () => { runs += 1; return { ok: true, result: { hits: 0 } }; } },
+      hooks: { onDone: (chunk) => done.push(chunk), onError: (err) => errors.push(err) },
+    });
+    expect(runs).toBe(5);
+    expect(errors).toEqual([]);
+    expect(done).toEqual([{ delta: '', done: true, finishReason: 'cancelled' }]);
+  });
+
+  it('témoin : arrêté pendant un appel d’outil, le tour finit cancelled, sans max_tool_turns', async () => {
+    const controller = new AbortController();
+    const calls = { n: 0 };
+    let runs = 0;
+    const done: ChatChunk[] = [];
+    const errors: Array<{ code: string; message: string }> = [];
+    await runChatTurn({
+      provider: insistentProvider(calls),
+      messages: [{ role: 'user', content: 'Cherche Chiappe.' }],
+      signal: controller.signal,
+      tools: TOOLS,
+      toolHandler: {
+        call: async () => {
+          runs += 1;
+          if (runs === 2) controller.abort();
+          return { ok: true, result: { hits: 0 } };
+        },
+      },
+      hooks: { onDone: (chunk) => done.push(chunk), onError: (err) => errors.push(err) },
+    });
+    expect(runs).toBe(2);
+    expect(calls.n).toBe(3);
+    expect(errors).toEqual([]);
+    expect(done).toEqual([{ delta: '', done: true, finishReason: 'cancelled' }]);
   });
 });

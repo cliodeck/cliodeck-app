@@ -17,7 +17,8 @@
  *  - Retrieval is a single async hook returning chunks to prepend as a
  *    system message; leaving it undefined skips RAG entirely.
  *  - The agent loop is capped by `maxTurns` (default 6) to avoid runaway
- *    tool-use ping-pong.
+ *    tool-use ping-pong. Au dernier tour permis, les outils encore demandés
+ *    ne partent pas et le tour finit en erreur `max_tool_turns` (S06-1-4).
  */
 
 import type {
@@ -605,6 +606,27 @@ export async function runChatTurn<TSource = unknown>(
         return;
       }
 
+      // Dernier tour permis et des outils encore demandés (S06-1-4) : leurs résultats ne seraient
+      // jamais relus, et le tour finissait en « stop » sans un mot. Les outils ne partent pas, et le
+      // tour finit en erreur — sauf s'il a été arrêté entre-temps : il finit alors annulé.
+      if (turn === maxTurns - 1) {
+        if (args.signal?.aborted) {
+          finalFinishReason = 'cancelled';
+          generationMs = Date.now() - generationStart;
+          emitExplanation();
+          safeStatus({ phase: 'done' });
+          hooks.onDone?.({ delta: '', done: true, finishReason: 'cancelled' });
+        } else {
+          finalFinishReason = 'error';
+          emitError(
+            'max_tool_turns',
+            `Tool-call limit reached (${maxTurns} turns) without a final answer`
+          );
+        }
+        logTurnDone();
+        return;
+      }
+
       // Record the assistant's tool-call message so the provider-specific
       // adapter can replay it on the next turn (Anthropic tool_use blocks,
       // OpenAI tool_calls array, Gemini functionCall parts, etc.).
@@ -669,7 +691,8 @@ export async function runChatTurn<TSource = unknown>(
       // callers debug mid-loop state. No functional use today.
       void lastDoneChunk;
     }
-    // Loop unwound without a natural terminal — emit a stop.
+    // Loop unwound without a natural terminal — emit a stop. Le dernier tour permis finit toujours
+    // de lui-même : seul `maxTurns < 1` arrive ici.
     finalFinishReason = 'stop';
     generationMs = Date.now() - generationStart;
     emitExplanation();

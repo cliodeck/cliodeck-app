@@ -198,6 +198,8 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
     ['anthropic_stream_error', '', 'chat.providerNoCause'],
     ['ollama_stream_error', '', 'chat.providerNoCause'],
     ['provider_error', 'Le fournisseur a interrompu la réponse sans donner de cause.', 'chat.providerNoCause'],
+    // Plafond des tours d'outils (S06-1-4) : le moteur l'écrit en anglais, pour le journal.
+    ['max_tool_turns', 'Tool-call limit reached (6 turns) without a final answer', 'chat.maxToolTurns'],
   ])('traduit par son code la panne %s, dont la cause vient de ClioDeck', async (code, message, key) => {
     await i18n.changeLanguage('en');
     try {

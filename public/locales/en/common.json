@@ -894,6 +894,7 @@
     "timeout": "No response from the model for {{minutes}} min: generation stopped. Raise the inactivity timeout in the chat settings if the model is just slow.",
     "providerError": "The model failed: {{message}}",
     "streamIncomplete": "The model failed: the connection closed before the response was complete.",
+    "maxToolTurns": "The model kept calling MCP tools without giving an answer: the turn stopped at the limit. Rephrase the question, or turn off some MCP tools.",
     "emptyResponse": "The model failed: the provider returned an empty response.",
     "providerNoCause": "The model failed: the provider stopped the response without giving a reason.",
     "truncated": "Response truncated: the model reached its maximum response length.",
