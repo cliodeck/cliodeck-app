@@ -893,6 +893,7 @@
     "startFailed": "The model is not responding: {{error}}. Check your configuration in Settings.",
     "timeout": "No response from the model for {{minutes}} min: generation stopped. Raise the inactivity timeout in the chat settings if the model is just slow.",
     "providerError": "The model failed: {{message}}",
+    "truncated": "Response truncated: the model reached its maximum response length.",
     "waitingForModel": "The model is still reading the prompt · {{elapsed}} min elapsed · automatic stop at {{limit}} min",
     "thinking": "The model is thinking · {{chars}} characters of reasoning",
     "thinkingBlock": "Model reasoning ({{chars}} characters)",

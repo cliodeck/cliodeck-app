@@ -161,6 +161,59 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  // L09-7 : chaque fournisseur nomme ses pannes par son préfixe. Seuls ceux d'Ollama étaient
+  // habillés ; « invalid x-api-key » arrivait seul, sans dire que c'était le modèle qui refusait.
+  it.each([
+    ['anthropic_http_401', 'invalid x-api-key'],
+    ['openai_compat_stream_error', 'server_error'],
+    ['mistral_http_429', 'Requests rate limit exceeded'],
+    ['gemini_http_400', 'API key not valid. Please pass a valid API key.'],
+    ['embedded_generation_failed', 'context size exceeded'],
+  ])('habille la panne %s comme une erreur du modèle', async (code, message) => {
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('bonjour');
+    });
+    act(() => {
+      emit({
+        sessionId: sessionOf(start),
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code, message },
+      });
+    });
+    expect(result.current.error).toBe(i18n.t('chat.providerError', { message }));
+    expect(result.current.error).not.toBe(message);
+  });
+
+  // Un modèle pensant qui tombe en cours de raisonnement : la bulle garde ce qu'il a pensé, et
+  // l'erreur s'y ajoute.
+  it('le raisonnement reçu avant la panne reste dans la bulle', async () => {
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('bonjour');
+    });
+    const s1 = sessionOf(start);
+    act(() => {
+      emit({ sessionId: s1, chunk: { delta: '', thinking: 'Je cherche le préfet…' } });
+      emit({
+        sessionId: s1,
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code: 'ollama_stream_error', message: 'model runner has unexpectedly stopped' },
+      });
+    });
+    const last = useChatStore.getState().messages.at(-1);
+    expect(last).toMatchObject({
+      role: 'assistant',
+      thinking: 'Je cherche le préfet…',
+      finishReason: 'error',
+      isError: true,
+      pending: false,
+    });
+    expect(last?.error).toContain('model runner has unexpectedly stopped');
+  });
+
   it('n’envoie pas de modèle quand la génération est confiée au modèle embarqué', async () => {
     const start = installFusionChat();
     useRAGQueryStore.getState().setParams({ provider: 'embedded', model: 'qwen3.5:35b' });

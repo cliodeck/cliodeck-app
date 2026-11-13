@@ -348,6 +348,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
           timestamp: m.timestamp,
           pending: m.pending,
           isError: !!m.error || !!m.isError,
+          finishReason: m.finishReason,
           badge: m.ragCitation ? t('chat.brainstorm.citationBadge') : modeBadge,
           original: m,
         };

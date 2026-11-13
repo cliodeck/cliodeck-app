@@ -74,6 +74,29 @@ describe('MessageBubble', () => {
     expect(screen.getByTestId('extras-slot')).toBeInTheDocument();
   });
 
+  // S05-1-7 : une réponse arrêtée par la limite de longueur du modèle le dit.
+  describe('réponse tronquée', () => {
+    it('finishReason length : la ligne chat.truncated s’affiche, avec son icône', () => {
+      const { container } = render(
+        <MessageBubble
+          message={baseMsg({ id: 't', role: 'assistant', content: 'Première partie', finishReason: 'length' })}
+        />,
+      );
+      const line = screen.getByText('chat.truncated');
+      expect(line).toBeInTheDocument();
+      expect(container.querySelector('.message-truncated svg')).not.toBeNull();
+    });
+
+    it.each(['stop', 'error', 'cancelled', undefined])('finishReason %s : aucune ligne', (finishReason) => {
+      render(
+        <MessageBubble
+          message={baseMsg({ id: 't', role: 'assistant', content: 'Réponse', finishReason })}
+        />,
+      );
+      expect(screen.queryByText('chat.truncated')).toBeNull();
+    });
+  });
+
   it('renders the … placeholder for pending assistant message with empty content', () => {
     const { container } = render(
       <MessageBubble

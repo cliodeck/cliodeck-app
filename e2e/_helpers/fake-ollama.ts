@@ -48,10 +48,23 @@ const OTHER_EMBEDDING_DIMENSION = 1024;
  * demande entre-temps (`chatAborted`).
  *
  * `port` : écouter sur ce port, celui d'un faux Ollama fermé plus tôt — un Ollama arrêté puis relancé.
+ *
+ * `doneReason` : la raison de fin que porte la ligne `done` (`stop` par défaut ; `length` pour une
+ * réponse arrêtée par la limite de longueur du modèle).
+ *
+ * `chatError` : après `answer`, une ligne `{"error": chatError}` ferme le flux sans ligne `done`,
+ * comme le runner d'Ollama qui tombe en pleine réponse (L09-7).
  */
 export async function startFakeOllama(
   answer: string,
-  options: { onlyItsModel?: boolean; hangChat?: boolean; heldChat?: string; port?: number } = {},
+  options: {
+    onlyItsModel?: boolean;
+    hangChat?: boolean;
+    heldChat?: string;
+    port?: number;
+    doneReason?: 'stop' | 'length';
+    chatError?: string;
+  } = {},
 ): Promise<FakeOllama> {
   const MODEL = 'faux:latest';
   let chatRequests = 0;
@@ -114,7 +127,13 @@ export async function startFakeOllama(
           }
           res.setHeader('Content-Type', 'application/x-ndjson');
           res.write(`${JSON.stringify({ model: MODEL, message: { role: 'assistant', content: answer }, done: false })}\n`);
-          res.end(`${JSON.stringify({ model: MODEL, message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop' })}\n`);
+          if (options.chatError !== undefined) {
+            res.end(`${JSON.stringify({ error: options.chatError })}\n`);
+            return undefined;
+          }
+          res.end(
+            `${JSON.stringify({ model: MODEL, message: { role: 'assistant', content: '' }, done: true, done_reason: options.doneReason ?? 'stop' })}\n`,
+          );
           return undefined;
         }
         default:

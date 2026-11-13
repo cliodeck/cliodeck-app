@@ -91,8 +91,9 @@ function errorMessage(error: { code: string; message: string }): string {
       minutes: Math.max(1, Math.round(useRAGQueryStore.getState().params.timeout / 60_000)),
     });
   }
-  // Échec côté fournisseur : la cause vient du main, on l'habille.
-  if (/^(ollama_|provider_|stream_)/.test(error.code)) {
+  // Échec côté fournisseur : la cause vient du main, on l'habille. Chaque fournisseur préfixe ses
+  // codes de son nom (L09-7).
+  if (/^(ollama_|anthropic_|openai_compat_|gemini_|mistral_|embedded_|provider_|stream_)/.test(error.code)) {
     return i18n.t('chat.providerError', { message: error.message });
   }
   return error.message;

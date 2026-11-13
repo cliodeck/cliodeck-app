@@ -133,6 +133,44 @@ describe('AssistantChat full (fusion step 6)', () => {
     });
   });
 
+  // Une réponse arrêtée par la limite de longueur du modèle ne se présente plus comme complète
+  // (S05-1-7) : la fin `length` était rangée dans le store et affichée nulle part.
+  it('une réponse finie par la limite de longueur porte la ligne « réponse tronquée »', async () => {
+    const api = installFusionMock();
+    render(<AssistantChat variant="full" />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Une synthèse longue.' } });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(api.start).toHaveBeenCalled());
+    await waitFor(() => expect(useChatStore.getState().pendingAssistantId).not.toBeNull());
+
+    act(() => {
+      api._emitChunk({ sessionId: api.session, chunk: { delta: 'Première partie' } });
+    });
+    act(() => {
+      api._emitChunk({ sessionId: api.session, chunk: { delta: '', done: true, finishReason: 'length' } });
+    });
+
+    await waitFor(() => expect(screen.getByText('chat.truncated')).toBeInTheDocument());
+  });
+
+  it('une réponse finie normalement ne porte pas la ligne « réponse tronquée »', async () => {
+    const api = installFusionMock();
+    render(<AssistantChat variant="full" />);
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'q' } });
+    fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Enter', ctrlKey: true });
+    await waitFor(() => expect(api.start).toHaveBeenCalled());
+    await waitFor(() => expect(useChatStore.getState().pendingAssistantId).not.toBeNull());
+
+    act(() => {
+      api._emitChunk({ sessionId: api.session, chunk: { delta: 'Réponse.', done: true, finishReason: 'stop' } });
+    });
+
+    await waitFor(() => expect(screen.getByText('Réponse.')).toBeInTheDocument());
+    expect(screen.queryByText('chat.truncated')).toBeNull();
+  });
+
   it('renders a tool-call badge when onToolCall fires with status=done', async () => {
     const api = installFusionMock();
     render(<AssistantChat variant="full" />);

@@ -893,6 +893,7 @@
     "startFailed": "Das Modell antwortet nicht: {{error}}. Prüfen Sie Ihre Konfiguration in den Einstellungen.",
     "timeout": "Seit {{minutes}} Min. keine Antwort vom Modell: Generierung abgebrochen. Erhöhen Sie das Inaktivitäts-Timeout in den Chat-Einstellungen, wenn das Modell nur langsam ist.",
     "providerError": "Das Modell ist gescheitert: {{message}}",
+    "truncated": "Antwort abgeschnitten: Das Modell hat die maximale Antwortlänge erreicht.",
     "waitingForModel": "Das Modell liest noch den Prompt · {{elapsed}} Min. vergangen · automatischer Abbruch nach {{limit}} Min.",
     "thinking": "Das Modell denkt nach · {{chars}} Zeichen Überlegung",
     "thinkingBlock": "Überlegung des Modells ({{chars}} Zeichen)",
