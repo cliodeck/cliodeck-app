@@ -162,6 +162,82 @@ describe('usage-journal provider instrumentation', () => {
     expect(await isLocal('llama3.2', 'http://gpu.labo.example:11434')).toBe(false);
   });
 
+  // Un tour tombé chez le fournisseur se termine par un chunk `error`, sans exception : le journal
+  // le comptait « ok » (S05-1-2).
+  it('un chat fini par un chunk terminal error est journalisé en erreur', async () => {
+    const llm = instrumentLLM(
+      new FakeLLM([{ delta: 'Début ' }, { delta: '', done: true, finishReason: 'error' }]),
+      'ollama'
+    );
+    for await (const _ of llm.chat([{ role: 'user', content: 'q' }])) {
+      // consommé jusqu'au bout
+    }
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'completion', status: 'error' });
+  });
+
+  it('complete() d’un fournisseur en panne rejette avec la cause, et le journal dit erreur', async () => {
+    const failing = new (class extends FakeLLM {
+      getStatus(): ProviderStatus {
+        return {
+          state: 'degraded',
+          lastError: { code: 'anthropic_http_401', message: 'invalid x-api-key', at: 'now' },
+        };
+      }
+    })([{ delta: '', done: true, finishReason: 'error' }]);
+    const llm = instrumentLLM(failing, 'anthropic');
+
+    await expect(llm.complete('q')).rejects.toMatchObject({
+      name: 'ProviderCallError',
+      code: 'anthropic_http_401',
+      message: 'invalid x-api-key',
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'completion', status: 'error' });
+  });
+
+  it('complete() annulé rejette, mais reste « ok » au journal, comme un chat() annulé', async () => {
+    const llm = instrumentLLM(
+      new FakeLLM([{ delta: 'Début', done: true, finishReason: 'cancelled' }]),
+      'ollama'
+    );
+    await expect(llm.complete('q')).rejects.toMatchObject({
+      name: 'ProviderCallError',
+      finishReason: 'cancelled',
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ kind: 'completion', status: 'ok' });
+  });
+
+  // Une synthèse coupée chez un fournisseur facturé a déjà produit du texte et annoncé son usage :
+  // le journal le garde, comme pour un chat() coupé au même endroit (revue de L09-7).
+  it('complete() tombé après du texte garde au journal le texte produit et l’usage annoncé', async () => {
+    const chunks: ChatChunk[] = [
+      { delta: 'x'.repeat(4000), usage: { promptTokens: 1200 } },
+      { delta: '', done: true, finishReason: 'error' },
+    ];
+    await expect(instrumentLLM(new FakeLLM(chunks), 'anthropic').complete('p'.repeat(40))).rejects
+      .toMatchObject({ name: 'ProviderCallError' });
+    for await (const _ of instrumentLLM(new FakeLLM(chunks), 'anthropic').chat([
+      { role: 'user', content: 'p'.repeat(40) },
+    ])) {
+      // consommé jusqu'au bout
+    }
+
+    expect(events).toHaveLength(2);
+    const [viaComplete, viaChat] = events;
+    expect(viaComplete).toMatchObject({
+      status: 'error',
+      promptTokens: 1200,
+      completionTokens: 1000,
+      tokensEstimated: true,
+    });
+    expect(viaComplete).toMatchObject({
+      promptTokens: viaChat.promptTokens,
+      completionTokens: viaChat.completionTokens,
+    });
+  });
+
   it('un repli enveloppé se résout à travers le décorateur, sans quitter le journal', async () => {
     const named = (model: string, up: boolean): EmbeddingProvider => {
       const base = new FakeEmbedding();

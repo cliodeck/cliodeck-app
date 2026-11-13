@@ -24,6 +24,8 @@ import type {
   ProviderCapabilities,
   ProviderStatus,
 } from './base.js';
+import { collectCompletion } from './collect.js';
+import { readProviderError } from './provider-error.js';
 
 const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -277,7 +279,17 @@ export class GeminiProvider implements LLMProvider {
       return;
     }
 
+    // La cause est posée avant le chunk terminal : `chat-engine` lit l'état à son arrivée, puis
+    // lâche le flux (S05-1-5). `readProviderError` masque la clé, passée dans l'URL.
     if (!res.ok || !res.body) {
+      this.status = {
+        state: 'degraded',
+        lastError: {
+          code: `gemini_http_${res.status}`,
+          message: res.ok ? 'Réponse sans corps' : await readProviderError(res),
+          at: now(),
+        },
+      };
       yield { delta: '', done: true, finishReason: 'error' };
       return;
     }
@@ -306,6 +318,7 @@ export class GeminiProvider implements LLMProvider {
           if (!payload) continue;
           try {
             const obj = JSON.parse(payload) as {
+              error?: { code?: number; message?: string; status?: string };
               candidates?: Array<{
                 content?: {
                   parts?: Array<{
@@ -324,6 +337,21 @@ export class GeminiProvider implements LLMProvider {
                 totalTokenCount?: number;
               };
             };
+            // Une erreur en cours de flux coupe la réponse : elle n'a pas de `candidates`, et
+            // passait pour un morceau vide.
+            if (obj.error) {
+              this.status = {
+                state: 'degraded',
+                lastError: {
+                  code: 'gemini_stream_error',
+                  // Vide si l'API n'a rien dit : le renderer le dit dans la langue de l'interface.
+                  message: obj.error.message || obj.error.status || '',
+                  at: now(),
+                },
+              };
+              yield { delta: '', done: true, finishReason: 'error' };
+              return;
+            }
             const cand = obj.candidates?.[0];
             const parts = cand?.content?.parts ?? [];
             for (const part of parts) {
@@ -360,12 +388,9 @@ export class GeminiProvider implements LLMProvider {
       }
       yield { delta: '', done: true, finishReason, usage };
     } catch (e) {
+      // La cause est posée avant le chunk terminal : `chat-engine` lit l'état à son arrivée, puis
+      // lâche le flux.
       const cancelled = opts.signal?.aborted;
-      yield {
-        delta: '',
-        done: true,
-        finishReason: cancelled ? 'cancelled' : 'error',
-      };
       if (!cancelled) {
         this.status = {
           state: 'degraded',
@@ -376,18 +401,20 @@ export class GeminiProvider implements LLMProvider {
           },
         };
       }
+      yield {
+        delta: '',
+        done: true,
+        finishReason: cancelled ? 'cancelled' : 'error',
+      };
     }
   }
 
   async complete(prompt: string, opts: CompleteOptions = {}): Promise<string> {
-    let out = '';
-    for await (const chunk of this.chat(
-      [{ role: 'user', content: prompt }],
-      opts
-    )) {
-      out += chunk.delta;
-    }
-    return out;
+    const { text } = await collectCompletion(
+      this,
+      this.chat([{ role: 'user', content: prompt }], opts)
+    );
+    return text;
   }
 
   async dispose(): Promise<void> {

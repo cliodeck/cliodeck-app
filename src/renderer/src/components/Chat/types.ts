@@ -10,6 +10,8 @@ export interface UnifiedMessage {
   timestamp?: Date;
   pending?: boolean;
   isError?: boolean;
+  /** Fin du tour (`stop`, `length`…) : `length` affiche la ligne « réponse tronquée ». */
+  finishReason?: string;
   /** Optional label shown next to role (e.g. active mode name). */
   badge?: string;
 }

@@ -21,6 +21,57 @@ describe('AnthropicProvider — config', () => {
 });
 
 /**
+ * Le chat n'envoie jamais `maxTokens` : à 1 024 par défaut, toute réponse de Claude s'arrêtait
+ * vers 750 mots, sans avertissement (S05-1-7). Le contrôle de santé garde son jeton unique.
+ */
+describe('AnthropicProvider — max_tokens', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function captureBodies(): Array<{ max_tokens?: number }> {
+    const bodies: Array<{ max_tokens?: number }> = [];
+    vi.stubGlobal('fetch', async (_input: string | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      const sse = [
+        'event: message_delta',
+        `data: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' } })}`,
+        '',
+        '',
+      ].join('\n');
+      return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    });
+    return bodies;
+  }
+
+  const provider = (): AnthropicProvider =>
+    new AnthropicProvider({ apiKey: 'sk-test', model: 'claude-sonnet-4-6', baseUrl: 'http://mock.anthropic/v1' });
+
+  it('sans maxTokens, le corps porte max_tokens 8192', async () => {
+    const bodies = captureBodies();
+    for await (const _ of provider().chat([{ role: 'user', content: 'Synthèse longue.' }])) {
+      // le flux est consommé jusqu'au bout
+    }
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].max_tokens).toBe(8192);
+  });
+
+  it('un maxTokens explicite est respecté', async () => {
+    const bodies = captureBodies();
+    for await (const _ of provider().chat([{ role: 'user', content: 'Court.' }], { maxTokens: 300 })) {
+      // le flux est consommé jusqu'au bout
+    }
+    expect(bodies[0].max_tokens).toBe(300);
+  });
+
+  it('le contrôle de santé ne demande toujours qu’un jeton', async () => {
+    const bodies = captureBodies();
+    await provider().healthCheck();
+    expect(bodies[0].max_tokens).toBe(1);
+  });
+});
+
+/**
  * Un tour resté sans réponse laisse dans l'historique un message assistant vide (S06-1-1). L'API
  * Messages refuse tout message non final au contenu vide : HTTP 400 à chaque tour suivant, jusqu'à
  * ce qu'on vide la conversation. Le corps est lu sur un `fetch` simulé : rien ne part en ligne.

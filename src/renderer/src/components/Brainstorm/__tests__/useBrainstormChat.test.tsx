@@ -161,6 +161,94 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
     expect(result.current.isStreaming).toBe(false);
   });
 
+  // L09-7 : chaque fournisseur nomme ses pannes par son préfixe. Seuls ceux d'Ollama étaient
+  // habillés ; « invalid x-api-key » arrivait seul, sans dire que c'était le modèle qui refusait.
+  it.each([
+    ['anthropic_http_401', 'invalid x-api-key'],
+    ['openai_compat_stream_error', 'server_error'],
+    ['mistral_http_429', 'Requests rate limit exceeded'],
+    ['gemini_http_400', 'API key not valid. Please pass a valid API key.'],
+    ['embedded_generation_failed', 'context size exceeded'],
+  ])('habille la panne %s comme une erreur du modèle', async (code, message) => {
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('bonjour');
+    });
+    act(() => {
+      emit({
+        sessionId: sessionOf(start),
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code, message },
+      });
+    });
+    expect(result.current.error).toBe(i18n.t('chat.providerError', { message }));
+    expect(result.current.error).not.toBe(message);
+  });
+
+  // Revue de L09-7 : ces causes ne viennent pas de l'API mais de ClioDeck, écrites par le main, qui
+  // n'a pas la langue de l'interface. Insérées telles quelles, une interface en anglais lisait
+  // « The model failed: Le flux s’est fermé avant la fin de la réponse. ».
+  it.each([
+    ['ollama_stream_incomplete', 'Le flux s’est fermé avant la fin de la réponse.', 'chat.streamIncomplete'],
+    ['anthropic_stream_incomplete', 'Le flux s’est fermé avant la fin de la réponse.', 'chat.streamIncomplete'],
+    ['stream_incomplete', 'LLM stream ended without a terminal chunk', 'chat.streamIncomplete'],
+    ['ollama_http_200', 'Réponse sans corps', 'chat.emptyResponse'],
+    ['gemini_http_200', 'Réponse sans corps', 'chat.emptyResponse'],
+    ['anthropic_stream_error', '', 'chat.providerNoCause'],
+    ['ollama_stream_error', '', 'chat.providerNoCause'],
+    ['provider_error', 'Le fournisseur a interrompu la réponse sans donner de cause.', 'chat.providerNoCause'],
+  ])('traduit par son code la panne %s, dont la cause vient de ClioDeck', async (code, message, key) => {
+    await i18n.changeLanguage('en');
+    try {
+      const start = installFusionChat();
+      const { result } = renderHook(() => useBrainstormChat());
+      await act(async () => {
+        await result.current.send('hello');
+      });
+      act(() => {
+        emit({
+          sessionId: sessionOf(start),
+          chunk: { delta: '', done: true, finishReason: 'error' },
+          error: { code, message },
+        });
+      });
+      expect(i18n.t(key)).not.toBe(key);
+      expect(result.current.error).toBe(i18n.t(key));
+      if (message) expect(result.current.error).not.toContain(message);
+    } finally {
+      await i18n.changeLanguage('fr');
+    }
+  });
+
+  // Un modèle pensant qui tombe en cours de raisonnement : la bulle garde ce qu'il a pensé, et
+  // l'erreur s'y ajoute.
+  it('le raisonnement reçu avant la panne reste dans la bulle', async () => {
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('bonjour');
+    });
+    const s1 = sessionOf(start);
+    act(() => {
+      emit({ sessionId: s1, chunk: { delta: '', thinking: 'Je cherche le préfet…' } });
+      emit({
+        sessionId: s1,
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code: 'ollama_stream_error', message: 'model runner has unexpectedly stopped' },
+      });
+    });
+    const last = useChatStore.getState().messages.at(-1);
+    expect(last).toMatchObject({
+      role: 'assistant',
+      thinking: 'Je cherche le préfet…',
+      finishReason: 'error',
+      isError: true,
+      pending: false,
+    });
+    expect(last?.error).toContain('model runner has unexpectedly stopped');
+  });
+
   it('n’envoie pas de modèle quand la génération est confiée au modèle embarqué', async () => {
     const start = installFusionChat();
     useRAGQueryStore.getState().setParams({ provider: 'embedded', model: 'qwen3.5:35b' });

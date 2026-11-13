@@ -17,6 +17,8 @@ import type {
   ProviderCapabilities,
   ProviderStatus,
 } from './base.js';
+import { collectCompletion } from './collect.js';
+import { readProviderError } from './provider-error.js';
 
 export interface AnthropicProviderConfig {
   apiKey: string;
@@ -28,6 +30,15 @@ export interface AnthropicProviderConfig {
 
 const DEFAULT_BASE = 'https://api.anthropic.com/v1';
 const DEFAULT_VERSION = '2023-06-01';
+
+/**
+ * `max_tokens` quand l'appelant n'en donne pas. L'API Messages l'exige ; le chat ne l'envoie
+ * jamais, et à 1 024 toute réponse de Claude s'arrêtait vers 750 mots (S05-1-7). 8 192 tient dans
+ * la limite de sortie de chacun des modèles proposés dans les réglages (Sonnet 4.6, Opus 4.6 :
+ * 128K ; Haiku 4.5 : 64K). Un modèle plus ancien, plafonné plus bas, répondra 400 : la cause
+ * s'affiche.
+ */
+const ANTHROPIC_DEFAULT_MAX_TOKENS = 8192;
 
 function now(): string {
   return new Date().toISOString();
@@ -200,7 +211,7 @@ export class AnthropicProvider implements LLMProvider {
       : undefined;
     const body = {
       model: opts.model ?? this.model,
-      max_tokens: opts.maxTokens ?? 1024,
+      max_tokens: opts.maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
       temperature: opts.temperature,
       top_p: opts.topP,
       top_k: opts.topK,
@@ -232,7 +243,17 @@ export class AnthropicProvider implements LLMProvider {
       return;
     }
 
+    // La cause est posée avant le chunk terminal : `chat-engine` lit l'état à son arrivée, puis
+    // lâche le flux (S05-1-5).
     if (!res.ok || !res.body) {
+      this.status = {
+        state: 'degraded',
+        lastError: {
+          code: `anthropic_http_${res.status}`,
+          message: res.ok ? 'Réponse sans corps' : await readProviderError(res),
+          at: now(),
+        },
+      };
       yield { delta: '', done: true, finishReason: 'error' };
       return;
     }
@@ -242,6 +263,8 @@ export class AnthropicProvider implements LLMProvider {
     let buf = '';
     let usage: ChatChunk['usage'] | undefined;
     let finishReason: ChatChunk['finishReason'] = 'stop';
+    // Une réponse complète se clôt par un `stop_reason` ; sans lui, le flux a été coupé.
+    let sawStopReason = false;
 
     // Track partial tool_use blocks — Anthropic streams the name in
     // content_block_start and accumulates arguments across
@@ -285,7 +308,24 @@ export class AnthropicProvider implements LLMProvider {
                 usage?: { input_tokens?: number; output_tokens?: number };
               };
               usage?: { output_tokens?: number };
+              error?: { type?: string; message?: string };
             };
+            // `event: error` en cours de flux (overloaded_error…), l'équivalent d'un 529 : la
+            // réponse est coupée, pas finie (S05-1-21).
+            if (obj.type === 'error') {
+              const cause = [obj.error?.type, obj.error?.message].filter(Boolean).join(': ');
+              this.status = {
+                state: 'degraded',
+                lastError: {
+                  code: 'anthropic_stream_error',
+                  // Vide si l'API n'a rien dit : le renderer le dit dans la langue de l'interface.
+                  message: cause,
+                  at: now(),
+                },
+              };
+              yield { delta: '', done: true, finishReason: 'error' };
+              return;
+            }
             if (
               obj.type === 'content_block_start' &&
               obj.content_block?.type === 'tool_use' &&
@@ -324,6 +364,7 @@ export class AnthropicProvider implements LLMProvider {
               }
             } else if (obj.type === 'message_delta') {
               if (obj.delta?.stop_reason) {
+                sawStopReason = true;
                 const r = obj.delta.stop_reason;
                 finishReason =
                   r === 'tool_use'
@@ -349,14 +390,23 @@ export class AnthropicProvider implements LLMProvider {
           }
         }
       }
+      if (!sawStopReason) {
+        this.status = {
+          state: 'degraded',
+          lastError: {
+            code: 'anthropic_stream_incomplete',
+            message: 'Le flux s’est fermé avant la fin de la réponse.',
+            at: now(),
+          },
+        };
+        yield { delta: '', done: true, finishReason: 'error', usage };
+        return;
+      }
       yield { delta: '', done: true, finishReason, usage };
     } catch (e) {
+      // La cause est posée avant le chunk terminal : `chat-engine` lit l'état à son arrivée, puis
+      // lâche le flux.
       const cancelled = opts.signal?.aborted;
-      yield {
-        delta: '',
-        done: true,
-        finishReason: cancelled ? 'cancelled' : 'error',
-      };
       if (!cancelled) {
         this.status = {
           state: 'degraded',
@@ -367,18 +417,20 @@ export class AnthropicProvider implements LLMProvider {
           },
         };
       }
+      yield {
+        delta: '',
+        done: true,
+        finishReason: cancelled ? 'cancelled' : 'error',
+      };
     }
   }
 
   async complete(prompt: string, opts: CompleteOptions = {}): Promise<string> {
-    let out = '';
-    for await (const chunk of this.chat(
-      [{ role: 'user', content: prompt }],
-      opts
-    )) {
-      out += chunk.delta;
-    }
-    return out;
+    const { text } = await collectCompletion(
+      this,
+      this.chat([{ role: 'user', content: prompt }], opts)
+    );
+    return text;
   }
 
   async dispose(): Promise<void> {

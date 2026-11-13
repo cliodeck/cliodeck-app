@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Bot, Circle, Info, User } from 'lucide-react';
+import { AlertTriangle, Bot, Circle, Info, User } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { marked } from 'marked';
 import { UnifiedMessage } from './types';
@@ -43,6 +43,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
     // A reply made only of forbidden tags sanitizes to '': show it as escaped
     // text, never as raw HTML (a lone <style> would restyle the whole app).
     const filtered = !pending && !htmlContent && message.content.trim() !== '';
+    // Réponse arrêtée par la limite de longueur du modèle : elle ne se présente pas comme
+    // complète (S05-1-7).
+    const truncated = !isUser && !message.pending && message.finishReason === 'length';
 
     return (
       <div className={`message-bubble ${isUser ? 'user' : isSystem ? 'system' : 'assistant'}`}>
@@ -74,6 +77,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = React.memo(
             />
           )}
         </div>
+
+        {truncated && (
+          <div className="message-truncated">
+            <AlertTriangle size={12} /> {t('chat.truncated')}
+          </div>
+        )}
 
         {extras}
       </div>

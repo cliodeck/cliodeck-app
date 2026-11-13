@@ -336,6 +336,20 @@
   color: var(--text-tertiary);
 }
 
+/* Réponse arrêtée par la limite de longueur du modèle (S05-1-7). */
+.message-truncated {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.message-truncated svg {
+  flex-shrink: 0;
+  color: var(--color-warning);
+}
+
 /* NER entity highlights (A11.5) */
 .ner {
   padding: 0 2px;
