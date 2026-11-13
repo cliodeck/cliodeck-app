@@ -245,8 +245,8 @@ export interface RunChatTurnArgs<TSource = unknown> {
 /**
  * Consigne au modèle quand la recherche lève : il ne doit rien prétendre avoir lu, ni conclure que
  * les sources se taisent, et doit le dire à l'utilisateur (S04-2-1). Le service la reprend telle
- * quelle quand chaque corpus a échoué de son côté (`CONTEXT_TEXT.searchFailed`) : une seule
- * consigne pour une recherche qui n'a pas eu lieu.
+ * quelle quand un corpus a échoué et qu'aucun n'a rendu d'extrait (`CONTEXT_TEXT.searchFailed`) :
+ * une seule consigne pour une recherche qui n'a rien pu donner.
  */
 export const RETRIEVAL_FAILED_TEXT: Record<'fr' | 'en', string> = {
   fr: 'La recherche dans les sources a échoué pour ce tour. Aucun extrait n’a été récupéré. Dis à l’utilisateur que ses sources n’ont pas pu être consultées : ne conclus pas qu’elles ne disent rien sur la question, ne prétends pas les avoir consultées et ne fabrique pas de citations.',
@@ -608,12 +608,13 @@ export async function runChatTurn<TSource = unknown>(
 
       // Dernier tour permis et des outils encore demandés (S06-1-4) : leurs résultats ne seraient
       // jamais relus, et le tour finissait en « stop » sans un mot. Les outils ne partent pas, et le
-      // tour finit en erreur — sauf s'il a été arrêté entre-temps : il finit alors annulé.
+      // tour finit en erreur — sauf s'il a été arrêté entre-temps : il finit alors annulé. Dans les
+      // deux cas, l'explication part d'abord : la bande d'une recherche en panne reste sous la bulle.
       if (turn === maxTurns - 1) {
+        generationMs = Date.now() - generationStart;
+        emitExplanation();
         if (args.signal?.aborted) {
           finalFinishReason = 'cancelled';
-          generationMs = Date.now() - generationStart;
-          emitExplanation();
           safeStatus({ phase: 'done' });
           hooks.onDone?.({ delta: '', done: true, finishReason: 'cancelled' });
         } else {

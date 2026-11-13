@@ -484,13 +484,28 @@ export interface ChatStreamEnvelope {
   error?: { code: string; message: string };
 }
 
+/**
+ * Issue de la recherche d'un tour, seul calcul pour la bande, le panneau et les consignes au modèle.
+ *
+ * - `failed` : un corpus tenté au moins a échoué, et aucun n'a rendu d'extrait. Un corpus vide
+ *   (Tropy sans projet lié, rien d'indexé) rend 0 sans rien chercher : à côté d'une panne, il n'en
+ *   fait pas une panne partielle. C'est le cas d'Ollama arrêté (S04-2-1). Un corpus qui a cherché
+ *   sans rien trouver compte de même : `fanOutCorpora` rend `ok: true, hitCount: 0` dans les deux cas.
+ * - `partial` : une panne, et un autre corpus a rendu des extraits.
+ * - `empty` : aucune panne, aucun extrait.
+ */
 export function retrievalStatus(
   corpora: NonNullable<RAGExplanation['search']['corpora']>,
   noHits: boolean
 ): RAGExplanation['search']['retrievalStatus'] {
   const attempted = corpora.filter((corpus) => corpus.attempted);
   const failures = attempted.filter((corpus) => !corpus.ok);
-  if (failures.length > 0) return failures.length === attempted.length ? 'failed' : 'partial';
+  if (failures.length > 0) {
+    // Un extrait dans le prompt, ou un corpus qui en a rendu (même écarté ensuite par la bande ou
+    // l'inspecteur) : quelque chose a répondu.
+    const answered = !noHits || attempted.some((corpus) => corpus.ok && corpus.hitCount > 0);
+    return answered ? 'partial' : 'failed';
+  }
   return noHits && attempted.length > 0 ? 'empty' : undefined;
 }
 
@@ -1471,11 +1486,12 @@ interface ContextText {
   /** Préambule du texte de l'utilisateur quand aucune source ne le précède. */
   ownPassagesNotSources: string;
   /**
-   * Recherche en échec (S04-2-1), choisie par le statut affiché (`formatRetrievalNotes`). Tous les
-   * corpus tentés en échec : la consigne d'une recherche qui a levé, celle du moteur, mot pour mot.
+   * Recherche en échec (S04-2-1), choisie par le statut affiché (`formatRetrievalNotes`). Un corpus
+   * tenté au moins en échec, et aucun extrait rendu : la consigne d'une recherche qui a levé, celle du
+   * moteur, mot pour mot.
    */
   searchFailed: string;
-  /** Une partie des corpus tentés en échec. */
+  /** Une partie des corpus tentés en échec, un autre a rendu des extraits. */
   someSearchesFailed: string;
   /** Aucun extrait du tout, quand une source a échoué ou que seul le texte de l'utilisateur est interrogé. */
   noEvidence: string;
@@ -1652,9 +1668,9 @@ export function formatSelectionScope(
 
 /**
  * Consignes au modèle sur l'issue de la recherche, tirées du statut affiché (`retrievalStatus`) :
- * l'écran et le modèle lisent le même calcul. Tout en échec : la consigne d'une recherche qui a levé,
- * qui dit déjà qu'aucun extrait n'a été récupéré. Une partie en échec : le dire, sans conclure à une
- * absence (S04-2-1).
+ * l'écran et le modèle lisent le même calcul. Une panne sans aucun extrait rendu : la consigne d'une
+ * recherche qui a levé, qui dit déjà qu'aucun extrait n'a été récupéré. Une panne à côté d'extraits :
+ * le dire, sans conclure à une absence (S04-2-1).
  */
 function formatRetrievalNotes(
   status: RAGExplanation['search']['retrievalStatus'],

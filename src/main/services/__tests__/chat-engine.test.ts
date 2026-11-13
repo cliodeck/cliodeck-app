@@ -716,6 +716,28 @@ describe('chat-engine — plafond des tours d’outils (S06-1-4)', () => {
     expect(done).toEqual([{ delta: '', done: true, finishReason: 'error' }]);
   });
 
+  it('au plafond, l’explication part avant l’erreur : la bande d’une recherche en panne reste sous la bulle', async () => {
+    // Sur `main`, le tour fini au plafond passait par l'explication puis un « stop ». L'erreur ne doit
+    // pas emporter la bande « La recherche de sources a échoué » ni le panneau des détails.
+    const events: string[] = [];
+    let explanation: RAGExplanation | undefined;
+    await runChatTurn({
+      provider: insistentProvider({ n: 0 }),
+      messages: [{ role: 'user', content: 'Cherche Chiappe.' }],
+      retriever: { search: async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:11434'); } },
+      tools: TOOLS,
+      toolHandler: { call: async () => ({ ok: true, result: { hits: 0 } }) },
+      hooks: {
+        onExplanation: (value) => { explanation = value; events.push('explanation'); },
+        onError: (err) => events.push(`error:${err.code}`),
+        onDone: (chunk) => events.push(`done:${chunk.finishReason}`),
+      },
+    });
+    expect(events).toEqual(['explanation', 'error:max_tool_turns', 'done:error']);
+    expect(explanation?.search.retrievalStatus).toBe('failed');
+    expect(explanation?.timing.generationMs).toBeGreaterThanOrEqual(0);
+  });
+
   it('arrêté pendant le dernier tour permis : cancelled, ni max_tool_turns ni outil de plus', async () => {
     const controller = new AbortController();
     const calls = { n: 0 };

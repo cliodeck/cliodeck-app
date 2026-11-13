@@ -616,13 +616,24 @@ describe('recherche en échec : le modèle et l’écran le disent (S04-2-1)', (
     fs.rmSync(project, { recursive: true, force: true });
   });
 
-  type Corpus = 'secondary' | 'primary' | 'vault';
-  const corpus = (source: Corpus, ok: boolean) =>
-    ({ source, attempted: true, ok, hitCount: 0, selectedCount: 0 });
-  const withCorpora = (corpora: Array<ReturnType<typeof corpus>>): RetrievalSearchWithStatsResult => ({
-    hits: [], manuscriptHits: [], readingNoteHits: [], outcomes: [], securityEvents: [],
-    stats: { search: { query: 'question', totalResults: 0, searchDurationMs: 1, cacheHit: false, sourceType: 'both', documents: [], corpora }, timing: { searchMs: 1 } },
+  type Corpus = 'secondary' | 'primary' | 'vault' | 'manuscript';
+  const corpus = (source: Corpus, ok: boolean, hitCount = 0) =>
+    ({ source, attempted: true, ok, hitCount, selectedCount: hitCount });
+  const withCorpora = (
+    corpora: Array<ReturnType<typeof corpus>>,
+    hits: RetrievalSearchWithStatsResult['hits'] = []
+  ): RetrievalSearchWithStatsResult => ({
+    hits, manuscriptHits: [], readingNoteHits: [], outcomes: [], securityEvents: [],
+    stats: { search: { query: 'question', totalResults: hits.length, searchDurationMs: 1, cacheHit: false, sourceType: 'both', documents: [], corpora }, timing: { searchMs: 1 } },
   });
+  const ARCHIVE = 'Rapport du commissaire central sur la grève des dockers, 1907.';
+  const archiveHit: RetrievalSearchWithStatsResult['hits'][number] = {
+    chunk: { id: 'p-0', content: ARCHIVE, documentId: 'src-10', chunkIndex: 0 },
+    document: { id: 'src-10', title: 'Rapport du commissaire central', author: undefined, bibtexKey: null },
+    source: undefined,
+    similarity: 0.6,
+    sourceType: 'primary',
+  };
 
   /** Les messages système reçus par le modèle au dernier appel. */
   const systemText = (): string =>
@@ -637,13 +648,25 @@ describe('recherche en échec : le modèle et l’écran le disent (S04-2-1)', (
     return sent;
   }
 
-  it('tous les corpus tentés en échec : explication « failed », et la consigne d’une recherche qui a levé', async () => {
-    vi.mocked(retrievalService.searchWithStats).mockResolvedValueOnce(
-      withCorpora([corpus('secondary', false), corpus('primary', false), corpus('vault', false)])
-    );
-    const allFailed = await turn();
-    expect(terminal(allFailed)?.error).toBeUndefined();
-    expect(explanationOf(allFailed)?.search.retrievalStatus).toBe('failed');
+  // Deux formes d'une recherche où rien n'a répondu. La première est celle de l'app quand Ollama est
+  // arrêté et qu'aucun projet Tropy n'est lié : Tropy rend 0 sans rien chercher (E2), tous les corpus
+  // qui avaient de quoi chercher tombent. La seconde, avec un Tropy lié et indexé, tombe en entier.
+  it.each([
+    {
+      shape: 'Ollama arrêté, sans Tropy lié : archives à 0, tout le reste en échec',
+      corpora: [corpus('secondary', false), corpus('primary', true), corpus('vault', false), corpus('manuscript', false)],
+    },
+    {
+      shape: 'Tropy lié et indexé : tous les corpus en échec',
+      corpora: [corpus('secondary', false), corpus('primary', false), corpus('vault', false)],
+    },
+  ])('$shape : explication « failed », et la consigne d’une recherche qui a levé', async ({ corpora }) => {
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValueOnce(withCorpora(corpora));
+    const failed = await turn();
+    expect(terminal(failed)?.error).toBeUndefined();
+    expect(explanationOf(failed)?.search.retrievalStatus).toBe('failed');
+    // La ligne « Par corpus » garde le détail : des archives sans projet lié restent à 0, pas en échec.
+    expect(explanationOf(failed)?.search.corpora).toEqual(corpora);
     const failedNote = systemText();
 
     vi.mocked(retrievalService.searchWithStats).mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:11434'));
@@ -655,16 +678,22 @@ describe('recherche en échec : le modèle et l’écran le disent (S04-2-1)', (
     expect(failedNote).toBe(systemText());
     expect(failedNote).toMatch(/Dis à l['’]utilisateur/);
     expect(failedNote).toMatch(/ne conclus pas/);
+    expect(failedNote).not.toMatch(/Certaines recherches/);
   });
 
-  it('une partie des corpus en échec, aucun extrait : la consigne demande de le dire, pas de conclure à une absence', async () => {
+  it('une partie des corpus en échec, un autre a répondu : panne partielle, à dire sans conclure à une absence', async () => {
     vi.mocked(retrievalService.searchWithStats).mockResolvedValueOnce(
-      withCorpora([corpus('secondary', false), corpus('primary', true)])
+      withCorpora([corpus('secondary', false), corpus('primary', true, 1)], [archiveHit])
     );
     const sent = await turn();
     expect(explanationOf(sent)?.search.retrievalStatus).toBe('partial');
+    expect(systemText()).toContain(ARCHIVE);
+    expect(systemText()).toMatch(/Certaines recherches dans les sources ont échoué/);
     expect(systemText()).toMatch(/Dis à l['’]utilisateur/);
     expect(systemText()).toMatch(/ne conclus pas/);
+    // L'extrait des archives est là : ni « aucun extrait », ni la consigne d'une recherche sans réponse.
+    expect(systemText()).not.toMatch(/Aucun extrait n['’]a été/);
+    expect(systemText()).not.toMatch(/La recherche dans les sources a échoué/);
   });
 
   it('témoin J9 : « Arrêter » pendant la recherche ne donne ni consigne, ni échec affiché, ni appel au modèle', async () => {

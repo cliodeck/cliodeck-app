@@ -34,7 +34,7 @@ import type { ManuscriptMappedSearchResult } from '../retrieval-service.js';
 afterEach(() => { vi.restoreAllMocks(); state.messages.length = 0; });
 
 describe('fusion chat retrieval status', () => {
-  it('sends empty and partial-failure results to the model and renderer', async () => {
+  it('sends empty and failed-search results to the model and renderer', async () => {
     vi.spyOn(configManager, 'getLLMConfig').mockReturnValue({ backend: 'ollama', ollamaURL: 'http://localhost:11434', ollamaChatModel: 'test' } as ReturnType<typeof configManager.getLLMConfig>);
     vi.spyOn(configManager, 'getRAGConfig').mockReturnValue({ topK: 5, systemPromptLanguage: 'en' } as ReturnType<typeof configManager.getRAGConfig>);
     vi.spyOn(projectManager, 'getCurrentProjectPath').mockReturnValue('missing-project');
@@ -60,9 +60,12 @@ describe('fusion chat retrieval status', () => {
     expect(empty.filter((event) => event.channel === 'fusion:chat:chunk')).not.toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ error: expect.anything() }) }));
     expect(state.messages[0].some((m) => m.content.includes('No excerpt'))).toBe(true);
     expect(empty.find((event) => event.channel === 'fusion:chat:explanation')?.payload).toMatchObject({ explanation: { search: { retrievalStatus: 'empty' } } });
-    const partial = await run(true);
-    expect(state.messages[1].some((m) => m.content.includes('searches failed'))).toBe(true);
-    expect(partial.find((event) => event.channel === 'fusion:chat:explanation')?.payload).toMatchObject({ explanation: { search: { retrievalStatus: 'partial' } } });
+    // Aucun corpus n'a rendu d'extrait et l'un a échoué : recherche en échec, pas « partielle »
+    // (S04-2-1). Le cas partiel, avec un corpus qui répond, est au banc des tours.
+    const failedRun = await run(true);
+    expect(state.messages[1].some((m) => m.content.includes('The source search failed'))).toBe(true);
+    expect(state.messages[1].some((m) => m.content.includes('searches failed'))).toBe(false);
+    expect(failedRun.find((event) => event.channel === 'fusion:chat:explanation')?.payload).toMatchObject({ explanation: { search: { retrievalStatus: 'failed' } } });
     const recovered = await run(false);
     expect(state.messages[2].some((m) => m.content.includes('searches failed'))).toBe(false);
     expect(recovered.find((event) => event.channel === 'fusion:chat:explanation')?.payload).toMatchObject({ explanation: { search: { retrievalStatus: 'empty' } } });
