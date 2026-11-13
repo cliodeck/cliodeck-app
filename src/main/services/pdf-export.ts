@@ -188,11 +188,20 @@ $endif$`;
  * (`\citeproc` le redéfinit dans un groupe). Sans `link-citations`, pandoc n'écrit pas `\cite`, et
  * `CSLReferences` efface déjà les étiquettes de `\bibitem` : le rendu ne change pas (mesuré :
  * pages identiques à l'octet près, article et livre).
+ *
+ * Une seule différence avec pandoc : une clé sans notice (`@inconnu2020`) garde le texte que
+ * pandoc écrit pour elle (« inconnu2020? »), au lieu du « ? » de `\cite` (« ( ?) », avec le
+ * gabarit de pandoc aussi) : l'historien voit quelle citation manque. Une clé connue n'a son
+ * `b@ref-cle` qu'à partir de la deuxième passe de xelatex, que pandoc relance tant que LaTeX le
+ * demande (« Label(s) may have changed ») : les citations connues restent des liens (mesuré :
+ * mêmes liens, pages identiques à l'octet près).
  */
-const PANDOC_CITEPROC_LINKS = `% Citations liees (link-citations) : recopie de pandoc 3.13 (common.latex, bloc csl-refs).
-\\NewDocumentCommand\\citeproc{mm}{%
-  \\begingroup\\def\\citeproctext{#2}\\cite{#1}\\endgroup}
+const PANDOC_CITEPROC_LINKS = `% Citations liees (link-citations) : recopie de pandoc 3.13 (common.latex, bloc csl-refs),
+% sauf pour une cle sans notice : pandoc en ecrit le nom (inconnu2020?), que \\cite
+% remplacerait par un simple point d'interrogation.
 \\makeatletter
+\\NewDocumentCommand\\citeproc{mm}{%
+  \\@ifundefined{b@#1}{#2}{\\begingroup\\def\\citeproctext{#2}\\cite{#1}\\endgroup}}
  % allow citations to break across lines
  \\let\\@cite@ofmt\\@firstofone
  % avoid brackets around text for \\cite:
@@ -317,9 +326,22 @@ $body$
 % Notes de fin (reglage noteStyle) : le paquet endnotes accumule les notes
 % jusqu'au prochain \\theendnotes, que l'assembleur place apres chaque
 % chapitre ou en fin d'ouvrage.
+% Une note dans un tableau ou dans une legende, pandoc l'ecrit en deux temps :
+% \\footnotemark{} dans la cellule, \\footnotetext{...} apres, avec des
+% \\addtocounter{footnote}{-1} entre plusieurs. Les trois passent aux notes de
+% fin, et le compteur footnote devient celui des notes de fin : sans cela, ces
+% notes sortaient en bas de page, numerotees a part (J19). La classe book
+% remet footnote a zero a chaque chapitre : plus maintenant, puisque c'est le
+% compteur des notes de fin, que seul l'assembleur remet a zero (per-chapter).
 $if(endnotes)$
 \\usepackage{endnotes}
 \\let\\footnote\\endnote
+\\let\\footnotemark\\endnotemark
+\\let\\footnotetext\\endnotetext
+\\makeatletter
+\\let\\c@footnote\\c@endnote
+\\makeatother
+\\counterwithout{footnote}{chapter}
 \\renewcommand{\\notesname}{Notes}
 $endif$
 
