@@ -148,27 +148,10 @@ export interface SlidesSourceCut {
   totalChars: number;
 }
 
-/**
- * Le document que le modèle embarqué peut lire avec les consignes et la demande, dans sa fenêtre de
- * 4 096 jetons (L08-4). Le moteur ne coupe jamais la question, et le document y est : sans cette
- * coupe, un document de plus de 9 000 caractères environ était refusé, et, juste en deçà, ce sont
- * les consignes des diapositives, en rôle système, qui partaient. C'est la fin du document qui part,
- * marquée « […] », comme le moteur le faisait avant L08-4 ; les diapositives sont tirées de son début.
- */
-function fitSourceToWindow(
-  source: string,
-  system: string,
-  promptFor: (source: string) => string,
-  tokenizer: EmbeddedTokenizer
-): { source: string; cut?: SlidesSourceCut } {
-  const fixed =
-    tokenizer.tokenize(system).length + tokenizer.tokenize(promptFor('')).length + FIT_MARGIN_TOKENS;
-  const room = embeddedInputBudget(EMBEDDED_CONTEXT_SIZE) - fixed;
-  const kept = fitTextToTokens(source, Math.max(0, room), tokenizer);
-  if (kept === source) return { source };
-  // Ce qui a été lu, sans la marque de coupe.
-  const readChars = kept.endsWith('[…]') ? kept.slice(0, -'[…]'.length).trimEnd().length : kept.length;
-  return { source: kept, cut: { readChars, totalChars: source.length } };
+/** Les références de la bibliographie que le modèle a reçues, quand toutes n'ont pas tenu. */
+export interface SlidesBibliographyCut {
+  kept: number;
+  total: number;
 }
 
 /** Le modèle a fini en erreur : son code (`embedded_prompt_too_long`…) va au panneau, qui le traduit. */
@@ -180,6 +163,80 @@ class SlidesGenerationError extends Error {
     super(message);
     this.name = 'SlidesGenerationError';
   }
+}
+
+/**
+ * Place minimale du document, en jetons (un millier de caractères en français). En deçà, le modèle
+ * produirait des diapositives sans le document : un gabarit générique, donné pour réussi.
+ */
+const MIN_SOURCE_TOKENS = 300;
+
+/**
+ * Ce que le modèle embarqué lit de la demande, dans sa fenêtre de 4 096 jetons (L08-4). Le moteur ne
+ * coupe jamais la question, et la bibliographie comme le document y sont : sans cette mesure, un
+ * document de plus de 9 000 caractères environ était refusé, et, juste en deçà, ce sont les
+ * consignes des diapositives, en rôle système, qui partaient.
+ *
+ * Le document passe d'abord (revue de L08-4) : la bibliographie n'a que la place qu'il laisse, et au
+ * moins un tiers, jamais ce qui lui ôterait son minimum. Elle passait entière avant lui, et 50
+ * références de taille courante (2 214 jetons, mesuré) ne lui laissaient plus rien. Elle perd ses
+ * dernières entrées ; le document, sa fin, marquée « […] », comme le moteur le faisait avant L08-4.
+ * Les deux coupes se disent au panneau.
+ */
+function fitSlidesRequest(args: {
+  source: string;
+  bibLines: string[];
+  /** Les références du projet : les lignes n'en reprennent que les 50 premières. */
+  bibTotal: number;
+  system: string;
+  promptFor: (bibLines: string[], source: string) => string;
+  tokenizer: EmbeddedTokenizer;
+}): { source: string; bibLines: string[]; cut?: SlidesSourceCut; bibliographyCut?: SlidesBibliographyCut } {
+  const { source, bibLines, bibTotal, system, promptFor, tokenizer } = args;
+  const count = (text: string): number => tokenizer.tokenize(text).length;
+  const systemTokens = count(system);
+  const bare = count(promptFor([], ''));
+  const available = embeddedInputBudget(EMBEDDED_CONTEXT_SIZE) - systemTokens - bare - FIT_MARGIN_TOKENS;
+  if (available < MIN_SOURCE_TOKENS) {
+    throw new SlidesGenerationError(
+      `The slide-generation instructions leave ${Math.max(0, available)} tokens for the document in the embedded model's ` +
+        `${EMBEDDED_CONTEXT_SIZE}-token context window.`,
+      'embedded_prompt_too_long'
+    );
+  }
+
+  // La bibliographie : ce que le document laisse, au moins un tiers de la place, jamais son minimum.
+  const bibRoom = Math.min(
+    available - MIN_SOURCE_TOKENS,
+    Math.max(Math.floor(available / 3), available - count(source))
+  );
+  const bibCost = (n: number): number => count(promptFor(bibLines.slice(0, n), '')) - bare;
+  // Le plus grand nombre d'entrées, prises dans l'ordre, qui tient : le coût croît avec lui.
+  let kept = bibLines.length;
+  if (bibCost(kept) > bibRoom) {
+    let low = 0;
+    let high = kept - 1;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (bibCost(mid) <= bibRoom) low = mid;
+      else high = mid - 1;
+    }
+    kept = low;
+  }
+  const keptLines = bibLines.slice(0, kept);
+
+  const room = embeddedInputBudget(EMBEDDED_CONTEXT_SIZE) - systemTokens - count(promptFor(keptLines, '')) - FIT_MARGIN_TOKENS;
+  const keptSource = fitTextToTokens(source, room, tokenizer);
+  // Ce qui a été lu, sans la marque de coupe.
+  const readChars = keptSource.endsWith('[…]')
+    ? keptSource.slice(0, -'[…]'.length).trimEnd().length
+    : keptSource.length;
+  return {
+    source: keptSource,
+    bibLines: keptLines,
+    ...(keptSource === source ? {} : { cut: { readChars, totalChars: source.length } }),
+    ...(kept < bibLines.length ? { bibliographyCut: { kept, total: bibTotal } } : {}),
+  };
 }
 
 // ── Service ─────────────────────────────────────────────────────────────
@@ -247,18 +304,15 @@ export class SlidesGenerationService {
     };
     const t = i18n[language] ?? i18n.fr;
 
-    // Build bibliography section if citations are provided
-    let bibliographySection = '';
-    if (citations && citations.length > 0) {
-      const bibLines = citations
-        .slice(0, 50) // cap to avoid overloading context
-        .map((c) => `- [@${c.id}] ${c.author} (${c.year}). *${c.title}*`)
-        .join('\n');
-      bibliographySection = `\n\n${t.bibHeader} :\n${bibLines}`;
-    }
+    // Bibliography lines, if citations are provided
+    const bibLines = (citations ?? [])
+      .slice(0, 50) // cap to avoid overloading context
+      .map((c) => `- [@${c.id}] ${c.author} (${c.year}). *${c.title}*`);
 
-    const promptFor = (source: string): string =>
-      `${t.intro} :${bibliographySection}\n\n---\n${source}\n---\n\n${t.go}`;
+    const promptFor = (lines: string[], source: string): string => {
+      const bibliographySection = lines.length > 0 ? `\n\n${t.bibHeader} :\n${lines.join('\n')}` : '';
+      return `${t.intro} :${bibliographySection}\n\n---\n${source}\n---\n\n${t.go}`;
+    };
 
     let fullResponse = '';
     const llm = this.llm;
@@ -267,13 +321,24 @@ export class SlidesGenerationService {
       logger.info('slides', 'generateSlides:start', { textLength: sourceText.length, language });
 
       // Le modèle embarqué (réglage « embarqué », ou « auto » Ollama arrêté) ne lit que ce qui tient
-      // dans sa fenêtre : le document y est mesuré et coupé par la fin. Les autres le reçoivent entier.
+      // dans sa fenêtre : le document et la bibliographie y sont mesurés, et coupés par la fin. Les
+      // autres reçoivent tout.
       const tokenizer = await embeddedTokenizerOf(llm, signal);
-      const fitted = tokenizer
-        ? fitSourceToWindow(sourceText, systemPrompt, promptFor, tokenizer)
-        : { source: sourceText };
+      const fitted: ReturnType<typeof fitSlidesRequest> = tokenizer
+        ? fitSlidesRequest({
+            source: sourceText,
+            bibLines,
+            bibTotal: citations?.length ?? 0,
+            system: systemPrompt,
+            promptFor,
+            tokenizer,
+          })
+        : { source: sourceText, bibLines };
       if (fitted.cut) {
         logger.warn('slides', 'generateSlides:source-cut', { ...fitted.cut });
+      }
+      if (fitted.bibliographyCut) {
+        logger.warn('slides', 'generateSlides:bibliography-cut', { ...fitted.bibliographyCut });
       }
 
       // Stream via the typed provider. Single system+user turn,
@@ -281,7 +346,7 @@ export class SlidesGenerationService {
       const iter = llm.chat(
         [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: promptFor(fitted.source) },
+          { role: 'user', content: promptFor(fitted.bibLines, fitted.source) },
         ],
         { temperature: 0.3, signal }
       );
@@ -309,6 +374,7 @@ export class SlidesGenerationService {
       window.webContents.send('slides:stream-done', {
         content: normalised,
         ...(fitted.cut ? { sourceCut: fitted.cut } : {}),
+        ...(fitted.bibliographyCut ? { bibliographyCut: fitted.bibliographyCut } : {}),
       });
       logger.info('slides', 'generateSlides:done', { outputLength: normalised.length });
 

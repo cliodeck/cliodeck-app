@@ -6,9 +6,25 @@
  *   langue de l'interface, et la réponse brute de l'IPC, qui suit, ne le remplace pas.
  * - Un document plus long que la fenêtre est lu en partie : le panneau dit que seul son début a
  *   servi, au lieu de laisser croire que les slides couvrent tout le texte.
+ * - Une bibliographie trop longue est coupée : le panneau dit combien de références le modèle a
+ *   reçues.
+ *
+ * Le `t` de ce fichier rend la clé suivie de ses paramètres : les nombres affichés se vérifient.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { act, render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: string | Record<string, unknown>) =>
+      typeof options === 'string'
+        ? options
+        : options && Object.keys(options).length > 0
+          ? `${key} ${JSON.stringify(options)}`
+          : key,
+    i18n: { language: 'fr', changeLanguage: async () => undefined },
+  }),
+}));
 
 vi.mock('../../../stores/editorStore', () => ({
   useEditorStore: () => ({
@@ -28,6 +44,7 @@ type DoneListener = (result: {
   content: string;
   cancelled?: boolean;
   sourceCut?: { readChars: number; totalChars: number };
+  bibliographyCut?: { kept: number; total: number };
 }) => void;
 type ErrorListener = (error: { error: string; code?: string }) => void;
 
@@ -115,10 +132,44 @@ describe('SlideGenerationPanel — modèle embarqué (L08-4)', () => {
     );
     await act(async () => bridge.resolve({ success: true, model: 'qwen2.5-0.5b' }));
 
-    expect(screen.getByText('slides.generate.sourceCut')).toBeTruthy();
+    expect(screen.getByText('slides.generate.sourceCut {"percent":25}')).toBeTruthy();
     // « Régénérer » efface la mention avec le résultat.
     fireEvent.click(screen.getByText('slides.generate.regenerate'));
-    expect(screen.queryByText('slides.generate.sourceCut')).toBeNull();
+    expect(screen.queryByText(/slides\.generate\.sourceCut/)).toBeNull();
+  });
+
+  // Rien de lu ne s'affiche jamais « environ 1 % » ; un peu de lu ne s'affiche pas « 0 % ».
+  it('la part lue n’est pas arrondie à 1 % quand rien n’a été lu', async () => {
+    const bridge = installSlidesBridge();
+    render(<SlideGenerationPanel />);
+    fireEvent.click(screen.getByText('slides.generate.generate'));
+    await waitFor(() => expect(() => bridge.done()).not.toThrow());
+
+    act(() => bridge.done()({ content: '# Gabarit', sourceCut: { readChars: 0, totalChars: 4983 } }));
+    expect(screen.getByText('slides.generate.sourceCut {"percent":0}')).toBeTruthy();
+
+    fireEvent.click(screen.getByText('slides.generate.regenerate'));
+    fireEvent.click(screen.getByText('slides.generate.generate'));
+    await waitFor(() => expect(() => bridge.done()).not.toThrow());
+    act(() => bridge.done()({ content: '# Gabarit', sourceCut: { readChars: 40, totalChars: 400_000 } }));
+    expect(screen.getByText('slides.generate.sourceCut {"percent":1}')).toBeTruthy();
+  });
+
+  it('bibliographie coupée : le panneau dit combien de références le modèle a reçues', async () => {
+    const bridge = installSlidesBridge();
+    render(<SlideGenerationPanel />);
+    fireEvent.click(screen.getByText('slides.generate.generate'));
+    await waitFor(() => expect(() => bridge.done()).not.toThrow());
+
+    act(() =>
+      bridge.done()({ content: '# La grève\n\n## Le Havre, 1910', bibliographyCut: { kept: 19, total: 50 } })
+    );
+    await act(async () => bridge.resolve({ success: true, model: 'qwen2.5-0.5b' }));
+
+    expect(screen.getByText('slides.generate.bibliographyCut {"kept":19,"total":50}')).toBeTruthy();
+    expect(screen.queryByText(/slides\.generate\.sourceCut/)).toBeNull();
+    fireEvent.click(screen.getByText('slides.generate.regenerate'));
+    expect(screen.queryByText(/slides\.generate\.bibliographyCut/)).toBeNull();
   });
 
   it('document lu en entier : aucune mention', async () => {
@@ -130,6 +181,7 @@ describe('SlideGenerationPanel — modèle embarqué (L08-4)', () => {
     act(() => bridge.done()({ content: '# La grève\n\n## Le Havre, 1910' }));
     await act(async () => bridge.resolve({ success: true, model: 'qwen2.5-0.5b' }));
 
-    expect(screen.queryByText('slides.generate.sourceCut')).toBeNull();
+    expect(screen.queryByText(/slides\.generate\.sourceCut/)).toBeNull();
+    expect(screen.queryByText(/slides\.generate\.bibliographyCut/)).toBeNull();
   });
 });

@@ -90,14 +90,14 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
   };
 });
 
-import { fusionChatService, type ChatStreamEnvelope } from '../fusion-chat-service.js';
+import { fusionChatService, type ChatStreamEnvelope, type FusionChatRetrievalOptions } from '../fusion-chat-service.js';
 import { operations, type CancellableOperation } from '../cancellable-operation.js';
 import { configManager } from '../config-manager.js';
 import { projectManager } from '../project-manager.js';
 import { retrievalService } from '../retrieval-service.js';
 import { manuscriptIndexService } from '../manuscript-index-service.js';
 import { readingNotesIndexService } from '../reading-notes-index-service.js';
-import type { ReadingNoteMappedSearchResult, RetrievalSearchWithStatsResult } from '../retrieval-service.js';
+import type { ManuscriptMappedSearchResult, ReadingNoteMappedSearchResult, RetrievalSearchWithStatsResult } from '../retrieval-service.js';
 import type { RAGExplanation } from '../../../../backend/types/chat-source.js';
 import { cloudConsent } from '../../../../backend/security/cloud-consent.js';
 import { historyService } from '../history-service.js';
@@ -968,6 +968,33 @@ describe('moteur embarqué : la fenêtre réelle du tour (L08-4)', () => {
     (sent.find((e) => e.channel === 'fusion:chat:explanation')?.payload as { explanation: RAGExplanation } | undefined)
       ?.explanation;
 
+  /** Quatre extraits de 452 mots, chacun marqué au début et à la fin, sous les 1 500 caractères gardés. */
+  const hitOf = (i: number): RetrievalSearchWithStatsResult['hits'][number] =>
+    ({
+      ...secondaryHit,
+      chunk: {
+        ...secondaryHit.chunk,
+        id: `s-${i}`,
+        documentId: `doc-${i}`,
+        content: [`DEBUT-${i}`, ...Array.from({ length: 450 }, (_, k) => `m${k % 10}`), `FIN-${i}`].join(' '),
+      },
+      document: { ...secondaryHit.document, id: `doc-${i}`, title: `Document ${i}` },
+      similarity: 0.9 - i / 100,
+    }) as RetrievalSearchWithStatsResult['hits'][number];
+
+  /** La recherche rend ces quatre extraits, et ses statistiques les comptent tous. */
+  const fourLongHits = (): RetrievalSearchWithStatsResult => ({
+    hits: [1, 2, 3, 4].map(hitOf), manuscriptHits: [], readingNoteHits: [], outcomes: [], securityEvents: [],
+    stats: {
+      search: {
+        query: 'Qui était Jules Durand ?', totalResults: 4, searchDurationMs: 1, cacheHit: false, sourceType: 'both',
+        documents: [1, 2, 3, 4].map((i) => ({ title: `Document ${i}`, similarity: 0.9 - i / 100, sourceType: 'secondary', chunkCount: 1 })),
+        corpora: [{ source: 'secondary', attempted: true, ok: true, hitCount: 4, selectedCount: 4 }],
+      },
+      timing: { searchMs: 1 },
+    },
+  });
+
   function ask(retrievalOptions?: { topK?: number }): Sent[] {
     const { webContents, sent } = captureWebContents();
     fusionChatService.start({
@@ -1111,29 +1138,7 @@ describe('moteur embarqué : la fenêtre réelle du tour (L08-4)', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     // 1 300 mots d'indications, sous la borne de 32 000 caractères du garde.
     fs.writeFileSync(path.join(project, 'context.md'), Array.from({ length: 1300 }, (_, i) => `c${i % 10}`).join(' '));
-    // Quatre extraits de 452 mots, chacun marqué au début et à la fin, sous les 1 500 caractères gardés.
-    const hitOf = (i: number): RetrievalSearchWithStatsResult['hits'][number] =>
-      ({
-        ...secondaryHit,
-        chunk: {
-          ...secondaryHit.chunk,
-          id: `s-${i}`,
-          documentId: `doc-${i}`,
-          content: [`DEBUT-${i}`, ...Array.from({ length: 450 }, (_, k) => `m${k % 10}`), `FIN-${i}`].join(' '),
-        },
-        document: { ...secondaryHit.document, id: `doc-${i}`, title: `Document ${i}` },
-        similarity: 0.9 - i / 100,
-      }) as RetrievalSearchWithStatsResult['hits'][number];
-    vi.mocked(retrievalService.searchWithStats).mockResolvedValue({
-      hits: [1, 2, 3, 4].map(hitOf), manuscriptHits: [], readingNoteHits: [], outcomes: [], securityEvents: [],
-      stats: {
-        search: {
-          query: 'Qui était Jules Durand ?', totalResults: 4, searchDurationMs: 1, cacheHit: false, sourceType: 'both', documents: [],
-          corpora: [{ source: 'secondary', attempted: true, ok: true, hitCount: 4, selectedCount: 4 }],
-        },
-        timing: { searchMs: 1 },
-      },
-    });
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValue(fourLongHits());
 
     const sent = await turn({ topK: 25 });
 
@@ -1153,6 +1158,91 @@ describe('moteur embarqué : la fenêtre réelle du tour (L08-4)', () => {
     // Les plus pertinents restent ; l'explication dit combien le modèle en a lu.
     expect(shown).toEqual([1, 2, 3, 4].slice(0, shown.length).map((i) => `Document ${i}`));
     expect(explanationOf(sent)?.search.extractsCap).toBe(shown.length);
+    // Et elle ne compte, par corpus et par document, que ceux-là ; « Résultats trouvés » reste ce
+    // que la recherche a rendu.
+    const search = explanationOf(sent)?.search;
+    expect(search?.corpora?.find((c) => c.source === 'secondary')?.selectedCount).toBe(shown.length);
+    expect(search?.corpora?.find((c) => c.source === 'secondary')?.hitCount).toBe(4);
+    expect(search?.documents.map((d) => d.title)).toEqual(shown);
+    expect(search?.totalResults).toBe(4);
+  });
+
+  /**
+   * Des indications du projet assez longues pour ne laisser place à aucun extrait (une page et demie
+   * suffit : 6 000 caractères, mesuré au tokeniseur du vrai modèle). Le bloc des extraits retombait
+   * sur la consigne « aucun extrait des sources interrogées ne correspond à cette question » : le
+   * modèle aurait dit à l'historien que ses sources se taisent, alors qu'elles avaient répondu
+   * (revue de L08-4). Il dit désormais que les extraits trouvés n'ont pas pu lui être transmis.
+   */
+  it('indications du projet qui ne laissent place à aucun extrait : jamais « aucun extrait ne correspond »', async () => {
+    useConfig(EMBEDDED);
+    bench.registry = () =>
+      instrumentLLM(new EmbeddedProvider({ modelPath: EMBEDDED.embeddedModelPath, modelId: 'qwen2.5-0.5b' }), 'embedded');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    fs.writeFileSync(path.join(project, 'context.md'), Array.from({ length: 2300 }, (_, i) => `c${i % 10}`).join(' '));
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValue(fourLongHits());
+
+    const sent = await turn({ topK: 25 });
+
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    const shown = (sent.find((e) => e.channel === 'fusion:chat:context')?.payload as { sources: unknown[] } | undefined)?.sources ?? [];
+    expect(shown).toHaveLength(0);
+    const system = fakeLlama.sessions[0].systemPrompt ?? '';
+    // La consigne part entière, après les indications.
+    expect(system.endsWith('[…]')).toBe(false);
+    expect(system).not.toContain('ne correspond à cette question');
+    expect(system).toContain('mais aucun n’a pu t’être transmis');
+    expect(system).toContain('ne conclus pas que ses sources ne disent rien sur la question');
+    for (const i of [1, 2, 3, 4]) expect(system).not.toContain(`DEBUT-${i}`);
+    const search = explanationOf(sent)?.search;
+    expect(search?.extractsCap).toBe(0);
+    expect(search?.totalResults).toBe(4);
+    expect(search?.corpora?.find((c) => c.source === 'secondary')?.selectedCount).toBe(0);
+    expect(search?.documents).toEqual([]);
+  });
+
+  it('manuscrit seul, aucun passage ne tient : la consigne dit qu’ils n’ont pas pu être transmis', async () => {
+    useConfig(EMBEDDED);
+    bench.registry = () =>
+      instrumentLLM(new EmbeddedProvider({ modelPath: EMBEDDED.embeddedModelPath, modelId: 'qwen2.5-0.5b' }), 'embedded');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.mocked(manuscriptIndexService.isEnabled).mockReturnValue(true);
+    fs.writeFileSync(path.join(project, 'context.md'), Array.from({ length: 2300 }, (_, i) => `c${i % 10}`).join(' '));
+    const passage = (i: number): ManuscriptMappedSearchResult => ({
+      chunk: { id: `m-${i}`, content: Array.from({ length: 450 }, (_, k) => `p${k % 10}`).join(' '), documentId: 'chap-1', chunkIndex: i },
+      document: { id: 'chap-1', title: 'Chapitre 1', author: null, bibtexKey: null },
+      source: { kind: 'manuscript-chapter', relativePath: 'chapters/01.md', chapterId: 'chap-1', line: 1 },
+      similarity: 0.8,
+      sourceType: 'manuscript',
+    });
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValue({
+      hits: [], manuscriptHits: [1, 2].map(passage), readingNoteHits: [], outcomes: [], securityEvents: [],
+      stats: {
+        search: {
+          query: 'q', totalResults: 0, searchDurationMs: 1, cacheHit: false, sourceType: 'both', documents: [],
+          corpora: [{ source: 'manuscript', attempted: true, ok: true, hitCount: 2, selectedCount: 2 }],
+        },
+        timing: { searchMs: 1 },
+      },
+    });
+
+    const { webContents, sent } = captureWebContents();
+    fusionChatService.start({
+      webContents,
+      messages: [{ role: 'user', content: 'Qui était Jules Durand ?' }],
+      systemPrompt: { language: 'fr' },
+      // La portée « manuscrit seul » du renderer : `resolveRetrievalArgs` la lit, le type public de
+      // `start` ne la nomme pas.
+      retrievalOptions: { topK: 25, sourceType: 'manuscript' } as unknown as FusionChatRetrievalOptions,
+    });
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    const system = fakeLlama.sessions[0].systemPrompt ?? '';
+    expect(system).not.toContain('PASSAGE :');
+    expect(system).toContain('ne conclus pas qu’il n’a rien écrit sur la question');
+    expect(explanationOf(sent)?.search.extractsCap).toBe(0);
+    expect(explanationOf(sent)?.search.corpora?.find((c) => c.source === 'manuscript')?.selectedCount).toBe(0);
   });
 
   // La bande partagée du manuscrit et des notes se calcule sur le `topK` plafonné : sur 25 demandés,

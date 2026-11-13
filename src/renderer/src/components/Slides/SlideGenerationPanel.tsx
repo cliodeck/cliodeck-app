@@ -25,6 +25,8 @@ export const SlideGenerationPanel: React.FC = () => {
    * embarqué ne lit que ce qui tient dans sa fenêtre de contexte (L08-4).
    */
   const [sourceReadPercent, setSourceReadPercent] = useState<number | null>(null);
+  /** Références de la bibliographie que le modèle embarqué a reçues, quand toutes n'ont pas tenu. */
+  const [bibliographyCut, setBibliographyCut] = useState<{ kept: number; total: number } | null>(null);
   const [hasSelection, setHasSelection] = useState(false);
   // Modèle réellement utilisé par la génération (remonté par l'IPC) — porté
   // par la proposition d'application (source.model, contrat Phase 4).
@@ -77,6 +79,7 @@ export const SlideGenerationPanel: React.FC = () => {
     setStreamedContent('');
     setError(null);
     setSourceReadPercent(null);
+    setBibliographyCut(null);
 
     // Remove previous listeners
     cleanupRef.current.forEach((fn) => fn());
@@ -87,14 +90,17 @@ export const SlideGenerationPanel: React.FC = () => {
       setStreamedContent((prev) => prev + chunk);
     });
 
-    const removeDone = window.electron.slides.onStreamDone(({ content, cancelled, sourceCut }) => {
+    const removeDone = window.electron.slides.onStreamDone(({ content, cancelled, sourceCut, bibliographyCut: bibCut }) => {
       // Replace streamed raw content with the post-processed (normalised) version
       if (content) {
         setStreamedContent(content);
       }
       if (sourceCut && sourceCut.totalChars > 0) {
-        setSourceReadPercent(Math.max(1, Math.round((100 * sourceCut.readChars) / sourceCut.totalChars)));
+        // Un peu de lu ne s'affiche pas « 0 % » ; rien de lu, jamais « 1 % ».
+        const percent = Math.round((100 * sourceCut.readChars) / sourceCut.totalChars);
+        setSourceReadPercent(sourceCut.readChars > 0 ? Math.max(1, percent) : 0);
       }
+      if (bibCut) setBibliographyCut(bibCut);
       setIsGenerating(false);
       setIsDone(!cancelled);
     });
@@ -183,6 +189,7 @@ export const SlideGenerationPanel: React.FC = () => {
     setIsDone(false);
     setError(null);
     setSourceReadPercent(null);
+    setBibliographyCut(null);
   };
 
   return (
@@ -262,6 +269,13 @@ export const SlideGenerationPanel: React.FC = () => {
         {sourceReadPercent !== null && (
           <div className="sgp-notice">
             {t('slides.generate.sourceCut', { percent: sourceReadPercent })}
+          </div>
+        )}
+
+        {/* Le modèle n'a reçu que les premières références de la bibliographie */}
+        {bibliographyCut !== null && (
+          <div className="sgp-notice">
+            {t('slides.generate.bibliographyCut', { kept: bibliographyCut.kept, total: bibliographyCut.total })}
           </div>
         )}
       </div>

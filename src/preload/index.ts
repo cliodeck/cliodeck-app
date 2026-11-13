@@ -1106,6 +1106,8 @@ const api = {
         cancelled?: boolean;
         /** Le modèle embarqué n'a lu que le début du document (sa fenêtre de contexte, L08-4). */
         sourceCut?: { readChars: number; totalChars: number };
+        /** Il n'a reçu que les premières références de la bibliographie (même raison). */
+        bibliographyCut?: { kept: number; total: number };
       }) => void
     ) => {
       const listener = (_event: any, result: any) => callback(result);

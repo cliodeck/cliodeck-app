@@ -66,9 +66,26 @@ function ollama(health: ProviderStatus, seen: ChatMessage[][]): LLMProvider {
 const documentOf = (n: number): string =>
   ['DEBUT-DU-DOCUMENT', ...Array.from({ length: n }, (_, i) => `mot${i}`), 'FIN-DU-DOCUMENT'].join(' ');
 
+/**
+ * `n` références de 44 jetons chacune pour le double (un jeton par mot) : ce que coûte au tokeniseur
+ * du vrai modèle une entrée de 109 caractères, avec sa clé `[@id]` et ses noms (mesuré).
+ */
+const realisticCitations = (n: number): Array<{ id: string; author: string; title: string; year: string }> =>
+  Array.from({ length: n }, (_, i) => ({
+    id: `ref${i}`,
+    author: 'Pigenet',
+    title: Array.from({ length: 40 }, (_, j) => `t${i}-${j}`).join(' '),
+    year: '1990',
+  }));
+
 const doneOf = (sent: Sent[]) =>
   sent.find((s) => s.channel === 'slides:stream-done')?.payload as
-    | { content: string; cancelled?: boolean; sourceCut?: { readChars: number; totalChars: number } }
+    | {
+        content: string;
+        cancelled?: boolean;
+        sourceCut?: { readChars: number; totalChars: number };
+        bibliographyCut?: { kept: number; total: number };
+      }
     | undefined;
 const errorOf = (sent: Sent[]) =>
   sent.find((s) => s.channel === 'slides:stream-error')?.payload as { error: string; code?: string } | undefined;
@@ -150,9 +167,71 @@ describe('diapositives par le modèle embarqué (L08-4)', () => {
     expect(doneOf(sent)?.sourceCut).toBeUndefined();
   });
 
-  // Une bibliographie démesurée ne tient pas avec les consignes, même sans document : l'appel est
-  // refusé avant le moteur. Le refus se dit, avec son code, au lieu d'un résultat vide.
-  it('demande refusée par le moteur : l’erreur et son code atteignent le panneau, pas un résultat vide', async () => {
+  /**
+   * Une bibliographie de taille courante prenait toute la place (revue de L08-4) : elle passait
+   * entière avant le document, 50 entrées de 109 caractères coûtent 2 214 jetons au tokeniseur du
+   * vrai modèle (mesuré), et il ne restait rien au document. Le moteur recevait les consignes et la
+   * bibliographie seules, et rendait un gabarit générique, donné pour réussi. Le document passe
+   * désormais d'abord : la bibliographie n'a que la place qu'il laisse, au moins un tiers, et
+   * perd ses dernières entrées ; le panneau dit combien le modèle en a reçu.
+   */
+  it('50 références de taille réelle et un document de 5 000 caractères : le document est lu, la bibliographie bornée, et la coupe dite', async () => {
+    const llm = embedded();
+    const service = new SlidesGenerationService();
+    service.setLLMProvider(llm);
+    const { window, sent } = captureWindow();
+    // 44 jetons par entrée, ce que coûte au vrai tokeniseur une entrée de 109 caractères ; un document
+    // de 1 450 jetons, ce que coûtent 5 000 caractères en français (3,43 caractères par jeton, mesuré).
+    const citations = realisticCitations(50);
+    const source = documentOf(1450);
+
+    const content = await service.generateSlides(source, 'fr', window, citations);
+    await llm.dispose();
+
+    expect(errorOf(sent)).toBeUndefined();
+    expect(content).toContain('La grève des dockers');
+    const prompt = fakeLlama.sessions[0].prompts[0].text;
+    // Le document entier est lu : il tient dans les deux tiers de la place.
+    expect(prompt).toContain('DEBUT-DU-DOCUMENT');
+    expect(prompt).toContain('FIN-DU-DOCUMENT');
+    expect(doneOf(sent)?.sourceCut).toBeUndefined();
+    // La bibliographie garde ses premières entrées, et la coupe se dit.
+    const bib = doneOf(sent)?.bibliographyCut;
+    expect(bib?.total).toBe(50);
+    expect(bib?.kept).toBeGreaterThan(0);
+    expect(bib?.kept).toBeLessThan(50);
+    expect(prompt).toContain('[@ref0]');
+    expect(prompt).toContain(`[@ref${(bib?.kept ?? 0) - 1}]`);
+    expect(prompt).not.toContain(`[@ref${bib?.kept ?? 0}]`);
+    expect(fakeLlama.sessions[0].systemPrompt).toBe(getSlideGenerationPrompt('fr'));
+    expect(fakeTokenize(fakeLlama.sessions[0].systemPrompt ?? '').length + fakeTokenize(prompt).length).toBeLessThanOrEqual(
+      embeddedInputBudget(EMBEDDED_CONTEXT_SIZE)
+    );
+  });
+
+  it('long document et 50 références : le document garde au moins les deux tiers de la place', async () => {
+    const llm = embedded();
+    const service = new SlidesGenerationService();
+    service.setLLMProvider(llm);
+    const { window, sent } = captureWindow();
+    const source = documentOf(5000);
+
+    await service.generateSlides(source, 'fr', window, realisticCitations(50));
+    await llm.dispose();
+
+    expect(errorOf(sent)).toBeUndefined();
+    const cut = doneOf(sent)?.sourceCut;
+    expect(cut?.readChars).toBeGreaterThan(0);
+    const prompt = fakeLlama.sessions[0].prompts[0].text;
+    const read = fakeTokenize(prompt.slice(prompt.indexOf('DEBUT-DU-DOCUMENT'), prompt.indexOf('[…]'))).length;
+    const bibliography = prompt.split('\n').filter((line) => line.startsWith('- [@'));
+    const bibTokens = fakeTokenize(bibliography.join('\n')).length;
+    expect(read).toBeGreaterThanOrEqual(2 * bibTokens - 50);
+    expect(doneOf(sent)?.bibliographyCut?.kept).toBe(bibliography.length);
+  });
+
+  // Des titres de 80 mots : refusés avant le correctif, faute de place pour la seule bibliographie.
+  it('bibliographie démesurée : le document est lu quand même, et la bibliographie coupée', async () => {
     const llm = embedded();
     const service = new SlidesGenerationService();
     service.setLLMProvider(llm);
@@ -164,12 +243,42 @@ describe('diapositives par le modèle embarqué (L08-4)', () => {
       year: '1990',
     }));
 
-    await expect(service.generateSlides(documentOf(300), 'fr', window, citations)).rejects.toThrow(/tokens/);
+    await service.generateSlides(documentOf(300), 'fr', window, citations);
+    await llm.dispose();
+
+    expect(errorOf(sent)).toBeUndefined();
+    expect(fakeLlama.sessions[0].prompts[0].text).toContain('FIN-DU-DOCUMENT');
+    expect(doneOf(sent)?.bibliographyCut?.kept).toBeLessThan(50);
+  });
+
+  it('témoin : une bibliographie qui tient part entière, sans mention', async () => {
+    const llm = embedded();
+    const service = new SlidesGenerationService();
+    service.setLLMProvider(llm);
+    const { window, sent } = captureWindow();
+
+    await service.generateSlides(documentOf(300), 'fr', window, realisticCitations(5));
+    await llm.dispose();
+
+    expect(fakeLlama.sessions[0].prompts[0].text).toContain('[@ref4]');
+    expect(doneOf(sent)?.bibliographyCut).toBeUndefined();
+  });
+
+  // Le contrat des fournisseurs : une panne finit le flux par un terminal `error`, sans lever. Le
+  // service le lit : l'erreur et son code atteignent le panneau, pas un résultat vide.
+  it('panne du moteur : l’erreur et son code atteignent le panneau, pas un résultat vide', async () => {
+    const llm = embedded();
+    const service = new SlidesGenerationService();
+    service.setLLMProvider(llm);
+    const { window, sent } = captureWindow();
+    fakeLlama.failWith = 'llama_decode failed';
+
+    await expect(service.generateSlides(documentOf(300), 'fr', window)).rejects.toThrow(/llama_decode failed/);
     await llm.dispose();
 
     expect(doneOf(sent)).toBeUndefined();
-    expect(errorOf(sent)?.code).toBe('embedded_prompt_too_long');
-    expect(errorOf(sent)?.error).toMatch(/tokens/);
+    expect(errorOf(sent)?.code).toBe('embedded_generation_failed');
+    expect(errorOf(sent)?.error).toMatch(/llama_decode failed/);
   });
 
   it('témoin : Ollama reçoit le document entier, comme avant', async () => {

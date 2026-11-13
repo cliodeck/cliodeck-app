@@ -184,4 +184,26 @@ describe('ExplanationPanel', () => {
     fireEvent.click(screen.getByRole('button'));
     expect(screen.queryByTestId('explanation-extracts-cap')).not.toBeInTheDocument();
   });
+
+  // Revue de L08-4 : des extraits trouvés, aucun lu (les indications du projet prennent toute la
+  // fenêtre). Le panneau des sources est vide : sans avertissement, l'historien conclurait que la
+  // recherche n'a rien trouvé.
+  it('aucun extrait lu sur ceux trouvés : un avertissement visible sans déplier le panneau', () => {
+    const unread = {
+      ...fixture,
+      search: { ...fixture.search, extractsCap: 0, totalResults: 4 },
+    } as unknown as RAGExplanation;
+    const { container } = render(<ExplanationPanel explanation={unread} />);
+    const warning = container.querySelector('.retrieval-warning');
+    expect(warning?.getAttribute('data-status')).toBe('unread');
+    expect(screen.getByRole('status').textContent).toBe(
+      'Des extraits ont été trouvés, mais aucun ne tient dans la fenêtre de contexte du modèle avec les consignes : la réponse ne s’appuie sur aucun d’eux. Des consignes de projet plus courtes leur feraient place.'
+    );
+    expect(warning?.querySelector('svg.lucide-triangle-alert, svg.lucide-alert-triangle')).not.toBeNull();
+    cleanup();
+
+    // Un plafond qui laisse des extraits n'a rien à signaler hors du panneau.
+    render(<ExplanationPanel explanation={{ ...fixture, search: { ...fixture.search, extractsCap: 2 } } as unknown as RAGExplanation} />);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
 });

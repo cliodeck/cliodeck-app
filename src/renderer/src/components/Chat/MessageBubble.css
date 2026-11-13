@@ -221,13 +221,15 @@
   color: var(--color-danger);
 }
 
-/* Aucune source pertinente : une information, pas une panne. */
-.retrieval-warning[data-status='empty'] {
+/* Aucune source pertinente, ou aucune qui tienne dans la fenêtre du modèle : une information, pas une panne. */
+.retrieval-warning[data-status='empty'],
+.retrieval-warning[data-status='unread'] {
   background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
   border-bottom-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
-.retrieval-warning[data-status='empty'] svg {
+.retrieval-warning[data-status='empty'] svg,
+.retrieval-warning[data-status='unread'] svg {
   color: var(--color-accent);
 }
 

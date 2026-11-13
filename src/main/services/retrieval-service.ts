@@ -434,6 +434,64 @@ function toInspectable(r: AnySearchResult): InspectableChunk {
   };
 }
 
+/** Une ligne de « Documents consultés » : un document, ses extraits et le meilleur score. */
+export interface ConsultedDocument {
+  title: string;
+  similarity: number;
+  sourceType: string;
+  chunkCount: number;
+}
+
+/**
+ * Les documents des extraits donnés, dans l'ordre de leur premier extrait, dix au plus : la liste
+ * « Documents consultés » du panneau d'explication. Le tour la refait sur les extraits que le modèle
+ * lit quand la fenêtre du modèle embarqué en a retiré (L08-4).
+ */
+export function documentsOfHits(hits: MultiSourceSearchResult[]): ConsultedDocument[] {
+  const documentMap = new Map<string, ConsultedDocument>();
+  for (const r of hits) {
+    const docId = r.document?.id || 'unknown';
+    const existing = documentMap.get(docId);
+    if (existing) {
+      existing.chunkCount++;
+      if (r.similarity > existing.similarity) existing.similarity = r.similarity;
+    } else {
+      documentMap.set(docId, {
+        title: r.document?.title || 'Sans titre',
+        similarity: r.similarity,
+        sourceType: r.sourceType,
+        chunkCount: 1,
+      });
+    }
+  }
+  return Array.from(documentMap.values()).slice(0, 10);
+}
+
+/**
+ * Ce qui a vraiment atteint le prompt, par corpus. `hitCount` dit ce que chaque corpus a rendu ; la
+ * bande du manuscrit et l'inspecteur passent ensuite, puis, pour le modèle embarqué, sa fenêtre
+ * (L08-4) : `selectedCount` compte les extraits donnés, et l'écart entre les deux est la part que
+ * l'utilisateur ne pouvait pas voir (docs/poids-du-manuscrit.md).
+ */
+export function withSelectedCounts<
+  C extends { source: string; attempted: boolean; ok: boolean; hitCount: number },
+>(
+  corpora: C[],
+  selected: Array<{ sourceType: string }>
+): Array<{ source: C['source']; attempted: boolean; ok: boolean; hitCount: number; selectedCount: number }> {
+  const selectedBySource = new Map<string, number>();
+  for (const r of selected) {
+    selectedBySource.set(r.sourceType, (selectedBySource.get(r.sourceType) ?? 0) + 1);
+  }
+  return corpora.map((c) => ({
+    source: c.source,
+    attempted: c.attempted,
+    ok: c.ok,
+    hitCount: c.hitCount,
+    selectedCount: selectedBySource.get(c.source) ?? 0,
+  }));
+}
+
 class RetrievalService {
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
   /**
@@ -833,26 +891,6 @@ class RetrievalService {
     // consultation (sources primaires seules : Tropy embarque de son côté), rien ne vient du cache.
     const cacheHit = captured.cacheLookups.get(q.query) === true;
 
-    const documentMap = new Map<
-      string,
-      { title: string; similarity: number; sourceType: string; chunkCount: number }
-    >();
-    for (const r of hits) {
-      const docId = r.document?.id || 'unknown';
-      const existing = documentMap.get(docId);
-      if (existing) {
-        existing.chunkCount++;
-        if (r.similarity > existing.similarity) existing.similarity = r.similarity;
-      } else {
-        documentMap.set(docId, {
-          title: r.document?.title || 'Sans titre',
-          similarity: r.similarity,
-          sourceType: r.sourceType,
-          chunkCount: 1,
-        });
-      }
-    }
-
     // Collapse 'vault' into 'both' for the stats envelope (vault shows as a
     // separate corpus in the hit list itself). The stats type stays on the
     // narrower PDF+Tropy triad to avoid breaking downstream consumers.
@@ -863,17 +901,7 @@ class RetrievalService {
     // chaque corpus a rendu ; la bande du manuscrit et l'inspecteur passent
     // ensuite, et l'écart entre les deux est précisément la part invisible
     // que l'utilisateur ne pouvait pas voir (docs/poids-du-manuscrit.md).
-    const selectedBySource = new Map<string, number>();
-    for (const r of [...hits, ...manuscriptHits, ...readingNoteHits]) {
-      selectedBySource.set(r.sourceType, (selectedBySource.get(r.sourceType) ?? 0) + 1);
-    }
-    const corpora = outcomes.map((o) => ({
-      source: o.source,
-      attempted: o.attempted,
-      ok: o.ok,
-      hitCount: o.hitCount,
-      selectedCount: selectedBySource.get(o.source) ?? 0,
-    }));
+    const corpora = withSelectedCounts(outcomes, [...hits, ...manuscriptHits, ...readingNoteHits]);
 
     return {
       hits,
@@ -888,7 +916,7 @@ class RetrievalService {
           searchDurationMs: searchMs,
           cacheHit,
           sourceType,
-          documents: Array.from(documentMap.values()).slice(0, 10),
+          documents: documentsOfHits(hits),
           corpora,
         },
         timing: { searchMs },

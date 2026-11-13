@@ -34,7 +34,9 @@ import type { ManuscriptStance } from '../../../backend/types/mode.js';
 import { readingNotesIndexService } from './reading-notes-index-service.js';
 import { projectManager } from './project-manager.js';
 import {
+  documentsOfHits,
   retrievalService,
+  withSelectedCounts,
   type ManuscriptMappedSearchResult,
   type MultiSourceSearchResult,
   type ReadingNoteMappedSearchResult,
@@ -1169,31 +1171,46 @@ class FusionChatService {
                   promptLang
                 );
             const retrievalNotes = formatRetrievalNotes(status, { noHits, ownOnly }, promptLang);
+            const ownFound = ownHits.length + noteHits.length;
             const blocksFor = (read: ReadExtracts) => {
+              const text = CONTEXT_TEXT[promptLang];
               // Manuscrit seul : pas d'en-tête « aucune source », qui dirait au
               // modèle que bibliographie et archives ont été interrogées en vain
               // alors qu'elles ne l'ont pas été ; la consigne du bloc manuscrit
               // porte alors le périmètre. Sources en échec sans extrait : pas
               // d'en-tête non plus (elles n'ont pas répondu « rien »), mais le
               // texte de l'utilisateur qui suit garde son préambule — sinon le
-              // modèle peut le citer comme une source.
+              // modèle peut le citer comme une source. Sources trouvées, mais
+              // toutes retirées par la fenêtre du modèle embarqué : elles ont
+              // répondu, et « aucun extrait ne correspond » ferait dire au
+              // modèle qu'elles se taisent (revue de L08-4).
               const ownCount = read.own.length + read.notes.length;
               const sourcesBlock = ownOnly
                 ? ''
-                : read.hits.length === 0 && someFailed
+                : read.hits.length === 0 && effectiveHits.length > 0
                   ? ownCount > 0
-                    ? CONTEXT_TEXT[promptLang].ownPassagesNotSources
-                    : ''
-                  : formatContextAsSystemPrompt(read.hits, promptLang, {
-                      ownBlocksFollow: ownCount > 0,
-                    });
+                    ? `${text.sourcesUnread} ${text.ownPassagesNotSources}`
+                    : text.sourcesUnread
+                  : read.hits.length === 0 && someFailed
+                    ? ownCount > 0
+                      ? text.ownPassagesNotSources
+                      : ''
+                    : formatContextAsSystemPrompt(read.hits, promptLang, {
+                        ownBlocksFollow: ownCount > 0,
+                      });
               const manuscriptBlock = formatManuscriptContext(read.own, promptLang, manuscript.wording);
               const notesBlock = formatReadingNotesContext(read.notes, promptLang, readingNotes.wording);
+              // Plus rien ne reste, et le texte de l'utilisateur avait répondu : le dire aussi, sans
+              // quoi une question de rappel ou une portée « seul » recevrait une réponse sans le moindre
+              // avertissement. Quand des sources restent, la règle ordinaire du `topK` vaut.
+              const ownUnread =
+                ownFound > 0 && countExtracts(read) === 0 ? `\n${text.ownTextUnread}` : '';
               return {
                 sourcesBlock,
                 manuscriptBlock,
                 notesBlock,
-                systemPrompt: scopeBlock + sourcesBlock + manuscriptBlock + notesBlock + retrievalNotes,
+                systemPrompt:
+                  scopeBlock + sourcesBlock + manuscriptBlock + notesBlock + ownUnread + retrievalNotes,
               };
             };
 
@@ -1283,6 +1300,23 @@ class FusionChatService {
               explanation: {
                 search: {
                   ...stats.search,
+                  // Les extraits retirés par la fenêtre ne comptent ni par corpus ni par document :
+                  // l'explication dit ce que le modèle a lu, comme le panneau des sources. « Résultats
+                  // trouvés » (`totalResults`) et `hitCount` restent ce que la recherche a rendu.
+                  ...(readCount < foundCount
+                    ? {
+                        documents: documentsOfHits(read.hits),
+                        ...(stats.search.corpora
+                          ? {
+                              corpora: withSelectedCounts(stats.search.corpora, [
+                                ...read.hits,
+                                ...read.own,
+                                ...read.notes,
+                              ]),
+                            }
+                          : {}),
+                      }
+                    : {}),
                   contextChars,
                   retrievalStatus: status,
                   ...(extractsCap !== undefined ? { extractsCap } : {}),
@@ -1730,6 +1764,13 @@ interface ContextText {
   /** Préambule du texte de l'utilisateur quand aucune source ne le précède. */
   ownPassagesNotSources: string;
   /**
+   * Des extraits des sources ont été trouvés, mais la fenêtre du modèle embarqué n'en laisse tenir
+   * aucun (L08-4) : jamais `noSources`, qui ferait dire au modèle que les sources se taisent.
+   */
+  sourcesUnread: string;
+  /** Même chose pour le texte de l'utilisateur : manuscrit et notes de lecture trouvés, aucun transmis. */
+  ownTextUnread: string;
+  /**
    * Recherche en échec (S04-2-1), choisie par le statut affiché (`formatRetrievalNotes`). Un corpus
    * tenté au moins en échec, et aucun extrait rendu : la consigne d'une recherche qui a levé, celle du
    * moteur, mot pour mot.
@@ -1769,6 +1810,10 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
       'Aucun extrait des sources interrogées (bibliographie, archives, notes) ne correspond à cette question. Si elle porte sur une source, dis-le.',
     ownPassagesNotSources:
       "Les passages qui suivent, s'il y en a, sont le texte de l'utilisateur ou ses notes de lecture : ne les présente JAMAIS comme le contenu d'une source.",
+    sourcesUnread:
+      'Des extraits des sources interrogées ont été trouvés pour cette question, mais aucun n’a pu t’être transmis : ils ne tiennent pas dans ta fenêtre de contexte. Dis-le à l’utilisateur : ne conclus pas que ses sources ne disent rien sur la question et ne fabrique pas de citations.',
+    ownTextUnread:
+      "Des passages du texte de l’utilisateur (manuscrit, notes de lecture) ont été trouvés pour cette question, mais aucun n’a pu t’être transmis : ils ne tiennent pas dans ta fenêtre de contexte. Dis-le-lui : ne conclus pas qu’il n’a rien écrit sur la question et ne cite aucun passage.",
     searchFailed: RETRIEVAL_FAILED_TEXT.fr,
     someSearchesFailed:
       'Certaines recherches dans les sources ont échoué pour ce tour : les éléments disponibles peuvent être incomplets. Dis à l’utilisateur qu’une partie de ses sources n’a pas pu être consultée : ne conclus pas qu’une information en est absente, ne prétends pas avoir consulté les corpus en échec et ne fabrique pas de citations.',
@@ -1825,6 +1870,10 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
       'No excerpt from the searched sources (bibliography, archives, notes) matches this question. If it is about a source, say so.',
     ownPassagesNotSources:
       "The passages that follow, if any, are the user's own text or their reading notes: NEVER present them as the content of a source.",
+    sourcesUnread:
+      'Excerpts from the searched sources were found for this question, but none could be passed to you: they do not fit in your context window. Tell the user so: do not conclude that their sources say nothing about the question, and do not invent citations.',
+    ownTextUnread:
+      "Passages from the user's own text (manuscript, reading notes) were found for this question, but none could be passed to you: they do not fit in your context window. Tell the user so: do not conclude that they have written nothing about the question, and do not cite any passage.",
     searchFailed: RETRIEVAL_FAILED_TEXT.en,
     someSearchesFailed:
       'Some source searches failed for this turn: the available evidence may be incomplete. Tell the user that part of their sources could not be searched: do not conclude that something is absent from them, do not imply that the failed sources were consulted, and do not invent citations.',

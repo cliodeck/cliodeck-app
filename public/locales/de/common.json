@@ -811,6 +811,7 @@
       "duration": "Dauer:",
       "extractsCapLabel": "Obergrenze der Auszüge:",
       "extractsCapReason": "(Kontextfenster des Modells)",
+      "extractsUnread": "Es wurden Auszüge gefunden, aber keiner passt zusammen mit den Anweisungen in das Kontextfenster des Modells: Die Antwort stützt sich auf keinen von ihnen. Ein kürzerer dauerhafter Kontext würde ihnen Platz machen.",
       "cacheHitSuffix": "(Cache)",
       "sourceTypeLabel": "Quellentyp:",
       "sourceTypePrimary": "Primärquellen (Tropy)",
@@ -1249,8 +1250,9 @@
       "output": "Ergebnis",
       "noContent": "Kein Inhalt zum Umwandeln.",
       "unknownError": "Unbekannter Fehler bei der Generierung.",
-      "embeddedPromptTooLong": "Die Bibliographie des Projekts passt zusammen mit den Folienanweisungen nicht in das Kontextfenster des eingebetteten Modells: Wählen Sie in den Einstellungen ein anderes Modell.",
-      "sourceCut": "Das eingebettete Modell hat nur den Anfang des Dokuments gelesen (etwa {{percent}} %): Der Rest überschreitet sein Kontextfenster. Um ihn abzudecken, wählen Sie einen Abschnitt daraus aus."
+      "embeddedPromptTooLong": "Die Anweisungen zur Foliengenerierung lassen im Kontextfenster des eingebetteten Modells keinen Platz für das Dokument: Wählen Sie in den Einstellungen ein anderes Modell.",
+      "sourceCut": "Das eingebettete Modell hat nur den Anfang des Dokuments gelesen (etwa {{percent}} %): Der Rest überschreitet sein Kontextfenster. Um ihn abzudecken, wählen Sie einen Abschnitt daraus aus.",
+      "bibliographyCut": "Vom eingebetteten Modell im Rahmen seines Kontextfensters erhaltene Referenzen der Bibliographie: {{kept}} von {{total}}. Die Folien können die übrigen nicht zitieren."
     },
     "navigator": {
       "count": "{{count}} Folie",

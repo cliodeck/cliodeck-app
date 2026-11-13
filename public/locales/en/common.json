@@ -811,6 +811,7 @@
       "duration": "Duration:",
       "extractsCapLabel": "Extract limit:",
       "extractsCapReason": "(the model's context window)",
+      "extractsUnread": "Extracts were found, but none fits in the model's context window alongside the instructions: the answer does not rely on any of them. A shorter persistent context would make room for them.",
       "cacheHitSuffix": "(cache)",
       "sourceTypeLabel": "Source type:",
       "sourceTypePrimary": "Primary sources (Tropy)",
@@ -1249,8 +1250,9 @@
       "output": "Result",
       "noContent": "No content to transform.",
       "unknownError": "Unknown error during generation.",
-      "embeddedPromptTooLong": "The project bibliography does not fit in the embedded model's context window together with the slide instructions: choose another model in Settings.",
-      "sourceCut": "The embedded model only read the beginning of the document (about {{percent}}%): the rest exceeds its context window. To cover it, select a passage from it."
+      "embeddedPromptTooLong": "The slide-generation instructions leave no room for the document in the embedded model's context window: choose another model in Settings.",
+      "sourceCut": "The embedded model only read the beginning of the document (about {{percent}}%): the rest exceeds its context window. To cover it, select a passage from it.",
+      "bibliographyCut": "Bibliography references received by the embedded model, within the limits of its context window: {{kept}} of {{total}}. The slides cannot cite the others."
     },
     "navigator": {
       "count": "{{count}} slide",

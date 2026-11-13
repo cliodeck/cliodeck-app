@@ -58,6 +58,17 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
               : t('chat.explanation.retrievalFailed', 'La recherche de sources a échoué.')}
         </div>
       )}
+      {/* Des extraits trouvés, aucun lu : la fenêtre du modèle les a tous retirés (L08-4). Le panneau
+          des sources est vide ; sans ceci, on croirait que la recherche n'a rien trouvé. */}
+      {explanation.search.extractsCap === 0 && (
+        <div role="status" className="retrieval-warning" data-status="unread">
+          <AlertTriangle size={14} aria-hidden="true" />
+          {t(
+            'chat.explanation.extractsUnread',
+            'Des extraits ont été trouvés, mais aucun ne tient dans la fenêtre de contexte du modèle avec les consignes : la réponse ne s’appuie sur aucun d’eux. Des consignes de projet plus courtes leur feraient place.'
+          )}
+        </div>
+      )}
       <button
         className="explanation-toggle"
         onClick={() => setShowExplanation(!showExplanation)}

@@ -50,12 +50,15 @@ export const fakeLlama = {
   cleared: 0,
   /** Modèles libérés. */
   modelsDisposed: 0,
+  /** Message de l'exception que lève `prompt`, pour simuler une panne du moteur. */
+  failWith: undefined as string | undefined,
   reset(): void {
     this.contextSizes = [];
     this.sessions = [];
     this.reply = ['Selon [1], ', 'la grève éclate en 1910.'];
     this.cleared = 0;
     this.modelsDisposed = 0;
+    this.failWith = undefined;
   },
 };
 
@@ -88,6 +91,7 @@ class LlamaChatSession {
   }
 
   async prompt(text: string, options: FakePromptOptions = {}): Promise<string> {
+    if (fakeLlama.failWith) throw new Error(fakeLlama.failWith);
     const limit = this.sequence.contextSize - Math.floor(this.sequence.contextSize / 10);
     const first = this.record.history?.[0];
     const systemTokens = first?.type === 'system' ? fakeTokenize(first.text).length : 0;
