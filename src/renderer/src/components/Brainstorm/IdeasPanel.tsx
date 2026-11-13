@@ -22,6 +22,8 @@ import { useIdeaStore, type Idea, type IdeaLink } from '../../stores/ideaStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { projectLifecycle } from '../../lifecycle/projectLifecycle';
+import { readOutcome } from '../../utils/ipc-outcome';
+import { translateMessage } from '../../utils/translate-message';
 import './IdeasPanel.css';
 
 export const IdeasPanel: React.FC = () => {
@@ -70,27 +72,31 @@ export const IdeasPanel: React.FC = () => {
     const handle = projectLifecycle.capture();
     if (!handle) return;
     setImporting(true);
+    const failure = (message: string) =>
+      useNotificationStore.getState().notify({ level: 'error', title: t('ideas.importFailed'), message });
     try {
-      const result = await fusion.vault.importAsIdeas({ maxFiles: 200 });
+      const outcome = readOutcome<{ ideas?: unknown }>(await fusion.vault.importAsIdeas({ maxFiles: 200 }));
       // Une bascule pendant l'attente : ces notes n'ont pas à rejoindre la liste du projet suivant,
       // et la sortie les y écrirait, sans que l'auteur ait rien fait dans ce projet. Aller-retour
       // compris : le même chemin après l'attente ne dit pas que l'écran ne l'a pas quitté, et les
       // notes rejoindraient une liste rechargée depuis.
       if (!handle.isCurrent()) return;
-      if (result.success && result.ideas) {
+      // Sans cela, le bouton ne fait rien : l'auteur ne sait ni pourquoi, ni quoi faire. Le refus est
+      // un code du main (aucun vault lié, dossier disparu), ou sa cause brute.
+      if (outcome.status === 'failed') {
+        failure(translateMessage(t, outcome.error));
+        return;
+      }
+      if (outcome.value.ideas) {
         // Une liste qui n'est pas celle de ce projet refuserait de s'écrire : les notes y
         // resteraient, à l'écran et nulle part ailleurs. Le panneau ne se montre qu'une fois la
         // liste chargée : la recharger d'ici ferait un second chargeur, pour un cas qu'on ne voit
         // pas. Rien n'est ajouté, l'auteur le sait, et les notes sont toujours dans le vault.
         if (useIdeaStore.getState().loadedFor !== handle.path) {
-          useNotificationStore.getState().notify({
-            level: 'error',
-            title: t('ideas.importFailed'),
-            message: t('ideas.importNotLoaded'),
-          });
+          failure(t('ideas.importNotLoaded'));
           return;
         }
-        const imported = result.ideas as Array<{
+        const imported = outcome.value.ideas as Array<{
           title: string;
           content: string;
           tags: string[];
@@ -102,10 +108,12 @@ export const IdeasPanel: React.FC = () => {
         // dossiers du vault entrent toutes les deux, comme avant. Seul ce que la liste avait déjà
         // est écarté, pas ce que ce même import vient d'y mettre.
         const present = useIdeaStore.getState().ideas;
+        let added = 0;
         for (const note of imported) {
           // Check if idea with same title already exists (avoid duplicates).
           const existing = present.find((i) => i.title === note.title && i.origin.type === 'obsidian');
           if (existing) continue;
+          added++;
           addIdea({
             title: note.title,
             content: note.content,
@@ -119,16 +127,16 @@ export const IdeasPanel: React.FC = () => {
           });
         }
         saveIdeas(handle.path);
-      } else if (!result.success) {
-        // Sans cela, le bouton ne fait rien : l'auteur ne sait ni pourquoi, ni quoi faire.
-        useNotificationStore.getState().notify({
-          level: 'error',
-          title: t('ideas.importFailed'),
-          message: result.error === 'no_vault_configured' ? t('ideas.importNoVault') : result.error,
-        });
+        // Un vault vide, ou déjà importé, ne doit pas ressembler à un bouton qui ne marche pas.
+        useNotificationStore.getState().notify(
+          added > 0
+            ? { level: 'success', title: t('ideas.importDone', { count: added }) }
+            : { level: 'info', title: t('ideas.importNothingNew') }
+        );
       }
     } catch (e) {
       console.error('Obsidian import failed:', e);
+      if (handle.isCurrent()) failure(translateMessage(t, e instanceof Error ? e : { message: String(e) }));
     } finally {
       setImporting(false);
     }

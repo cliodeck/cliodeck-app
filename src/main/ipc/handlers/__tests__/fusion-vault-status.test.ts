@@ -7,6 +7,9 @@
  * un `noteCount` que personne ne répondait.
  *
  * Le vrai handler, le vrai magasin, un vrai `brain.db` ; seuls les services voisins sont simulés.
+ *
+ * Et l'import du vault en idées refuse par un code (`messages.vault.*`) : le renderer le traduit,
+ * au lieu d'afficher la phrase anglaise du main.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
@@ -178,5 +181,28 @@ describe.skipIf(!sqliteAvailable)('fusion:vault:status : indexed et noteCount lu
     h.current.mockReturnValue(projectB);
 
     expect(await call('fusion:vault:status')).toMatchObject({ success: true, noteCount: 3 });
+  });
+});
+
+describe('fusion:vault:import-as-ideas : un refus codé, que le renderer traduit', () => {
+  it('aucun vault lié : errorCode vault.notConfigured', async () => {
+    const bare = makeProject('C', null);
+    h.current.mockReturnValue(bare);
+
+    const res = await call('fusion:vault:import-as-ideas', { maxFiles: 10 });
+
+    expect(res).toMatchObject({ success: false, errorCode: 'vault.notConfigured' });
+  });
+
+  it('le dossier du vault a disparu : errorCode vault.pathMissing, avec le chemin', async () => {
+    fs.rmSync(vaultDir, { recursive: true });
+
+    const res = await call('fusion:vault:import-as-ideas', { maxFiles: 10 });
+
+    expect(res).toMatchObject({
+      success: false,
+      errorCode: 'vault.pathMissing',
+      errorParams: { path: vaultDir },
+    });
   });
 });

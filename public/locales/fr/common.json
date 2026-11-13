@@ -1884,7 +1884,9 @@
     "delete": "Supprimer",
     "importObsidian": "Importer depuis le vault Obsidian",
     "importFailed": "Import du vault impossible",
-    "importNoVault": "Aucun vault n'est lié à ce projet : liez-en un dans les Réglages.",
+    "importDone_one": "{{count}} note du vault ajoutée aux idées",
+    "importDone_other": "{{count}} notes du vault ajoutées aux idées",
+    "importNothingNew": "Aucune note nouvelle : le vault est vide, ou ses notes sont déjà parmi vos idées.",
     "importNotLoaded": "Les idées de ce projet ne sont pas encore chargées : rien n'a été importé. Relancez l'import une fois la liste affichée.",
     "relatedIdeas": "Idées liées",
     "removeLink": "Supprimer le lien"
@@ -2663,6 +2665,10 @@
   "messages": {
     "errors": {
       "noResponse": "ClioDeck n'a reçu aucune réponse à cette demande."
+    },
+    "vault": {
+      "notConfigured": "Aucun vault n'est lié à ce projet : liez-en un dans les Réglages.",
+      "pathMissing": "Le dossier du vault est introuvable : {{path}}. Rebranchez le disque qui le porte, ou liez le vault de nouveau dans les Réglages."
     }
   }
 }

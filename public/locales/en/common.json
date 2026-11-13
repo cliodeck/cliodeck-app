@@ -1884,7 +1884,9 @@
     "delete": "Delete",
     "importObsidian": "Import from Obsidian vault",
     "importFailed": "Vault import failed",
-    "importNoVault": "No vault is linked to this project: link one in Settings.",
+    "importDone_one": "{{count}} vault note added to ideas",
+    "importDone_other": "{{count}} vault notes added to ideas",
+    "importNothingNew": "No new notes: the vault is empty, or its notes are already among your ideas.",
     "importNotLoaded": "This project's ideas are not loaded yet: nothing was imported. Run the import again once the list is shown.",
     "relatedIdeas": "Related ideas",
     "removeLink": "Remove the link"
@@ -2663,6 +2665,10 @@
   "messages": {
     "errors": {
       "noResponse": "ClioDeck received no answer to this request."
+    },
+    "vault": {
+      "notConfigured": "No vault is linked to this project: link one in Settings.",
+      "pathMissing": "The vault folder cannot be found: {{path}}. Reconnect the drive that holds it, or link the vault again in Settings."
     }
   }
 }

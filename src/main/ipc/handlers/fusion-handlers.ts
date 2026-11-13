@@ -96,7 +96,8 @@ import { importVaultAsIdeas } from '../../../../backend/integrations/obsidian/ob
 import { createRegistryFromClioDeckConfig } from '../../../../backend/core/llm/providers/cliodeck-config-adapter.js';
 import { runBatch, runWithJournalContext } from '../../../../backend/core/usage-journal/context.js';
 import type { ChatMessage } from '../../../../backend/core/llm/providers/base.js';
-import { successResponse, errorResponse } from '../utils/error-handler.js';
+import { successResponse, errorResponse, outcomeResponse } from '../utils/error-handler.js';
+import { failed } from '../../../../backend/types/outcome.js';
 
 interface VaultConfigBlock {
   path?: string;
@@ -1039,11 +1040,13 @@ export function setupFusionHandlers(): void {
     try {
       const cfg = await readOrInitWorkspaceConfig(root);
       const vaultPath = (cfg.vault as VaultConfigBlock | undefined)?.path;
+      // Des codes, que le renderer traduit (`messages.vault.*`) : la phrase anglaise s'affichait
+      // telle quelle (S16-1-16).
       if (!vaultPath) {
-        return errorResponse('no_vault_configured');
+        return outcomeResponse(failed('no_vault_configured', 'vault.notConfigured'));
       }
       if (!fsSync.existsSync(vaultPath)) {
-        return errorResponse('vault path no longer exists');
+        return outcomeResponse(failed('vault path no longer exists', 'vault.pathMissing', { path: vaultPath }));
       }
       const imported = await importVaultAsIdeas(vaultPath, { maxFiles: opts.maxFiles ?? 500 });
       return successResponse({
