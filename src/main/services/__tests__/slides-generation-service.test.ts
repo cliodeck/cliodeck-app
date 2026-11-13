@@ -281,6 +281,35 @@ describe('diapositives par le modèle embarqué (L08-4)', () => {
     expect(errorOf(sent)?.error).toMatch(/llama_decode failed/);
   });
 
+  // L09-10 : le client attendait la fin de la génération avant de céder le premier morceau, et
+  // « Arrêter » n'atteignait pas llama.cpp (S05-1-13) : rien ne s'affichait, et l'arrêt attendait la
+  // fin des diapositives.
+  it('« Arrêter » pendant la génération : le texte arrive au fil de l’eau, llama.cpp s’arrête, et le texte reçu reste', async () => {
+    const llm = embedded();
+    const service = new SlidesGenerationService();
+    service.setLLMProvider(llm);
+    const { window, sent } = captureWindow();
+    const reply = Array.from({ length: 1000 }, (_, i) => `mot${i} `);
+    fakeLlama.reply = [...reply];
+    const streamed = (): string =>
+      sent.filter((s) => s.channel === 'slides:stream').map((s) => String(s.payload)).join('');
+
+    const writing = fakeLlama.whenEmitted(3);
+    const generating = service.generateSlides(documentOf(300), 'fr', window);
+    await writing;
+    expect(streamed()).toBe(reply.slice(0, 2).join(''));
+
+    service.cancelGeneration();
+    const content = await generating;
+    await llm.dispose();
+
+    expect(fakeLlama.sessions[0].prompts[0].emitted).toBeLessThanOrEqual(4);
+    expect(errorOf(sent)).toBeUndefined();
+    expect(reply.join('').startsWith(streamed())).toBe(true);
+    expect(content).toContain('mot0 mot1');
+    expect(doneOf(sent)?.content).toBe(content);
+  });
+
   it('témoin : Ollama reçoit le document entier, comme avant', async () => {
     const seen: ChatMessage[][] = [];
     const llm = instrumentLLM(ollama({ state: 'ready' }, seen), 'ollama', 'http://127.0.0.1:9');

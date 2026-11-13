@@ -53,6 +53,13 @@ interface LlamaChatSessionInstance {
       maxTokens?: number;
       temperature?: number;
       topP?: number;
+      /**
+       * Avorté après un premier morceau, avec `stopOnAbortSignal`, la génération s'arrête au jeton
+       * suivant et la promesse rend le texte produit ; avorté avant, elle rejette par la raison du
+       * signal (node-llama-cpp 3.18.1).
+       */
+      signal?: AbortSignal;
+      stopOnAbortSignal?: boolean;
       onTextChunk?: (chunk: string) => void;
     }
   ) => Promise<string>;
@@ -70,10 +77,7 @@ export interface EmbeddedChatRequest {
   maxTokens?: number;
   temperature?: number;
   topP?: number;
-  /**
-   * Le signal du tour. Interrompre llama.cpp en cours de génération est l'objet de L09-10 : il
-   * n'atteint pas encore `session.prompt`.
-   */
+  /** Le signal du tour : il arrête llama.cpp au jeton suivant (L09-10). */
   signal?: AbortSignal;
 }
 
@@ -259,6 +263,40 @@ function closeOnQuestion(
   while (end > 0 && history[end - 1].role === 'user') end--;
   const pending = history.slice(end).map((turn) => turn.content);
   return { history: history.slice(0, end), question: [...pending, prompt].join('\n\n') };
+}
+
+/**
+ * Les morceaux de la réponse, cédés au fil de la génération (S05-1-13) : `onTextChunk` les dépose
+ * pendant que `prompt` court, et le générateur les lit, en attendant le suivant ou la fin.
+ */
+class TextChunkQueue {
+  private readonly pending: string[] = [];
+  private wake: () => void = () => undefined;
+  private ended = false;
+
+  readonly push = (chunk: string): void => {
+    this.pending.push(chunk);
+    this.wake();
+  };
+
+  /** Plus rien ne viendra : la génération est finie, arrêtée ou tombée. */
+  readonly end = (): void => {
+    this.ended = true;
+    this.wake();
+  };
+
+  async *drain(): AsyncGenerator<string> {
+    for (;;) {
+      const chunk = this.pending.shift();
+      if (chunk !== undefined) {
+        yield chunk;
+      } else if (this.ended) {
+        return;
+      } else {
+        await new Promise<void>((resolve) => (this.wake = resolve));
+      }
+    }
+  }
 }
 
 /** Ce qu'un client tient : chaque modèle et son contexte. */
@@ -618,6 +656,13 @@ export class EmbeddedLLMClient {
    *
    * Lève avant le premier morceau quand le modèle n'est pas chargé, quand une génération est déjà en
    * cours, ou quand la question seule dépasse la fenêtre (`EmbeddedPromptTooLongError`).
+   *
+   * Les morceaux sont cédés pendant que llama.cpp génère, et `req.signal` l'arrête au jeton suivant
+   * (L09-10) : le générateur finit alors sans lever, après le texte déjà produit, ou lève la raison
+   * du signal s'il n'y en avait pas encore. Quitter l'itération arrête aussi la génération ; la
+   * session part une fois llama.cpp arrêté, et la génération suivante peut partir. Pendant la lecture
+   * des consignes (le préremplissage), llama.cpp ne lit le signal qu'à son point de contrôle suivant :
+   * 0,5 s mesurée pour une lecture de 0,8 s, sur Metal, avec le petit Qwen.
    */
   async *generateChat(req: EmbeddedChatRequest): AsyncGenerator<string> {
     if (!this.context || !this.model || !this.sequence) {
@@ -630,6 +675,11 @@ export class EmbeddedLLMClient {
     }
 
     this.isGenerating = true;
+
+    // Arrête llama.cpp quand le tour s'arrête (« Arrêter », délai d'inactivité, fermeture du projet),
+    // ou quand le consommateur quitte l'itération avant la fin.
+    const stop = new AbortController();
+    const signal = req.signal ? AbortSignal.any([req.signal, stop.signal]) : stop.signal;
 
     try {
       // La réponse ne prend jamais plus de la moitié de la fenêtre : le budget d'entrée reste positif.
@@ -671,6 +721,7 @@ export class EmbeddedLLMClient {
         systemPrompt: system || undefined,
       }) as unknown as LlamaChatSessionInstance;
 
+      let prompting: Promise<string> | null = null;
       try {
         // Remplace l'historique initial, et avec lui le prompt système anglais par défaut de
         // node-llama-cpp : sans consigne, aucune consigne.
@@ -683,43 +734,45 @@ export class EmbeddedLLMClient {
           ),
         ]);
 
-        // Collecter la réponse avec callback pour streaming simulé
-        const chunks: string[] = [];
-
-        const response = await session.prompt(question, {
+        // Les morceaux partent pendant que llama.cpp génère (S05-1-13) : ils s'accumulaient jusqu'à
+        // la fin de `prompt`, rien ne s'affichait avant, et « Arrêter » ne coupait rien.
+        const chunks = new TextChunkQueue();
+        prompting = session.prompt(question, {
           maxTokens,
           temperature: req.temperature ?? 0.1,
           topP: req.topP ?? 0.85,
-          onTextChunk: (chunk: string) => {
-            chunks.push(chunk);
-          },
+          signal,
+          stopOnAbortSignal: true,
+          onTextChunk: chunks.push,
         });
+        void prompting.then(chunks.end, chunks.end);
 
-        // Si on a des chunks via callback, les utiliser pour un meilleur streaming
-        if (chunks.length > 0) {
-          for (const chunk of chunks) {
-            yield chunk;
-          }
-        } else {
-          // Fallback: découper la réponse en mots pour simuler le streaming
-          const words = response.split(/(\s+)/);
-          for (const word of words) {
-            if (word) {
-              yield word;
-              // Petit délai pour une meilleure UX de streaming
-              await new Promise((r) => setTimeout(r, 5));
-            }
-          }
+        let streamed = false;
+        for await (const chunk of chunks.drain()) {
+          streamed = true;
+          yield chunk;
         }
+        const response = await prompting;
+        // Rien par `onTextChunk` : la réponse d'un bloc.
+        if (!streamed && response) yield response;
 
-        console.log('✅ [EMBEDDED] Generation complete', {
+        console.log(req.signal?.aborted ? '⏹️ [EMBEDDED] Generation stopped' : '✅ [EMBEDDED] Generation complete', {
           responseLength: response.length,
         });
       } finally {
+        // Le consommateur a quitté l'itération : llama.cpp s'arrête. La session ne part qu'une fois la
+        // génération arrêtée ; la séquence reste au client pour le tour suivant.
+        stop.abort();
+        await prompting?.catch(() => undefined);
         session.dispose({ disposeSequence: false });
       }
     } catch (error) {
-      console.error('❌ [EMBEDDED] Generation error:', error);
+      // Arrêté avant son premier morceau, llama.cpp lève la raison du signal : un arrêt, pas une panne.
+      if (req.signal?.aborted) {
+        console.log('⏹️ [EMBEDDED] Generation stopped before its first chunk');
+      } else {
+        console.error('❌ [EMBEDDED] Generation error:', error);
+      }
       throw error;
     } finally {
       this.isGenerating = false;

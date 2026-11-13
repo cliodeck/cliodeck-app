@@ -9,7 +9,7 @@
  * vérifie le chemin, pas la qualité des slides. Avant le correctif, un document de 16 000
  * caractères donnait un résultat vide (`embedded_prompt_too_long`, terminal ignoré par le service) ;
  * puis, avec une bibliographie de 50 références de taille courante, le document ne recevait plus
- * aucune place (revue de L08-4).
+ * aucune place (revue de L08-4). « Arrêter » coupe llama.cpp, et le texte déjà reçu reste (L09-10).
  *
  * `CLIODECK_TEST_REPORT` : fichier où écrire ce qui a été mesuré.
  *
@@ -149,6 +149,58 @@ describe.skipIf(!available)('slides par le moteur embarqué réel (GGUF donné p
           })}\n`
         );
       }
+    } finally {
+      await llm.dispose();
+    }
+  }, 300_000);
+
+  it('« Arrêter » pendant les slides : la main revient en moins de 2 s, et le texte déjà reçu reste', async () => {
+    const llm = instrumentLLM(new EmbeddedProvider({ modelPath: GGUF ?? '', modelId: 'qwen2.5-0.5b' }), 'embedded');
+    const service = new SlidesGenerationService();
+    service.setLLMProvider(llm);
+    const sent: Array<{ channel: string; payload: unknown }> = [];
+    let pieces = 0;
+    let firstAt = 0;
+    let cancelledAt = 0;
+    // « Arrêter » une fois quarante morceaux affichés : le modèle est en train d'écrire.
+    const window = {
+      webContents: {
+        send: (channel: string, payload: unknown) => {
+          sent.push({ channel, payload });
+          if (channel !== 'slides:stream') return;
+          pieces += 1;
+          if (pieces === 1) firstAt = performance.now();
+          if (pieces === 40) {
+            cancelledAt = performance.now();
+            service.cancelGeneration();
+          }
+        },
+      },
+    } as unknown as BrowserWindow;
+    try {
+      const content = await service.generateSlides(SENTENCE.repeat(30).trim(), 'fr', window);
+      const stopMs = performance.now() - cancelledAt;
+      const streamed = sent
+        .filter((s) => s.channel === 'slides:stream')
+        .map((s) => String(s.payload))
+        .join('');
+      const done = sent.find((s) => s.channel === 'slides:stream-done')?.payload as { content: string } | undefined;
+      if (REPORT) {
+        appendFileSync(
+          REPORT,
+          `${JSON.stringify({ label: 'slides-arreter', stopMs: Math.round(stopMs), writingMs: Math.round(cancelledAt - firstAt), pieces, streamedChars: streamed.length, outputChars: content.length })}\n`
+        );
+      }
+
+      expect(cancelledAt).toBeGreaterThan(0);
+      // Les quarante morceaux sont arrivés au fil de la génération, au moins une milliseconde par
+      // jeton : sur le code d'avant, ils arrivaient d'un bloc, après la fin, et l'arrêt ne coupait rien.
+      expect(cancelledAt - firstAt).toBeGreaterThan(39);
+      expect(stopMs).toBeLessThan(2000);
+      expect(sent.find((s) => s.channel === 'slides:stream-error')).toBeUndefined();
+      expect(streamed.trim().length).toBeGreaterThan(0);
+      expect(content.trim().length).toBeGreaterThan(0);
+      expect(done?.content).toBe(content);
     } finally {
       await llm.dispose();
     }

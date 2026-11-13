@@ -1325,3 +1325,56 @@ describe('moteur embarqué : la fenêtre réelle du tour (L08-4)', () => {
     expect(warnings).not.toMatch(/Failed to compress/);
   });
 });
+
+/**
+ * « Arrêter » sur le moteur embarqué (L09-10) : le client attendait la fin de la génération avant de
+ * céder le premier morceau, et aucun signal n'atteignait llama.cpp (S05-1-13). Rien ne s'affichait
+ * pendant que le modèle écrivait, « Arrêter » le laissait finir, puis le tour se terminait
+ * « cancelled » sans un mot. Vrai service, vrai fournisseur et vrai client embarqués, derrière le
+ * décorateur du journal d'usage comme dans l'app ; seul `node-llama-cpp` est simulé.
+ */
+describe('« Arrêter » sur le moteur embarqué (L09-10)', () => {
+  const EMBEDDED = {
+    backend: 'ollama',
+    ollamaURL: 'http://127.0.0.1:9',
+    ollamaChatModel: 'llama3.2',
+    generationProvider: 'embedded',
+    embeddedModelPath: '/modeles/qwen2.5-0.5b-instruct-q4_k_m.gguf',
+    embeddedModelId: 'qwen2.5-0.5b',
+  };
+  const LONG_REPLY = Array.from({ length: 1000 }, (_, i) => `mot${i} `);
+
+  beforeEach(() => {
+    fakeLlama.reset();
+    vi.mocked(configManager.getLLMConfig).mockReturnValue(EMBEDDED as unknown as ReturnType<typeof configManager.getLLMConfig>);
+    bench.registry = () =>
+      instrumentLLM(new EmbeddedProvider({ modelPath: EMBEDDED.embeddedModelPath, modelId: 'qwen2.5-0.5b' }), 'embedded');
+  });
+
+  const textOf = (sent: Sent[]): string => chunks(sent).map((e) => e.chunk.delta).join('');
+
+  it('le texte arrive pendant que le modèle écrit, « Arrêter » coupe llama.cpp, le texte reçu reste, et la question suivante répond', async () => {
+    fakeLlama.reply = [...LONG_REPLY];
+    const writing = fakeLlama.whenEmitted(3);
+    const { sessionId, sent } = startTurn();
+    await writing;
+    // Le début de la réponse est déjà à l'écran, pendant que le modèle écrit.
+    expect(textOf(sent)).toBe(LONG_REPLY.slice(0, 2).join(''));
+
+    expect(fusionChatService.cancel(sessionId)).toBe(true);
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(terminal(sent)?.chunk.finishReason).toBe('cancelled');
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(fakeLlama.sessions[0].prompts[0].emitted).toBeLessThanOrEqual(4);
+    expect(LONG_REPLY.join('').startsWith(textOf(sent))).toBe(true);
+    expect(textOf(sent).length).toBeGreaterThanOrEqual(LONG_REPLY.slice(0, 2).join('').length);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+
+    fakeLlama.reply = ['Une ', 'réponse.'];
+    const next = startTurn();
+    await vi.waitFor(() => expect(terminal(next.sent)).toBeDefined(), WAIT);
+    expect(terminal(next.sent)?.chunk.finishReason).toBe('stop');
+    expect(textOf(next.sent)).toBe('Une réponse.');
+  });
+});

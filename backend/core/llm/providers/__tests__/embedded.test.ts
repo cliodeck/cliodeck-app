@@ -166,6 +166,54 @@ describe('EmbeddedProvider', () => {
     ]);
   });
 
+  // L09-10 : le signal arrête llama.cpp. Arrêté après un premier morceau, il rend ce qu'il a produit
+  // et la génération finit sans lever ; arrêté avant, il lève la raison du signal. Les deux sont un
+  // arrêt, pas une fin normale ni une panne.
+  function stoppableClient(stop: 'returns' | 'throws'): EmbeddedLLMClient {
+    const client = {
+      async initialize() {
+        return true;
+      },
+      async *generateChat(request: EmbeddedChatRequest) {
+        const signal = request.signal;
+        if (!signal) throw new Error('aucun signal transmis au client');
+        if (stop === 'returns') yield 'Selon [1], ';
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+        }
+        if (stop === 'throws') throw signal.reason;
+      },
+      async dispose() {},
+    };
+    return client as unknown as EmbeddedLLMClient;
+  }
+
+  it('arrêté après un premier morceau : le texte reste, terminal cancelled, pas stop', async () => {
+    const p = new EmbeddedProvider({ modelPath: MODEL_PATH, client: stoppableClient('returns') });
+    const controller = new AbortController();
+    const chunks: ChatChunk[] = [];
+    for await (const chunk of p.chat([{ role: 'user', content: 'x' }], { signal: controller.signal })) {
+      chunks.push(chunk);
+      if (chunk.delta) controller.abort();
+    }
+    expect(chunks).toEqual([
+      { delta: 'Selon [1], ' },
+      { delta: '', done: true, finishReason: 'cancelled' },
+    ]);
+  });
+
+  it('arrêté avant le premier morceau (la raison du signal levée) : cancelled, sans dégrader le fournisseur', async () => {
+    const p = new EmbeddedProvider({ modelPath: MODEL_PATH, client: stoppableClient('throws') });
+    await p.healthCheck();
+    const before = p.getStatus();
+    const controller = new AbortController();
+    const terminal = collect(p.chat([{ role: 'user', content: 'x' }], { signal: controller.signal }));
+    controller.abort();
+
+    expect(await terminal).toEqual([{ delta: '', done: true, finishReason: 'cancelled' }]);
+    expect(p.getStatus()).toEqual(before);
+  });
+
   it('un échec de chargement peut être retenté (modèle re-téléchargé)', async () => {
     let attempts = 0;
     const flaky = {
