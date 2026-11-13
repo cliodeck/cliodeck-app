@@ -231,10 +231,11 @@ describe.skipIf(!available)('moteur embarqué réel (GGUF donné par CLIODECK_TE
   /**
    * « Arrêter » pendant que le modèle lit encore les consignes (le préremplissage, revue de L09-10).
    * node-llama-cpp 3.18.1 ne lit le signal qu'entre deux jetons générés, et un décodage commencé va
-   * au bout de ses lots : l'arrêt attend la fin de la lecture, jamais celle de la réponse. Ce temps
-   * croît avec la longueur des consignes et dépend du moteur (Metal sur un Mac Apple, processeur
-   * seul sur un Mac Intel) : il est mesuré et rapporté, pas borné à 2 s. Relancer ce test sur un Mac
-   * Intel donne le chiffre du cas réel.
+   * au bout de ses lots : l'arrêt attend la fin de la lecture, jamais celle de la réponse, et le
+   * tour arrêté finit quand serait sorti le premier morceau. Ce temps croît avec la longueur des
+   * consignes et dépend du moteur (Metal sur un Mac Apple, processeur seul sur un Mac Intel) : il
+   * est mesuré et rapporté, pas borné à 2 s. Relancer ce test sur un Mac Intel donne le chiffre du
+   * cas réel.
    */
   it('« Arrêter » pendant la lecture des consignes : le tour attend la fin de la lecture, pas celle de la réponse', async () => {
     expect((await provider.healthCheck()).state).toBe('ready');
@@ -288,11 +289,16 @@ describe.skipIf(!available)('moteur embarqué réel (GGUF donné par CLIODECK_TE
         clearTimeout(timer);
       }
       const endedAt = performance.now();
+      // Les chiffres comparables sont ceux des deux passes à 384 jetons, qui lisent les mêmes
+      // consignes : la fin du tour arrêté et le premier morceau de la passe sans arrêt. La borne haute
+      // lit davantage (budget d'entrée plus large) : elle ne se compare pas à la fin du tour.
       report(
-        `arrêt pendant la lecture (${process.platform}-${process.arch}) : lecture seule ${readingMs.toFixed(0)} ms ; ` +
-          `tour entier ${wholeMs.toFixed(0)} ms, premier morceau à ${firstMs.toFixed(0)} ms (${plainPieces} morceaux) ; ` +
-          `arrêt à ${(abortedAt - startedAt).toFixed(0)} ms, ` +
-          `fin du tour ${(endedAt - abortedAt).toFixed(0)} ms après abort() ; ${text.length} caractères produits`
+        `arrêt pendant la lecture (${process.platform}-${process.arch}) : ` +
+          `arrêt à ${(abortedAt - startedAt).toFixed(0)} ms, fin du tour à ${(endedAt - startedAt).toFixed(0)} ms ` +
+          `(${(endedAt - abortedAt).toFixed(0)} ms après abort()) ; ` +
+          `sans arrêt, premier morceau à ${firstMs.toFixed(0)} ms, tour entier ${wholeMs.toFixed(0)} ms ` +
+          `(${plainPieces} morceaux) ; borne haute de la lecture (8 jetons de réponse) ${readingMs.toFixed(0)} ms ; ` +
+          `${text.length} caractères produits`
       );
 
       // La mesure n'a de sens que si la réponse entière dure bien plus que sa lecture.
@@ -304,6 +310,12 @@ describe.skipIf(!available)('moteur embarqué réel (GGUF donné par CLIODECK_TE
       // Le tour finit avec la lecture, bien avant la fin d'une réponse écrite en entier : sur le code
       // d'avant, le signal n'atteignait pas llama.cpp, qui écrivait toute la réponse.
       expect(endedAt - startedAt).toBeLessThan(readingMs + (wholeMs - readingMs) / 2);
+      // Et pas avant la fin de la lecture : node-llama-cpp lit le signal pour la première fois après
+      // le tirage du premier jeton (`iterateEvaluation`), et le tour arrêté finit avec le premier
+      // morceau de la passe sans arrêt, à quelques millisecondes près. Si une version de
+      // node-llama-cpp coupe un jour la lecture, ce test le dit : reprendre alors le commentaire de
+      // `generateChat`.
+      expect(endedAt - startedAt).toBeGreaterThan(firstMs / 2);
       // Un arrêt n'est pas une panne.
       expect(provider.getStatus()).toMatchObject({ state: 'ready' });
       expect(events.at(-1)).toMatchObject({ provider: 'embedded', status: 'cancelled' });

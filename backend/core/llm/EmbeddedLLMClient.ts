@@ -668,11 +668,14 @@ export class EmbeddedLLMClient {
    * L'arrêt au jeton suivant ne vaut que pendant l'écriture. Pendant la lecture des consignes et de
    * la question (le préremplissage), rien ne coupe llama.cpp : node-llama-cpp 3.18.1 ne lit le signal
    * qu'entre deux jetons générés (`ensureNotAborted`, `handleAbortTrigger`), et un décodage commencé
-   * va au bout de ses lots (aucun signal dans `LlamaContext`). L'arrêt attend la fin de la lecture,
-   * qui croît avec la longueur des consignes. Consignes au budget de la fenêtre, modèle par défaut
-   * (qwen2.5-0.5b), arrêt posé à 50 ms (revue de L09-10) :
-   * - Metal (Mac Apple) : lecture de 0,8 s, tour fini 0,5 s après `abort()` ;
-   * - processeur seul d'un Mac Apple : lecture de 4,9 s, tour fini 3,0 s après `abort()`.
+   * va au bout de ses lots (aucun signal dans `LlamaContext`). La première lecture du signal suit le
+   * tirage du premier jeton (`iterateEvaluation`) : l'arrêt attend la fin de la lecture, qui croît
+   * avec la longueur des consignes, et le tour arrêté finit à l'instant où serait sorti le premier
+   * morceau. Consignes au budget de la fenêtre, modèle par défaut (qwen2.5-0.5b) :
+   * - Metal (Mac Apple) : arrêt posé à 52 ms, tour fini à 0,69 s, comme le premier morceau d'une
+   *   passe sans arrêt (0,69 s), soit 0,64 s après `abort()` (`EmbeddedLLMClient.live.test.ts`) ;
+   * - processeur seul d'un Mac Apple : arrêt posé à 50 ms, tour fini 3,0 s après `abort()` (sonde
+   *   de la revue de L09-10, non refaite faute de binaire « processeur seul » pour mac-arm64).
    * Un Mac Intel n'a que le processeur (`@node-llama-cpp/mac-x64`, sans Metal), plus lent encore :
    * « Arrêter » pendant une lecture y dépasse 2 s, et le résumé du compacteur, qui lit beaucoup et
    * écrit peu, tombe presque toujours dans ce cas. Aucun correctif dans ce client ne coupe la lecture.
