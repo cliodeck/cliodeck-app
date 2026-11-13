@@ -11,6 +11,7 @@ import {
   resolveTurnOptions,
   retrievalStatus,
   shouldIncludeManuscript,
+  summarizeOptionsFor,
 } from '../fusion-chat-service.js';
 
 import type {
@@ -501,5 +502,36 @@ describe('resolveTurnOptions — ce qui est propre à Ollama reste chez Ollama',
       embeddedModelPath: '/models/q.gguf',
     };
     expect(resolveTurnOptions(embedded, opts).numCtx).toBeUndefined();
+  });
+});
+
+/**
+ * Le résumé du compacteur prend la fenêtre du tour (S06-1-18) : il est calibré sur elle, et partait
+ * sans, si bien qu'Ollama tronquait la conversation à résumer à sa fenêtre par défaut. Mais comme
+ * pour le tour, une fenêtre Ollama ne part jamais vers un autre fournisseur (`resolveTurnOptions`).
+ */
+describe('summarizeOptionsFor — la fenêtre du tour, chez Ollama seulement', () => {
+  const ollama: LLMConfig = {
+    backend: 'ollama',
+    ollamaURL: 'http://127.0.0.1:11434',
+    ollamaEmbeddingModel: 'nomic-embed-text',
+    ollamaChatModel: 'qwen3:32b',
+  };
+
+  it('Ollama : la fenêtre du tour, sans raisonnement, à température 0', () => {
+    const turn = resolveTurnOptions(ollama, { numCtx: 32_768, temperature: 0.7, think: true, topP: 0.9 });
+    expect(summarizeOptionsFor(turn)).toEqual({ temperature: 0, numCtx: 32_768, think: false });
+  });
+
+  it('Ollama sans fenêtre au panneau : celle des réglages', () => {
+    const turn = resolveTurnOptions({ ...ollama, ollamaNumCtx: 16_384 }, {});
+    expect(summarizeOptionsFor(turn).numCtx).toBe(16_384);
+  });
+
+  it('fournisseur cloud : aucune fenêtre posée, même si le panneau en donne une', () => {
+    const claude: LLMConfig = { ...ollama, backend: 'claude', claudeAPIKey: 'k', claudeModel: 'claude-sonnet-4-6' };
+    const options = summarizeOptionsFor(resolveTurnOptions(claude, { numCtx: 32_768 }));
+    expect(options).not.toHaveProperty('numCtx');
+    expect(options.temperature).toBe(0);
   });
 });

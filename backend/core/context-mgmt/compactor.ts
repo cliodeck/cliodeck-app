@@ -17,6 +17,7 @@ import type {
   CompleteOptions,
   LLMProvider,
 } from '../llm/providers/base';
+import { collectCompletion } from '../llm/providers/collect.js';
 
 export type TokenEstimator = (text: string) => number;
 
@@ -35,8 +36,27 @@ export interface ContextCompactorOptions {
   keepRecentTurns?: number;
   /** Rough token counter; default `Math.ceil(text.length / 4)`. Injectable for tests. */
   tokenEstimator?: TokenEstimator;
-  /** Options forwarded to `llm.complete` when producing the summary. */
+  /** Options forwarded to `llm.chat` when producing the summary. */
   summarizeOptions?: CompleteOptions;
+}
+
+/** Ce que le tour prête au résumé (S06-1-18) : il en fait partie, il n'est pas un appel à côté. */
+export interface CompactOptions {
+  /** Signal du tour : « Arrêter », le délai d'inactivité ou la fermeture du projet coupent le résumé. */
+  signal?: AbortSignal;
+  /**
+   * Appelé à chaque chunk du résumé, raisonnement compris. Un résumé qui avance est une activité ;
+   * un résumé dont rien ne vient n'en est pas une, et le délai d'inactivité peut tomber.
+   */
+  onActivity?: () => void;
+}
+
+/** Le découpage d'une conversation à compacter ; `null` quand il n'y a rien à résumer. */
+interface CompactionPlan {
+  systemMessages: ChatMessage[];
+  middleCitations: ChatMessage[];
+  middleToSummarize: ChatMessage[];
+  recent: ChatMessage[];
 }
 
 /** Marker placed at the start of the summary message `content`. */
@@ -103,15 +123,54 @@ export class ContextCompactor {
   }
 
   /**
+   * True when `compact` would summarize something: the threshold is crossed AND the middle of the
+   * conversation holds more than RAG citations. Lets the caller announce the summary before it
+   * starts, without announcing one that will not happen.
+   */
+  needsCompaction(messages: ChatMessage[]): boolean {
+    return this.plan(messages) !== null;
+  }
+
+  /**
    * Compact a conversation. When total estimated tokens are under the
    * threshold, returns `messages` unchanged (same reference). Otherwise
    * returns a new array: system messages + summary (if any) + preserved
    * RAG citations + last N turns.
+   *
+   * Un résumé vide n'en est pas un (S05-1-8) : il remplaçait en silence tout le milieu de la
+   * conversation, et le modèle répondait sans les échanges antérieurs. `messages` revient alors
+   * tel quel, même référence. Un résumé en panne ou annulé lève (`ProviderCallError`, L09-7) :
+   * l'appelant garde lui aussi la conversation entière.
    */
-  async compact(messages: ChatMessage[]): Promise<ChatMessage[]> {
+  async compact(messages: ChatMessage[], opts: CompactOptions = {}): Promise<ChatMessage[]> {
+    const plan = this.plan(messages);
+    if (!plan) {
+      return messages;
+    }
+
+    const summaryText = (await this.summarize(plan.middleToSummarize, opts)).trim();
+    if (!summaryText) {
+      console.warn('[compactor] résumé vide : conversation gardée telle quelle');
+      return messages;
+    }
+    const header = `${COMPACTED_SUMMARY_PREFIX} ${plan.middleToSummarize.length} earlier turns] `;
+    const summaryMessage: ChatMessage = {
+      role: 'system',
+      content: header + summaryText,
+    };
+
+    return [
+      ...plan.systemMessages,
+      summaryMessage,
+      ...plan.middleCitations,
+      ...plan.recent,
+    ];
+  }
+
+  private plan(messages: ChatMessage[]): CompactionPlan | null {
     const totalTokens = this.estimateTokens(messages);
     if (totalTokens <= this.triggerTokens) {
-      return messages;
+      return null;
     }
 
     // Partition: system (kept), non-system (candidate for compaction).
@@ -134,9 +193,9 @@ export class ContextCompactor {
     const recent = nonSystem.slice(recentStart);
 
     // If there is no middle to compact, nothing we can do beyond what we've
-    // already tried; return messages unchanged to preserve idempotency.
+    // already tried; `compact` returns messages unchanged to preserve idempotency.
     if (middle.length === 0) {
-      return messages;
+      return null;
     }
 
     // Pull RAG citations out of the middle: they pass through untouched,
@@ -147,25 +206,13 @@ export class ContextCompactor {
 
     // If the middle has nothing summarizable (only citations), nothing to do.
     if (middleToSummarize.length === 0) {
-      return messages;
+      return null;
     }
 
-    const summaryText = await this.summarize(middleToSummarize);
-    const header = `${COMPACTED_SUMMARY_PREFIX} ${middleToSummarize.length} earlier turns] `;
-    const summaryMessage: ChatMessage = {
-      role: 'system',
-      content: header + summaryText.trim(),
-    };
-
-    return [
-      ...systemMessages,
-      summaryMessage,
-      ...middleCitations,
-      ...recent,
-    ];
+    return { systemMessages, middleCitations, middleToSummarize, recent };
   }
 
-  private async summarize(messages: ChatMessage[]): Promise<string> {
+  private async summarize(messages: ChatMessage[], opts: CompactOptions): Promise<string> {
     const transcript = messages
       .map((m) => {
         const who =
@@ -191,7 +238,17 @@ export class ContextCompactor {
       transcript +
       '\n--- END ---\n\nSummary:';
 
-    return this.llm.complete(prompt, this.summarizeOptions);
+    // `chat()` plutôt que `complete()` : chaque chunk compte comme activité. `collectCompletion`
+    // lève sur un terminal `error` ou `cancelled`, comme `complete()` (L09-7).
+    const { text } = await collectCompletion(
+      this.llm,
+      this.llm.chat([{ role: 'user', content: prompt }], {
+        ...this.summarizeOptions,
+        signal: opts.signal,
+      }),
+      opts.onActivity
+    );
+    return text;
   }
 }
 

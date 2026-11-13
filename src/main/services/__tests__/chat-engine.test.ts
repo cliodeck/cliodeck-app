@@ -7,6 +7,8 @@ import type {
   LLMProvider,
 } from '../../../../backend/core/llm/providers/base.js';
 import type { RAGExplanation } from '../../../../backend/types/chat-source.js';
+import { ContextCompactor } from '../../../../backend/core/context-mgmt/compactor.js';
+import { collectCompletion } from '../../../../backend/core/llm/providers/collect.js';
 
 function makeFakeProvider(chunks: ChatChunk[]): LLMProvider {
   return {
@@ -305,6 +307,7 @@ describe('chat-engine compactor wiring (1.3)', () => {
     // compactor — it just calls .compact() — so a duck-typed shape works.
     const stubCompactor = {
       contextWindow: 8192,
+      needsCompaction: () => true,
       compact: async (messages: ChatMessage[]): Promise<ChatMessage[]> => {
         const lastUser = [...messages].reverse().find((m) => m.role === 'user');
         return [
@@ -341,11 +344,11 @@ describe('chat-engine compactor wiring (1.3)', () => {
     expect(captured[0][1]).toEqual({ role: 'user', content: 'third' });
 
     // The 'compressing' status banner fires whenever the compactor
-    // returns a different array reference (i.e. actual compaction).
+    // has something to summarise.
     expect(status).toContain('compressing');
   });
 
-  it('skips compaction silently when the compactor returns the same array', async () => {
+  it('skips compaction silently when the compactor says nothing needs summarising', async () => {
     const provider = makeFakeProvider([
       { delta: '', done: true, finishReason: 'stop' },
     ]);
@@ -353,9 +356,10 @@ describe('chat-engine compactor wiring (1.3)', () => {
     let compactCalls = 0;
     const noopCompactor = {
       contextWindow: 8192,
+      needsCompaction: () => false, // nothing to summarise → no 'compressing' status
       compact: async (messages: ChatMessage[]): Promise<ChatMessage[]> => {
         compactCalls++;
-        return messages; // unchanged → no 'compressing' status
+        return messages;
       },
     } as unknown as Parameters<typeof runChatTurn>[0]['compactor'];
 
@@ -371,7 +375,7 @@ describe('chat-engine compactor wiring (1.3)', () => {
       },
     });
 
-    expect(compactCalls).toBe(1);
+    expect(compactCalls).toBe(0);
     // Only retrieval-skip + done; compressing never fired.
     expect(status).not.toContain('compressing');
   });
@@ -394,6 +398,7 @@ describe('chat-engine compactor wiring (1.3)', () => {
 
     const failingCompactor = {
       contextWindow: 8192,
+      needsCompaction: () => true,
       compact: async () => {
         throw new Error('boom');
       },
@@ -781,5 +786,272 @@ describe('chat-engine — plafond des tours d’outils (S06-1-4)', () => {
     expect(calls.n).toBe(3);
     expect(errors).toEqual([]);
     expect(done).toEqual([{ delta: '', done: true, finishReason: 'cancelled' }]);
+  });
+});
+
+/**
+ * Le résumé du compacteur appartient au tour (S06-1-18, S05-1-8). Il partait détaché : sans le signal
+ * du tour (« Arrêter » ne l'arrêtait pas, et le modèle était appelé ensuite), sans signe de vie pour
+ * le délai d'inactivité, et « compressing » n'était annoncé qu'après coup. Un résumé vide remplaçait
+ * en silence le milieu de la conversation. Vrai compacteur ; seul le fournisseur est simulé.
+ */
+describe('chat-engine — le résumé du compacteur appartient au tour (S06-1-18)', () => {
+  const isSummaryCall = (messages: ChatMessage[]): boolean =>
+    messages.some((m) => m.content.startsWith('You are compressing'));
+
+  /**
+   * Un fournisseur en miniature, comme les vrais : son `complete()` consomme son `chat()` (L09-7).
+   * Le résumé suit `summary` ; les appels du tour suivent `answer` (par défaut, une réponse courte).
+   */
+  function summarizingProvider(
+    events: string[],
+    summary: (opts?: ChatOptions) => AsyncIterable<ChatChunk>,
+    answer?: (call: number) => AsyncIterable<ChatChunk>
+  ): LLMProvider & { answerCalls: ChatMessage[][] } {
+    const answerCalls: ChatMessage[][] = [];
+    const provider = makeFakeProvider([]) as LLMProvider & { answerCalls: ChatMessage[][] };
+    provider.answerCalls = answerCalls;
+    provider.chat = async function* (messages: ChatMessage[], opts?: ChatOptions) {
+      if (isSummaryCall(messages)) {
+        events.push('chat:summary');
+        yield* summary(opts);
+        return;
+      }
+      events.push('chat:answer');
+      answerCalls.push(messages);
+      if (answer) {
+        yield* answer(answerCalls.length);
+        return;
+      }
+      yield { delta: 'Réponse.' };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    provider.complete = async (prompt, opts) =>
+      (await collectCompletion(provider, provider.chat([{ role: 'user', content: prompt }], opts))).text;
+    return provider;
+  }
+
+  /** Cinq questions déjà posées, longues : au-delà de 70 % d'une fenêtre de 1 000 jetons. */
+  function longHistory(): ChatMessage[] {
+    const messages: ChatMessage[] = [];
+    for (let i = 1; i <= 5; i++) {
+      messages.push({ role: 'user', content: `Q${i} ${'x'.repeat(400)}` });
+      messages.push({ role: 'assistant', content: `R${i} ${'y'.repeat(400)}` });
+    }
+    messages.push({ role: 'user', content: 'Et le préfet Chiappe ?' });
+    return messages;
+  }
+
+  const compactorFor = (provider: LLMProvider): ContextCompactor =>
+    new ContextCompactor({ llm: provider, contextWindow: 1000 });
+
+  it('« compressing » part avant l’appel de résumé, puis à chaque chunk du résumé, raisonnement compris', async () => {
+    const events: string[] = [];
+    const provider = summarizingProvider(events, async function* () {
+      yield { delta: '', thinking: 'Je relis.' };
+      yield { delta: 'Ils ont parlé de 1934.' };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    });
+    await runChatTurn({
+      provider,
+      messages: longHistory(),
+      compactor: compactorFor(provider),
+      hooks: { onStatus: (s) => events.push(`status:${s.phase}`) },
+    });
+    // Chaque chunk relance le statut : un résumé qui avance nourrit le délai d'inactivité du service.
+    expect(events.slice(0, events.indexOf('chat:answer'))).toEqual([
+      'status:compressing',
+      'chat:summary',
+      'status:compressing',
+      'status:compressing',
+      'status:compressing',
+    ]);
+    expect(provider.answerCalls[0].some((m) => m.content.includes('Ils ont parlé de 1934.'))).toBe(true);
+  });
+
+  it('« Arrêter » pendant le résumé : le résumé voit le signal, le tour finit annulé, sans erreur ni appel au modèle', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const controller = new AbortController();
+    const events: string[] = [];
+    let seenSignal: AbortSignal | undefined;
+    // Sans signal, le résumé n'a pas de fin : il se libère à la fin du test.
+    let release = (): void => undefined;
+    const provider = summarizingProvider(events, async function* (opts?: ChatOptions) {
+      seenSignal = opts?.signal;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+        opts?.signal?.addEventListener('abort', () => resolve(), { once: true });
+      });
+      yield { delta: '', done: true, finishReason: opts?.signal?.aborted ? 'cancelled' : 'stop' };
+    });
+    const done: ChatChunk[] = [];
+    const errors: Array<{ code: string; message: string }> = [];
+    try {
+      const turn = runChatTurn({
+        provider,
+        messages: longHistory(),
+        signal: controller.signal,
+        compactor: compactorFor(provider),
+        hooks: { onDone: (chunk) => done.push(chunk), onError: (err) => errors.push(err) },
+      });
+      await vi.waitFor(() => expect(events).toContain('chat:summary'));
+      controller.abort();
+      try {
+        await vi.waitFor(() => expect(seenSignal?.aborted).toBe(true), { timeout: 1_000 });
+      } finally {
+        release();
+      }
+      await turn;
+
+      expect(done).toEqual([{ delta: '', done: true, finishReason: 'cancelled' }]);
+      expect(errors).toEqual([]);
+      expect(events).not.toContain('chat:answer');
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('compaction skipped');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('un résumé vide ne remplace rien : le modèle reçoit la conversation entière (S05-1-8)', async () => {
+    const events: string[] = [];
+    const provider = summarizingProvider(events, async function* () {
+      yield { delta: '', done: true, finishReason: 'stop' };
+    });
+    const history = longHistory();
+    await runChatTurn({ provider, messages: history, compactor: compactorFor(provider) });
+    expect(events).toEqual(['chat:summary', 'chat:answer']);
+    expect(provider.answerCalls[0]).toEqual(history);
+  });
+
+  // Les appels d'outils et leurs résultats tombent dans les tours récents, ancrés sur la dernière
+  // question : d'un passage de la boucle d'outils à l'autre, le milieu à résumer ne change pas. Un
+  // résumé vide ou en panne était redemandé à chaque passage (jusqu'à six fois par question, avec
+  // « Compression du contexte… » à chaque fois et tout le milieu relu par un modèle local).
+  it.each([
+    ['vide', 'stop'],
+    ['en panne', 'error'],
+  ] as const)(
+    'un résumé %s n’est pas redemandé aux passages suivants de la boucle d’outils',
+    async (_label, finishReason) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const events: string[] = [];
+        const provider = summarizingProvider(
+          events,
+          async function* () {
+            yield { delta: '', done: true, finishReason };
+          },
+          async function* (call) {
+            if (call <= 3) {
+              yield { delta: '', toolCall: { id: `c${call}`, name: 'search', arguments: '{}' } };
+              yield { delta: '', done: true, finishReason: 'tool_call' };
+              return;
+            }
+            yield { delta: 'Trouvé.' };
+            yield { delta: '', done: true, finishReason: 'stop' };
+          }
+        );
+        const phases: string[] = [];
+        const history = longHistory();
+        const done: ChatChunk[] = [];
+        await runChatTurn({
+          provider,
+          messages: history,
+          compactor: compactorFor(provider),
+          tools: [{ name: 'search', description: 'cherche', parameters: { type: 'object' } }],
+          toolHandler: { call: async () => ({ ok: true, result: { hits: 0 } }) },
+          hooks: { onStatus: (s) => phases.push(s.phase), onDone: (chunk) => done.push(chunk) },
+        });
+        expect(events).toEqual([
+          'chat:summary',
+          'chat:answer',
+          'chat:answer',
+          'chat:answer',
+          'chat:answer',
+        ]);
+        // « Compression du contexte… » ne revient pas après la première réponse.
+        expect(phases).toContain('compressing');
+        expect(phases.slice(phases.indexOf('generating'))).not.toContain('compressing');
+        // La conversation entière part à chaque passage, sans résumé.
+        expect(provider.answerCalls[3].slice(0, history.length)).toEqual(history);
+        expect(done).toEqual([{ delta: '', done: true, finishReason: 'stop' }]);
+      } finally {
+        warn.mockRestore();
+      }
+    }
+  );
+
+  it('après un compactage au second passage, la phase de génération se redit', async () => {
+    // Le premier passage reste sous le seuil ; le résultat d'outil le fait franchir au second.
+    const events: string[] = [];
+    const history: ChatMessage[] = [];
+    for (let i = 1; i <= 5; i++) {
+      history.push({ role: 'user', content: `Q${i} ${'x'.repeat(100)}` });
+      history.push({ role: 'assistant', content: `R${i} ${'y'.repeat(100)}` });
+    }
+    history.push({ role: 'user', content: 'Cherche Chiappe.' });
+    const provider = summarizingProvider(
+      events,
+      async function* () {
+        yield { delta: 'Résumé.' };
+        yield { delta: '', done: true, finishReason: 'stop' };
+      },
+      async function* (call) {
+        if (call === 1) {
+          yield { delta: '', toolCall: { id: 'c1', name: 'search', arguments: '{}' } };
+          yield { delta: '', done: true, finishReason: 'tool_call' };
+          return;
+        }
+        yield { delta: 'Trouvé.' };
+        yield { delta: '', done: true, finishReason: 'stop' };
+      }
+    );
+    const phases: string[] = [];
+    await runChatTurn({
+      provider,
+      messages: history,
+      compactor: compactorFor(provider),
+      tools: [{ name: 'search', description: 'cherche', parameters: { type: 'object' } }],
+      toolHandler: { call: async () => ({ ok: true, result: { text: 'z'.repeat(3000) } }) },
+      hooks: { onStatus: (s) => phases.push(s.phase) },
+    });
+    expect(events).toEqual(['chat:answer', 'chat:summary', 'chat:answer']);
+    // Le bandeau restait sur « Compression du contexte… » pendant toute la réponse.
+    expect(phases.slice(phases.lastIndexOf('compressing') + 1)).toEqual(['generating', 'done']);
+  });
+
+  it('témoin L09-8 : un compactage au dernier passage permis ne change pas la fin en max_tool_turns', async () => {
+    let calls = 0;
+    let runs = 0;
+    let compactions = 0;
+    const provider = makeFakeProvider([]);
+    provider.chat = async function* () {
+      calls += 1;
+      yield { delta: '', toolCall: { id: `c${calls}`, name: 'search', arguments: '{}' } };
+      yield { delta: '', done: true, finishReason: 'tool_call' };
+    };
+    const everyPass = {
+      contextWindow: 8192,
+      needsCompaction: () => true,
+      compact: async (messages: ChatMessage[]): Promise<ChatMessage[]> => {
+        compactions += 1;
+        return [...messages];
+      },
+    } as unknown as ContextCompactor;
+    const done: ChatChunk[] = [];
+    const errors: Array<{ code: string; message: string }> = [];
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'Cherche Chiappe.' }],
+      compactor: everyPass,
+      tools: [{ name: 'search', description: 'cherche', parameters: { type: 'object' } }],
+      toolHandler: { call: async () => { runs += 1; return { ok: true, result: { hits: 0 } }; } },
+      hooks: { onDone: (chunk) => done.push(chunk), onError: (err) => errors.push(err) },
+    });
+    expect(compactions).toBe(6);
+    expect(calls).toBe(6);
+    expect(runs).toBe(5);
+    expect(errors.map((e) => e.code)).toEqual(['max_tool_turns']);
+    expect(done).toEqual([{ delta: '', done: true, finishReason: 'error' }]);
   });
 });

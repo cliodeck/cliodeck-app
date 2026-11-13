@@ -267,6 +267,7 @@ import {
 import type {
   ChatChunk,
   ChatMessage,
+  CompleteOptions,
 } from '../../../backend/core/llm/providers/base.js';
 
 /**
@@ -413,6 +414,25 @@ export function resolveTurnOptions(
     topK: local ? opts?.topK : undefined,
     repeatPenalty: local ? opts?.repeatPenalty : undefined,
     think: local ? opts?.think : undefined,
+  };
+}
+
+/**
+ * Options du résumé du compacteur, tirées des options résolues du tour (S06-1-18).
+ *
+ * Le compacteur se déclenche sur la fenêtre du tour : la conversation à résumer est taillée pour
+ * elle. Sans `num_ctx`, Ollama la tronquait à sa fenêtre par défaut et ne résumait que la fin, puis
+ * rechargeait le modèle au tour suivant. La fenêtre ne part qu'à Ollama, comme celle du tour
+ * (`resolveTurnOptions` ne la pose pas pour un autre fournisseur). `think: false` coupe le
+ * raisonnement de ce seul résumé, que personne ne lit ; celui du tour reste affiché. Les
+ * fournisseurs cloud ignorent `think`.
+ */
+export function summarizeOptionsFor(turnOpts: TurnOptions): CompleteOptions {
+  return {
+    // Lower temperature for the summary call to stay faithful.
+    temperature: 0,
+    ...(turnOpts.numCtx !== undefined ? { numCtx: turnOpts.numCtx } : {}),
+    think: false,
   };
 }
 
@@ -749,10 +769,7 @@ class FusionChatService {
       // assume the model's full advertised window and let the prompt
       // overflow the smaller per-call allocation.
       contextWindow: getContextWindow(activeModel, numCtx),
-      summarizeOptions: {
-        // Lower temperature for the summary call to stay faithful.
-        temperature: 0,
-      },
+      summarizeOptions: summarizeOptionsFor(turnOpts),
     });
 
     // --- Assemble MCP tool catalog + dispatcher ---------------------------

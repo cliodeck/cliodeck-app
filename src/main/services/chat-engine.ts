@@ -231,7 +231,10 @@ export interface RunChatTurnArgs<TSource = unknown> {
    * runs `compactor.compact(messages)` at the start of each agent-loop
    * iteration so long sessions don't saturate the provider's window.
    * Compaction failures are swallowed (logged + skipped) so a faulty
-   * summarisation never aborts the user's chat turn.
+   * summarisation never aborts the user's chat turn. Arrêté pendant le
+   * résumé, le tour finit annulé (S06-1-18). Un résumé vide ou en panne
+   * n'est pas redemandé aux passages suivants du même tour : son entrée
+   * n'a pas changé.
    */
   compactor?: ContextCompactor;
   /**
@@ -471,6 +474,12 @@ export async function runChatTurn<TSource = unknown>(
     generationStart = Date.now();
     let firstFrameSeen = false;
     let thinkingSeen = false;
+    // Un résumé vide ou en panne ne se redemande pas dans le même tour : la boucle d'outils n'ajoute
+    // que des messages `assistant` et `tool`, qui tombent dans les tours récents (ancrés sur la
+    // dernière question), si bien que le milieu à résumer reste le même d'un passage à l'autre. Sans
+    // ce drapeau, le même résumé repartait à chaque passage, jusqu'à `maxTurns` fois par question.
+    // Le tour suivant, qui apporte une nouvelle question, le retente.
+    let compactionGaveUp = false;
     for (let turn = 0; turn < maxTurns; turn++) {
       turnsUsed = turn + 1;
       const pendingToolCalls: ChatEngineToolCall[] = [];
@@ -481,24 +490,52 @@ export async function runChatTurn<TSource = unknown>(
       // Compaction: only when a compactor is wired AND the conversation
       // already crossed its trigger threshold. The compactor itself
       // returns the same array reference when it decides nothing needs
-      // changing, so we can detect that without computing tokens twice.
-      if (args.compactor) {
+      // changing (or when its summary came back empty).
+      // Le résumé fait partie du tour (S06-1-18) : annoncé avant l'appel, il reçoit le signal du
+      // tour, et chacun de ses chunks relance le statut, ce qui nourrit le délai d'inactivité du
+      // service sans masquer un résumé dont plus rien ne vient.
+      if (!compactionGaveUp && args.compactor?.needsCompaction(messages)) {
+        safeStatus({ phase: 'compressing' });
         try {
-          const compacted = await args.compactor.compact(messages);
+          const compacted = await args.compactor.compact(messages, {
+            signal: args.signal,
+            onActivity: () => safeStatus({ phase: 'compressing' }),
+          });
           if (compacted !== messages) {
-            safeStatus({ phase: 'compressing' });
             console.log('[chat-engine] context compacted', {
               before: messages.length,
               after: compacted.length,
             });
             messages = compacted;
+          } else {
+            compactionGaveUp = true;
           }
         } catch (e) {
-          console.warn(
-            '[chat-engine] compaction skipped:',
-            e instanceof Error ? e.message : e
-          );
+          compactionGaveUp = true;
+          // Arrêté avec le tour, le résumé n'a pas échoué : le tour finit annulé, juste en dessous.
+          if (!args.signal?.aborted) {
+            console.warn(
+              '[chat-engine] compaction skipped:',
+              e instanceof Error ? e.message : e
+            );
+          }
         }
+        // « Arrêter » (ou le délai d'inactivité, ou la fermeture du projet) pendant le résumé : le
+        // tour finit annulé, comme arrêté pendant la réponse, sans demander au modèle une réponse
+        // que plus personne n'attend.
+        if (args.signal?.aborted) {
+          finalFinishReason = 'cancelled';
+          generationMs = Date.now() - generationStart;
+          emitExplanation();
+          safeStatus({ phase: 'done' });
+          hooks.onDone?.({ delta: '', done: true, finishReason: 'cancelled' });
+          logTurnDone();
+          return;
+        }
+        // La phase qui suit se redit : après un passage d'outils, « generating » ne repartait
+        // pas, et le bandeau restait sur « Compression du contexte… » pendant toute la réponse.
+        firstFrameSeen = false;
+        thinkingSeen = false;
       }
 
       for await (const chunk of args.provider.chat(messages, {
