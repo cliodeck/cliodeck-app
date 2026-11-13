@@ -17,13 +17,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatChunk, EmbeddingProvider, LLMProvider } from '../base.js';
 import { AnthropicProvider } from '../anthropic.js';
-import { EmbeddedEmbeddingProvider } from '../embedded.js';
+import { EmbeddedEmbeddingProvider, EmbeddedProvider } from '../embedded.js';
 import { GeminiEmbeddingProvider, GeminiProvider } from '../gemini.js';
 import { MistralEmbeddingProvider, MistralProvider } from '../mistral.js';
 import { OllamaEmbeddingProvider, OllamaProvider } from '../ollama.js';
 import { OpenAICompatibleEmbeddingProvider, OpenAICompatibleProvider } from '../openai-compatible.js';
-import { instrumentEmbedding } from '../instrument.js';
-import { FallbackEmbeddingProvider, resolveEmbeddingProvider } from '../fallback.js';
+import { instrumentEmbedding, instrumentLLM } from '../instrument.js';
+import { FallbackEmbeddingProvider, FallbackLLMProvider, resolveEmbeddingProvider } from '../fallback.js';
 import { setInferenceSink } from '../../../usage-journal/context.js';
 import type { RecordInferenceInput } from '../../../usage-journal/types.js';
 import type { EmbeddedLLMClient } from '../../EmbeddedLLMClient.js';
@@ -185,6 +185,16 @@ describe.each(embeddingProviders)('$label — embed abandonné (témoin : le sig
 
 const MODEL_PATH = '/tmp/does-not-need-to-exist.gguf';
 
+/** L'issue d'une promesse, lue sans l'attendre : `pending` tant qu'elle n'est pas réglée. */
+function settle(promise: Promise<unknown>): () => unknown {
+  let outcome: unknown = 'pending';
+  promise.then(
+    (value) => (outcome = { value }),
+    (error: unknown) => (outcome = { error })
+  );
+  return () => outcome;
+}
+
 /** Un moteur embarqué dont chaque passe attend `finish()` : une passe llama.cpp ne s'interrompt pas. */
 function heldEmbeddingClient(): { client: EmbeddedLLMClient; passes: () => number; entered: Promise<void>; finish: () => void } {
   let passes = 0;
@@ -252,16 +262,6 @@ describe('repli Ollama → moteur embarqué (« auto ») — abandonné pendant 
     return { fallback, held };
   }
 
-  /** L'issue d'une promesse, lue sans l'attendre : `pending` tant qu'elle n'est pas réglée. */
-  function settle(promise: Promise<unknown>): () => unknown {
-    let outcome: unknown = 'pending';
-    promise.then(
-      (value) => (outcome = { value }),
-      (error: unknown) => (outcome = { error })
-    );
-    return () => outcome;
-  }
-
   it.each([
     {
       cas: 'embed',
@@ -298,6 +298,94 @@ describe('repli Ollama → moteur embarqué (« auto ») — abandonné pendant 
     await vi.waitFor(() => expect(outcome()).toMatchObject({ error: { name: 'AbortError' } }), { timeout: 2_000 });
     expect(seen).toEqual([]);
     expect(held.passes()).toBe(0);
+  });
+});
+
+/** Un moteur de génération embarqué qui compte ce qu'on lui demande : chargement et génération. */
+function countingChatClient(): { client: EmbeddedLLMClient; calls: () => number } {
+  let calls = 0;
+  const client = {
+    async initialize() {
+      calls += 1;
+      return true;
+    },
+    async *generateResponseStream() {
+      calls += 1;
+      yield 'réponse du moteur embarqué';
+    },
+    async dispose() {},
+  };
+  return { client: client as unknown as EmbeddedLLMClient, calls: () => calls };
+}
+
+/**
+ * Mode « auto » de la génération (`generationProvider: 'auto'` avec un modèle embarqué installé) :
+ * Ollama d'abord, le moteur embarqué en repli (`FallbackLLMProvider`). Avant chaque `chat`, le repli
+ * sonde Ollama (`/api/tags`), et ce sondage n'a pas de signal au contrat. Ollama dont le serveur ne
+ * répond plus, « Arrêter » n'avait aucun terminal avant la réponse du sondage, jusqu'à 300 s : le
+ * tour restait au registre des opérations, et la fermeture du projet attendait sa borne de 30 s.
+ * Le flux finit désormais en `cancelled` dès l'abandon ; le sondage, lui, va à son terme.
+ */
+describe('repli Ollama → moteur embarqué de la génération (« auto ») — abandonné pendant le sondage d’Ollama', () => {
+  function autoLLM(): { llm: LLMProvider; engine: ReturnType<typeof countingChatClient> } {
+    const engine = countingChatClient();
+    const fallback = new FallbackLLMProvider(
+      new OllamaProvider({ model: 'qwen3:8b', baseUrl: 'http://mock.ollama' }),
+      new EmbeddedProvider({ modelPath: MODEL_PATH, client: engine.client })
+    );
+    // Comme dans l'app : le repli arrive enveloppé par le décorateur du journal d'usage.
+    return { llm: instrumentLLM(fallback, 'ollama', 'http://mock.ollama'), engine };
+  }
+
+  it('chat : abort() pendant le sondage finit en cancelled sans attendre sa réponse, et rien n’est demandé au modèle', async () => {
+    const seen = silentFetch();
+    const { llm, engine } = autoLLM();
+    const controller = new AbortController();
+
+    const outcome = settle(terminalOf(llm.chat(QUESTION, { signal: controller.signal })));
+    await vi.waitFor(() => expect(seen.map((r) => r.url)).toEqual(['http://mock.ollama/api/tags']));
+    controller.abort();
+
+    await vi.waitFor(
+      () => expect(outcome()).toMatchObject({ value: { done: true, finishReason: 'cancelled' } }),
+      { timeout: 2_000 }
+    );
+    expect(seen.map((r) => r.url)).toEqual(['http://mock.ollama/api/tags']);
+    expect(engine.calls()).toBe(0);
+  });
+
+  it('complete : abort() pendant le sondage rejette en cancelled, pas en panne', async () => {
+    const seen = silentFetch();
+    const { llm, engine } = autoLLM();
+    const controller = new AbortController();
+
+    const outcome = settle(llm.complete('Résume ce texte.', { signal: controller.signal }));
+    await vi.waitFor(() => expect(seen.map((r) => r.url)).toEqual(['http://mock.ollama/api/tags']));
+    controller.abort();
+
+    await vi.waitFor(
+      () =>
+        expect(outcome()).toMatchObject({ error: { name: 'ProviderCallError', finishReason: 'cancelled' } }),
+      { timeout: 2_000 }
+    );
+    expect(seen.map((r) => r.url)).toEqual(['http://mock.ollama/api/tags']);
+    expect(engine.calls()).toBe(0);
+  });
+
+  it('signal déjà abandonné : terminal cancelled, sans sondage ni demande au modèle', async () => {
+    const seen = silentFetch();
+    const { llm, engine } = autoLLM();
+    const controller = new AbortController();
+    controller.abort();
+
+    const outcome = settle(terminalOf(llm.chat(QUESTION, { signal: controller.signal })));
+
+    await vi.waitFor(
+      () => expect(outcome()).toMatchObject({ value: { done: true, finishReason: 'cancelled' } }),
+      { timeout: 2_000 }
+    );
+    expect(seen).toEqual([]);
+    expect(engine.calls()).toBe(0);
   });
 });
 

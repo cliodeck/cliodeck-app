@@ -25,6 +25,7 @@ import type {
   ProviderCapabilities,
   ProviderStatus,
 } from './base.js';
+import { collectCompletion } from './collect.js';
 
 /** Durée de validité d'un sondage du primaire. */
 const PROBE_TTL_MS = 15_000;
@@ -145,17 +146,37 @@ export class FallbackLLMProvider implements LLMProvider {
     return chosen.healthCheck();
   }
 
+  /**
+   * Abandonné pendant le sondage du primaire (« Arrêter », fermeture du projet) : terminal
+   * `cancelled` tout de suite, sans attendre la réponse du sondage ni rien demander au modèle (J9).
+   * `pick` ne rejette que sur l'abandon : un sondage qui échoue désigne le repli.
+   */
   async *chat(
     messages: ChatMessage[],
     opts: ChatOptions = {}
   ): AsyncIterable<ChatChunk> {
-    const chosen = await this.picker.pick();
+    let chosen: LLMProvider;
+    try {
+      chosen = await this.picker.pick(opts.signal);
+    } catch (error) {
+      if (!opts.signal?.aborted) throw error;
+      yield { delta: '', done: true, finishReason: 'cancelled' };
+      return;
+    }
     yield* chosen.chat(messages, opts);
   }
 
+  /**
+   * Comme le `complete()` de chaque fournisseur : le `chat()` ci-dessus, consommé par
+   * `collectCompletion`. Abandonné pendant le sondage, il lève donc `ProviderCallError` en
+   * `cancelled`, pas en panne.
+   */
   async complete(prompt: string, opts: CompleteOptions = {}): Promise<string> {
-    const chosen = await this.picker.pick();
-    return chosen.complete(prompt, opts);
+    const { text } = await collectCompletion(
+      this,
+      this.chat([{ role: 'user', content: prompt }], opts)
+    );
+    return text;
   }
 
   async dispose(): Promise<void> {

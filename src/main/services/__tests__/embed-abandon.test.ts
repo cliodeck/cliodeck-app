@@ -22,7 +22,7 @@ import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-gu
 import { makeTpy } from '../../../../backend/integrations/tropy/__tests__/helpers/make-tpy';
 import type { PDFDocument } from '../../../../backend/types/pdf-document';
 import type { RAGExplanation } from '../../../../backend/types/chat-source';
-import type { EmbeddingProvider } from '../../../../backend/core/llm/providers/base';
+import type { EmbeddingProvider, LLMProvider } from '../../../../backend/core/llm/providers/base';
 
 vi.mock('electron', () => ({
   app: { commandLine: { hasSwitch: () => false }, getPath: () => os.tmpdir() },
@@ -46,6 +46,8 @@ const provider = vi.hoisted(() => ({
   prompts: [] as Array<Array<{ role: string; content: string }>>,
   /** Ce que le registre rend à la place du fournisseur local : un repli du mode « auto », par exemple. */
   wrapEmbedding: null as ((local: EmbeddingProvider) => EmbeddingProvider) | null,
+  /** Ce que le registre rend à la place du modèle de génération : un repli du mode « auto », par exemple. */
+  wrapLLM: null as ((local: LLMProvider) => LLMProvider) | null,
 }));
 
 const DIMENSION = 768;
@@ -66,18 +68,21 @@ vi.mock('../../../../backend/core/llm/providers/cliodeck-config-adapter.js', asy
   return {
     ...original,
     createRegistryFromClioDeckConfig: () => ({
-      getLLM: () => ({
-        id: 'fake',
-        name: 'Fake',
-        model: 'fake-model',
-        capabilities: { chat: true, streaming: true, tools: false },
-        getStatus: () => ({ state: 'ready' }),
-        chat: async function* (messages: Array<{ role: string; content: string }>) {
-          provider.prompts.push(messages);
-          yield { delta: 'réponse', done: false };
-          yield { delta: '', done: true, finishReason: 'stop' };
-        },
-      }),
+      getLLM: () => {
+        const local = {
+          id: 'fake',
+          name: 'Fake',
+          model: 'fake-model',
+          capabilities: { chat: true, streaming: true, tools: false },
+          getStatus: () => ({ state: 'ready' }),
+          chat: async function* (messages: Array<{ role: string; content: string }>) {
+            provider.prompts.push(messages);
+            yield { delta: 'réponse', done: false };
+            yield { delta: '', done: true, finishReason: 'stop' };
+          },
+        } as unknown as LLMProvider;
+        return provider.wrapLLM ? provider.wrapLLM(local) : local;
+      },
       getEmbedding: () => {
         const local = {
         id: 'local-test',
@@ -120,7 +125,9 @@ const { manuscriptIndexService } = await import('../manuscript-index-service.js'
 const { readingNotesIndexService } = await import('../reading-notes-index-service.js');
 const { EnhancedVectorStore } = await import('../../../../backend/core/vector-store/EnhancedVectorStore.js');
 const { VectorStore } = await import('../../../../backend/core/vector-store/VectorStore.js');
-const { FallbackEmbeddingProvider } = await import('../../../../backend/core/llm/providers/fallback.js');
+const { FallbackEmbeddingProvider, FallbackLLMProvider } = await import(
+  '../../../../backend/core/llm/providers/fallback.js'
+);
 
 const ARCHIVE_NOTE =
   'Rapport du commissaire central au préfet sur la réunion tenue salle Colbert le 18 mars 1907. ' +
@@ -261,6 +268,7 @@ beforeEach(async () => {
   provider.held.length = 0;
   provider.prompts.length = 0;
   provider.wrapEmbedding = null;
+  provider.wrapLLM = null;
   turns = [];
   heldProbes = [];
   await tropyService.init(projectDir);
@@ -389,5 +397,43 @@ describe.skipIf(!sqliteAvailable)('« Arrêter » pendant le sondage d’Ollama,
     expect(explanations(sent).map((e) => e.search.retrievalStatus)).not.toContain('failed');
     expect(provider.prompts).toHaveLength(0);
     await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+  });
+});
+
+/**
+ * Mode « auto » de la génération : Ollama d'abord, le moteur embarqué en repli (`FallbackLLMProvider`).
+ * L'embedding de la question revient ; avant la génération, le repli sonde Ollama (`healthCheck`, sans
+ * signal au contrat). Ollama dont le serveur ne répond plus, « Arrêter » n'avait aucun terminal avant
+ * la réponse du sondage : le tour restait au registre des opérations, et une fermeture du projet
+ * l'attendait jusqu'à sa borne de 30 s (relevé à la revue de J9).
+ */
+describe.skipIf(!sqliteAvailable)('« Arrêter » pendant le sondage d’Ollama de la génération, en mode « auto » (J9)', () => {
+  it('le tour finit annulé sans attendre la réponse du sondage, et quitte le registre des opérations', async () => {
+    const probes: Array<() => void> = [];
+    provider.wrapLLM = (local) =>
+      new FallbackLLMProvider(
+        {
+          ...local,
+          id: 'ollama-sans-reponse',
+          healthCheck: () =>
+            new Promise((resolve) => {
+              const release = (): void => resolve({ state: 'ready' });
+              probes.push(release);
+              heldProbes.push(release);
+            }),
+        },
+        local
+      );
+    await openBibliography();
+    const { sessionId, sent } = startTurn(nextMarker(), 'secondary');
+    await vi.waitFor(() => expect(probes.length).toBeGreaterThan(0), WAIT);
+
+    expect(fusionChatService.cancel(sessionId)).toBe(true);
+
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), ABORT_WAIT);
+    expect(terminal(sent)).toMatchObject({ chunk: { done: true, finishReason: 'cancelled' } });
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(provider.prompts).toHaveLength(0);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), ABORT_WAIT);
   });
 });
