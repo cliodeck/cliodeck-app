@@ -94,6 +94,18 @@ function errorMessage(error: { code: string; message: string }): string {
   // Échec côté fournisseur : la cause vient du main, on l'habille. Chaque fournisseur préfixe ses
   // codes de son nom (L09-7).
   if (/^(ollama_|anthropic_|openai_compat_|gemini_|mistral_|embedded_|provider_|stream_)/.test(error.code)) {
+    // Les causes que ClioDeck écrit lui-même, faute de message de l'API, se traduisent par leur
+    // code : insérées telles quelles, elles restaient en français dans une interface en anglais.
+    // Un flux fermé sans signal de fin (un fournisseur, ou `chat-engine` pour un tour d'outils).
+    if (/(^|_)stream_incomplete$/.test(error.code)) return i18n.t('chat.streamIncomplete');
+    // Un code `_http_2xx` ne naît que d'une réponse acceptée mais sans corps : un refus porte son
+    // statut d'échec.
+    if (/_http_2\d\d$/.test(error.code)) return i18n.t('chat.emptyResponse');
+    // Aucune cause : événement d'erreur vide, ou fournisseur qui n'a rien rangé dans son état
+    // (`provider_error`, le repli de `chat-engine`).
+    if (error.code === 'provider_error' || !error.message.trim()) {
+      return i18n.t('chat.providerNoCause');
+    }
     return i18n.t('chat.providerError', { message: error.message });
   }
   return error.message;

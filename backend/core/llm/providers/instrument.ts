@@ -109,25 +109,31 @@ class InstrumentedLLM implements LLMProvider {
     // Les providers implémentent complete() en consommant leur propre chat() et
     // jettent l'usage ; on reproduit ce comportement mais on capture les tokens.
     // `collectCompletion` lève sur un terminal `error` ou `cancelled`, comme leurs complete().
+    // Le texte et l'usage se comptent au passage, avant lui : quand il lève, ce qui a déjà été
+    // produit (et facturé) reste au journal, comme pour un chat() coupé au même endroit.
     const start = Date.now();
     const workspaceRoot = originWorkspaceRoot();
     const promptChars = prompt.length;
-    let out = '';
+    let completionChars = 0;
     let usage: ChatChunk['usage'];
     let errored = false;
+    const stream = this.inner.chat([{ role: 'user', content: prompt }], opts);
+    async function* tally(): AsyncIterable<ChatChunk> {
+      for await (const chunk of stream) {
+        completionChars += chunk.delta.length;
+        if (chunk.usage) usage = chunk.usage;
+        yield chunk;
+      }
+    }
     try {
-      ({ text: out, usage } = await collectCompletion(
-        this.inner,
-        this.inner.chat([{ role: 'user', content: prompt }], opts)
-      ));
+      return (await collectCompletion(this.inner, tally())).text;
     } catch (err) {
       // Un appel annulé n'est pas une panne : il reste « ok », comme un chat() annulé.
       errored = !(err instanceof ProviderCallError && err.finishReason === 'cancelled');
       throw err;
     } finally {
-      this.emitCompletion(start, workspaceRoot, promptChars, out.length, usage, errored);
+      this.emitCompletion(start, workspaceRoot, promptChars, completionChars, usage, errored);
     }
-    return out;
   }
 
   private emitCompletion(

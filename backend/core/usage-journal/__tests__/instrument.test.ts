@@ -209,6 +209,35 @@ describe('usage-journal provider instrumentation', () => {
     expect(events[0]).toMatchObject({ kind: 'completion', status: 'ok' });
   });
 
+  // Une synthèse coupée chez un fournisseur facturé a déjà produit du texte et annoncé son usage :
+  // le journal le garde, comme pour un chat() coupé au même endroit (revue de L09-7).
+  it('complete() tombé après du texte garde au journal le texte produit et l’usage annoncé', async () => {
+    const chunks: ChatChunk[] = [
+      { delta: 'x'.repeat(4000), usage: { promptTokens: 1200 } },
+      { delta: '', done: true, finishReason: 'error' },
+    ];
+    await expect(instrumentLLM(new FakeLLM(chunks), 'anthropic').complete('p'.repeat(40))).rejects
+      .toMatchObject({ name: 'ProviderCallError' });
+    for await (const _ of instrumentLLM(new FakeLLM(chunks), 'anthropic').chat([
+      { role: 'user', content: 'p'.repeat(40) },
+    ])) {
+      // consommé jusqu'au bout
+    }
+
+    expect(events).toHaveLength(2);
+    const [viaComplete, viaChat] = events;
+    expect(viaComplete).toMatchObject({
+      status: 'error',
+      promptTokens: 1200,
+      completionTokens: 1000,
+      tokensEstimated: true,
+    });
+    expect(viaComplete).toMatchObject({
+      promptTokens: viaChat.promptTokens,
+      completionTokens: viaChat.completionTokens,
+    });
+  });
+
   it('un repli enveloppé se résout à travers le décorateur, sans quitter le journal', async () => {
     const named = (model: string, up: boolean): EmbeddingProvider => {
       const base = new FakeEmbedding();

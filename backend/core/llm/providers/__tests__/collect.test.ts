@@ -55,6 +55,23 @@ describe('collectCompletion', () => {
     ).rejects.toMatchObject({ code: 'provider_error', finishReason: 'error' });
   });
 
+  // Une erreur de flux sans détail laisse un message vide dans l'état (revue de L09-7) : un appelant
+  // de complete() reçoit quand même une cause lisible.
+  it('un message vide dans lastError vaut une cause absente', async () => {
+    await expect(
+      collectCompletion(
+        status({
+          state: 'degraded',
+          lastError: { code: 'anthropic_stream_error', message: '', at: 'now' },
+        }),
+        stream([{ delta: '', done: true, finishReason: 'error' }])
+      )
+    ).rejects.toMatchObject({
+      code: 'anthropic_stream_error',
+      message: 'Le fournisseur a interrompu la réponse sans donner de cause.',
+    });
+  });
+
   it('un terminal cancelled lève, sans prendre la cause d’une panne antérieure', async () => {
     await expect(
       collectCompletion(

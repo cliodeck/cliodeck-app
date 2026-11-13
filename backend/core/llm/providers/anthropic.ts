@@ -318,7 +318,8 @@ export class AnthropicProvider implements LLMProvider {
                 state: 'degraded',
                 lastError: {
                   code: 'anthropic_stream_error',
-                  message: cause || 'Erreur sans détail en cours de flux',
+                  // Vide si l'API n'a rien dit : le renderer le dit dans la langue de l'interface.
+                  message: cause,
                   at: now(),
                 },
               };

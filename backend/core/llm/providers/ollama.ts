@@ -359,7 +359,8 @@ export class OllamaProvider implements LLMProvider {
                 state: 'degraded',
                 lastError: {
                   code: 'ollama_stream_error',
-                  message: obj.error || 'Erreur sans détail en cours de flux',
+                  // Vide si Ollama n'a rien dit : le renderer le dit dans la langue de l'interface.
+                  message: obj.error,
                   at: now(),
                 },
               };

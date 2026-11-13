@@ -344,7 +344,8 @@ export class GeminiProvider implements LLMProvider {
                 state: 'degraded',
                 lastError: {
                   code: 'gemini_stream_error',
-                  message: obj.error.message || obj.error.status || 'Erreur sans détail en cours de flux',
+                  // Vide si l'API n'a rien dit : le renderer le dit dans la langue de l'interface.
+                  message: obj.error.message || obj.error.status || '',
                   at: now(),
                 },
               };

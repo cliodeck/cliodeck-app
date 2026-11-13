@@ -344,3 +344,33 @@ describe('readProviderError — ce que le chat affiche d’un refus', () => {
     expect((await untilTerminal(p2)).status.lastError?.message).toBe('HTTP 503');
   });
 });
+
+// Revue de L09-7 : le message d'une erreur de flux sans détail était un repli en français, écrit
+// par le main, que le chat affichait tel quel dans toutes les langues. Il reste vide : le renderer
+// dit lui-même, dans la langue de l'interface, que la cause manque.
+describe('Erreur de flux sans détail : aucun texte du main, la cause reste vide', () => {
+  it.each([
+    [
+      'ollama',
+      () => new OllamaProvider({ model: 'qwen3:8b', baseUrl: 'http://mock.ollama' }),
+      `${JSON.stringify({ error: '' })}\n`,
+    ],
+    [
+      'anthropic',
+      () =>
+        new AnthropicProvider({ apiKey: 'sk-test', model: 'claude-sonnet-4-6', baseUrl: 'http://mock.anthropic/v1' }),
+      sse({ type: 'error', error: {} }, 'error'),
+    ],
+    [
+      'gemini',
+      () => new GeminiProvider({ apiKey: 'test-key', model: 'gemini-2.0-flash', baseUrl: 'http://mock.gemini/v1beta' }),
+      sse({ error: { code: 500 } }),
+    ],
+  ])('%s', async (label, build, streamError) => {
+    serve(() => body(streamError));
+    const r = await untilTerminal(build());
+
+    expect(r.terminal).toMatchObject({ done: true, finishReason: 'error' });
+    expect(r.status.lastError).toMatchObject({ code: `${label}_stream_error`, message: '' });
+  });
+});

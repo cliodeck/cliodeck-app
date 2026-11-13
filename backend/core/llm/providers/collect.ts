@@ -43,9 +43,10 @@ export async function collectCompletion(
     }
     if (chunk.finishReason === 'error') {
       const cause = provider.getStatus().lastError;
+      // Un message vide (erreur de flux sans détail) vaut une cause absente.
       throw new ProviderCallError(
         cause?.code ?? 'provider_error',
-        cause?.message ?? 'Le fournisseur a interrompu la réponse sans donner de cause.',
+        cause?.message || 'Le fournisseur a interrompu la réponse sans donner de cause.',
         'error'
       );
     }
