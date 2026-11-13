@@ -309,7 +309,7 @@ function countingChatClient(): { client: EmbeddedLLMClient; calls: () => number 
       calls += 1;
       return true;
     },
-    async *generateResponseStream() {
+    async *generateChat() {
       calls += 1;
       yield 'réponse du moteur embarqué';
     },

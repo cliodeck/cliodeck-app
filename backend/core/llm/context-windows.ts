@@ -118,6 +118,34 @@ export function getContextWindow(
 }
 
 /**
+ * Fenêtre du contexte llama.cpp que crée le moteur embarqué (`EmbeddedLLMClient`), quel que soit
+ * le modèle : les Qwen 2.5 en annoncent 32 768, mais le contexte réellement alloué fait 4 096
+ * jetons (décision Q36, vérifiée sur un Mac Intel sous macOS 12). Une seule source pour le client,
+ * le compacteur et le plafond d'extraits (S05-1-16) : le compacteur supposait 32 768 et ne protégeait
+ * jamais la fenêtre réelle.
+ */
+export const EMBEDDED_CONTEXT_SIZE = 4096;
+
+/**
+ * Jetons d'entrée (consignes, extraits et question) qu'un appel au moteur embarqué peut envoyer :
+ * la fenêtre, moins un dixième pour le gabarit de conversation et la marge de décalage de
+ * llama.cpp, moins la réponse (`maxTokens`, un quart de la fenêtre par défaut). Au-delà,
+ * node-llama-cpp coupe la fin de la question ou lève « Failed to compress chat history ».
+ */
+export function embeddedInputBudget(window: number, maxTokens: number = Math.floor(window / 4)): number {
+  return window - Math.floor(window / 10) - maxTokens;
+}
+
+/**
+ * Nombre d'extraits qui tiennent dans le budget d'entrée d'une fenêtre : 650 jetons pour les
+ * consignes du mode et la question, 480 par extrait de 1 500 caractères (3,35 caractères par
+ * jeton, mesuré en français). 4 extraits à 4 096, 9 à 8 192 ; jamais moins d'un.
+ */
+export function maxExtractsForWindow(window: number): number {
+  return Math.max(1, Math.floor((embeddedInputBudget(window) - 650) / 480));
+}
+
+/**
  * Bornes de sécurité pour `num_ctx` (fenêtre demandée à Ollama par appel).
  *
  * Elles ne décrivent PAS ce qu'un modèle sait faire — c'est la longueur

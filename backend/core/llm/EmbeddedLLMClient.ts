@@ -5,7 +5,7 @@
  * Supporte la génération de texte ET les embeddings via des modèles GGUF séparés.
  */
 
-import type { SearchResult } from '../../types/pdf-document.js';
+import { EMBEDDED_CONTEXT_SIZE, embeddedInputBudget } from './context-windows.js';
 import { forgetEmbeddedClient, isEmbeddedEngineClosing, trackEmbeddedClient } from './embedded-engine-pool.js';
 
 // Types pour node-llama-cpp (évite les problèmes d'import ESM)
@@ -23,6 +23,8 @@ interface LlamaModelInstance {
   /** Fenêtre du modèle, en jetons (512 pour Nomic Embed v2). */
   trainContextSize?: number;
   tokenize?: (text: string) => ArrayLike<unknown>;
+  /** L'inverse de `tokenize` : sert à couper des consignes au jeton près. */
+  detokenize?: (tokens: readonly unknown[]) => string;
   /** Libère le GGUF chargé ; idempotent. Jamais `llama.dispose()`, qui libère le backend du processus. */
   dispose: () => Promise<void>;
 }
@@ -37,7 +39,14 @@ interface LlamaEmbeddingContextInstance {
   dispose: () => Promise<void>;
 }
 
+/** Un tour de l'historique, tel que l'attend `LlamaChatSession.setChatHistory`. */
+type LlamaChatHistoryItem =
+  | { type: 'system'; text: string }
+  | { type: 'user'; text: string }
+  | { type: 'model'; response: string[] };
+
 interface LlamaChatSessionInstance {
+  setChatHistory: (history: LlamaChatHistoryItem[]) => void;
   prompt: (
     text: string,
     options?: {
@@ -47,6 +56,87 @@ interface LlamaChatSessionInstance {
       onTextChunk?: (chunk: string) => void;
     }
   ) => Promise<string>;
+  /** `disposeSequence: false` : la séquence du contexte sert au tour suivant. */
+  dispose: (options?: { disposeSequence?: boolean }) => void;
+}
+
+/** Une demande de génération : consignes, tours précédents et question, chacun à sa place. */
+export interface EmbeddedChatRequest {
+  /** Les messages système du tour, réunis : consignes du mode, indications, extraits. */
+  system?: string;
+  history: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** La question, brute : jamais coupée. */
+  prompt: string;
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
+  /**
+   * Le signal du tour. Interrompre llama.cpp en cours de génération est l'objet de L09-10 : il
+   * n'atteint pas encore `session.prompt`.
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * La question ne tient pas dans la fenêtre du modèle embarqué, même sans consigne. Elle n'est jamais
+ * coupée : le moteur couperait sa fin, ou lèverait « Failed to compress chat history ». Le code
+ * remonte au renderer, qui le traduit (`chat.embeddedPromptTooLong`) ; le message reste au journal.
+ */
+export class EmbeddedPromptTooLongError extends Error {
+  readonly code = 'embedded_prompt_too_long';
+
+  constructor(
+    readonly promptTokens: number,
+    readonly budget: number
+  ) {
+    super(
+      `The question needs ${promptTokens} tokens, more than the ${budget} that the embedded model's ` +
+        `${EMBEDDED_CONTEXT_SIZE}-token context window leaves for the input.`
+    );
+    this.name = 'EmbeddedPromptTooLongError';
+  }
+}
+
+/** Ce que `fitSystemToWindow` demande du modèle : compter, et recoller des jetons. */
+export interface EmbeddedTokenizer {
+  tokenize: (text: string) => ArrayLike<unknown>;
+  detokenize: (tokens: readonly unknown[]) => string;
+}
+
+/** Posée à la place de la fin des consignes coupées. */
+const CUT_MARK = '\n[…]';
+
+/**
+ * Les consignes qui tiennent dans `budget` jetons avec la question. La question n'est jamais
+ * coupée ; c'est la fin des consignes qui part, coupée au jeton et marquée « […] » : les consignes du
+ * mode et les indications sont en tête, les extraits les moins pertinents et les blocs de l'auteur en
+ * fin. Sans cette coupe, llama.cpp, qui ne coupe jamais la première consigne système, lève « Failed
+ * to compress chat history » (mesuré).
+ *
+ * Lève `EmbeddedPromptTooLongError` quand la question seule dépasse le budget.
+ */
+export function fitSystemToWindow(
+  system: string,
+  question: string,
+  budget: number,
+  tokenizer: EmbeddedTokenizer
+): string {
+  const questionTokens = tokenizer.tokenize(question).length;
+  if (questionTokens > budget) throw new EmbeddedPromptTooLongError(questionTokens, budget);
+  const room = budget - questionTokens;
+  const tokens = Array.from(tokenizer.tokenize(system));
+  if (tokens.length <= room) return system;
+  // Une tête recollée se retokenise parfois en quelques jetons de plus : on recule d'autant.
+  let keep = room - tokenizer.tokenize(CUT_MARK).length;
+  while (keep > 0) {
+    // Un jeton coupé au milieu d'un caractère se recolle en caractère de remplacement.
+    const head = tokenizer.detokenize(tokens.slice(0, keep)).replace(/\uFFFD+$/, '').trimEnd();
+    const cut = head + CUT_MARK;
+    const overshoot = tokenizer.tokenize(cut).length - room;
+    if (overshoot <= 0) return cut;
+    keep -= overshoot;
+  }
+  return '';
 }
 
 export interface EmbeddedModelInfo {
@@ -147,6 +237,21 @@ function splitNearMiddle(text: string): [string, string] | null {
   return [text.slice(0, middle), text.slice(middle)];
 }
 
+/**
+ * La question telle que llama.cpp la verra : les questions restées sans réponse en fin d'historique
+ * la précèdent, réunies par une ligne vide, comme `LlamaChatSession.prompt()` les réunirait. C'est
+ * sur ce texte que se mesure la fenêtre, et lui qui n'est jamais coupé.
+ */
+function closeOnQuestion(
+  history: EmbeddedChatRequest['history'],
+  prompt: string
+): { history: EmbeddedChatRequest['history']; question: string } {
+  let end = history.length;
+  while (end > 0 && history[end - 1].role === 'user') end--;
+  const pending = history.slice(end).map((turn) => turn.content);
+  return { history: history.slice(0, end), question: [...pending, prompt].join('\n\n') };
+}
+
 /** Ce qu'un client tient : chaque modèle et son contexte. */
 interface HeldModels {
   embeddingContext: LlamaEmbeddingContextInstance | null;
@@ -227,10 +332,10 @@ export class EmbeddedLLMClient {
         modelPath: modelPath,
       });
 
-      // Contexte optimisé pour CPU - utiliser une taille raisonnable
-      // 4096 tokens est un bon compromis entre capacité et performance
+      // Contexte optimisé pour CPU : 4 096 jetons, compromis entre capacité et performance (Q36).
+      // Le compacteur et le plafond d'extraits lisent la même constante (S05-1-16).
       this.context = await this.model.createContext({
-        contextSize: 4096,
+        contextSize: EMBEDDED_CONTEXT_SIZE,
         batchSize: 512,
       });
 
@@ -475,73 +580,20 @@ export class EmbeddedLLMClient {
   // MARK: - Text generation
 
   /**
-   * Construit le prompt pour Qwen au format ChatML
-   * Qwen utilise le format <|im_start|> / <|im_end|>
+   * Génère une réponse : les consignes en vrai rôle système, les tours précédents en historique
+   * structuré, la question brute (S05-1-25). Le client fabriquait une chaîne ChatML complète et la
+   * passait comme texte de l'utilisateur à `LlamaChatSession.prompt()`, qui applique déjà son propre
+   * gabarit : les balises restaient du texte, et le vrai rôle système était le prompt anglais par
+   * défaut de node-llama-cpp. La fenêtre dépassée, c'est la fin du tout qui partait : la question.
+   *
+   * Les consignes sont coupées à la fenêtre (`fitSystemToWindow`) ; la question ne l'est jamais. Les
+   * tours anciens qui ne tiennent pas sont effacés par la stratégie de décalage de llama.cpp, qui
+   * garde la première consigne système.
+   *
+   * Lève avant le premier morceau quand le modèle n'est pas chargé, quand une génération est déjà en
+   * cours, ou quand la question seule dépasse la fenêtre (`EmbeddedPromptTooLongError`).
    */
-  private buildPromptWithSources(
-    userQuery: string,
-    sources: SearchResult[],
-    projectContext?: string,
-    systemPrompt?: string
-  ): string {
-    // System prompt par défaut adapté au RAG académique
-    const defaultSystemPrompt =
-      systemPrompt ||
-      `Tu es un assistant académique spécialisé dans l'analyse de documents de recherche.
-Tu réponds de manière précise et avec des citations à l'appui, en te basant uniquement sur les sources fournies.
-Cite toujours tes sources avec le format (Auteur, Année, p. X).
-Si les sources ne contiennent pas l'information demandée, dis-le clairement.
-
-IMPORTANT concernant les scores de pertinence:
-- Chaque source est accompagnée d'un score de pertinence (0-100%).
-- Priorise les sources avec une pertinence élevée (>50%) dans ta réponse.
-- Sois prudent avec les sources de faible pertinence (<30%) - elles peuvent être moins fiables pour la question posée.
-- Les sources sont triées par pertinence décroissante.`;
-
-    let contextSection = '';
-
-    // Ajouter le contexte du projet si disponible
-    if (projectContext) {
-      contextSection += `\n\nContexte du projet:\n${projectContext}`;
-    }
-
-    // Ajouter les sources documentaires triées par pertinence
-    // Issue #15: Ne plus afficher les scores de similarité au LLM
-    if (sources.length > 0) {
-      contextSection += '\n\nSources documentaires:';
-
-      // Trier les sources par pertinence décroissante
-      const sortedSources = [...sources].sort((a, b) => b.similarity - a.similarity);
-
-      sortedSources.forEach((source, idx) => {
-        const doc = source.document;
-        const ref = doc.author
-          ? `${doc.author}${doc.year ? ` (${doc.year})` : ''}`
-          : doc.title;
-        contextSection += `\n\n[Source ${idx + 1} - ${ref}, p. ${source.chunk.pageNumber}]\n${source.chunk.content}`;
-      });
-    }
-
-    // Format ChatML pour Qwen
-    return `<|im_start|>system
-${defaultSystemPrompt}${contextSection}
-<|im_end|>
-<|im_start|>user
-${userQuery}
-<|im_end|>
-<|im_start|>assistant
-`;
-  }
-
-  /**
-   * Génère une réponse avec sources (streaming)
-   */
-  async *generateResponseStreamWithSources(
-    prompt: string,
-    sources: SearchResult[],
-    projectContext?: string,
-    systemPrompt?: string
-  ): AsyncGenerator<string> {
+  async *generateChat(req: EmbeddedChatRequest): AsyncGenerator<string> {
     if (!this.context || !this.model || !this.sequence) {
       throw new Error('Embedded LLM not initialized. Call initialize() first.');
     }
@@ -553,20 +605,32 @@ ${userQuery}
 
     this.isGenerating = true;
 
-    const fullPrompt = this.buildPromptWithSources(
-      prompt,
-      sources,
-      projectContext,
-      systemPrompt
-    );
-
-    console.log('🤖 [EMBEDDED] Generating response...', {
-      promptLength: fullPrompt.length,
-      sourcesCount: sources.length,
-      modelId: this.modelId,
-    });
-
     try {
+      const model = this.model;
+      const maxTokens = req.maxTokens ?? Math.floor(EMBEDDED_CONTEXT_SIZE / 4);
+      const budget = embeddedInputBudget(EMBEDDED_CONTEXT_SIZE, maxTokens);
+      const { history, question } = closeOnQuestion(req.history, req.prompt);
+      // Fenêtre ou tokeniseur inconnus : on laisse le moteur trancher, comme pour les embeddings.
+      // Le modèle lui-même sert de tokeniseur : ses méthodes gardent leur `this`.
+      const tokenizer =
+        model.tokenize && model.detokenize ? (model as LlamaModelInstance & EmbeddedTokenizer) : null;
+      const system = tokenizer
+        ? fitSystemToWindow(req.system ?? '', question, budget, tokenizer)
+        : (req.system ?? '');
+      if (req.system && system.length < req.system.length) {
+        console.warn(
+          `⚠️ [EMBEDDED] Consignes coupées pour tenir dans la fenêtre de ${EMBEDDED_CONTEXT_SIZE} jetons : ` +
+            `${system.length} caractères gardés sur ${req.system.length}`
+        );
+      }
+
+      console.log('🤖 [EMBEDDED] Generating response...', {
+        systemLength: system.length,
+        historyTurns: history.length,
+        promptLength: question.length,
+        modelId: this.modelId,
+      });
+
       // @ts-ignore - Module chargé dynamiquement
       const nodeLlamaCpp = await import('node-llama-cpp').catch(() => null);
       if (!nodeLlamaCpp) {
@@ -580,63 +644,62 @@ ${userQuery}
 
       const session = new LlamaChatSession({
         contextSequence: this.sequence,
+        systemPrompt: system || undefined,
       }) as unknown as LlamaChatSessionInstance;
 
-      // Collecter la réponse avec callback pour streaming simulé
-      const chunks: string[] = [];
+      try {
+        // Remplace l'historique initial, et avec lui le prompt système anglais par défaut de
+        // node-llama-cpp : sans consigne, aucune consigne.
+        session.setChatHistory([
+          ...(system ? [{ type: 'system' as const, text: system }] : []),
+          ...history.map((turn): LlamaChatHistoryItem =>
+            turn.role === 'user'
+              ? { type: 'user', text: turn.content }
+              : { type: 'model', response: [turn.content] }
+          ),
+        ]);
 
-      const response = await session.prompt(fullPrompt, {
-        maxTokens: 2048,
-        temperature: 0.1,
-        topP: 0.85,
-        onTextChunk: (chunk: string) => {
-          chunks.push(chunk);
-        },
-      });
+        // Collecter la réponse avec callback pour streaming simulé
+        const chunks: string[] = [];
 
-      // Si on a des chunks via callback, les utiliser pour un meilleur streaming
-      if (chunks.length > 0) {
-        for (const chunk of chunks) {
-          yield chunk;
-        }
-      } else {
-        // Fallback: découper la réponse en mots pour simuler le streaming
-        const words = response.split(/(\s+)/);
-        for (const word of words) {
-          if (word) {
-            yield word;
-            // Petit délai pour une meilleure UX de streaming
-            await new Promise((r) => setTimeout(r, 5));
+        const response = await session.prompt(question, {
+          maxTokens,
+          temperature: req.temperature ?? 0.1,
+          topP: req.topP ?? 0.85,
+          onTextChunk: (chunk: string) => {
+            chunks.push(chunk);
+          },
+        });
+
+        // Si on a des chunks via callback, les utiliser pour un meilleur streaming
+        if (chunks.length > 0) {
+          for (const chunk of chunks) {
+            yield chunk;
+          }
+        } else {
+          // Fallback: découper la réponse en mots pour simuler le streaming
+          const words = response.split(/(\s+)/);
+          for (const word of words) {
+            if (word) {
+              yield word;
+              // Petit délai pour une meilleure UX de streaming
+              await new Promise((r) => setTimeout(r, 5));
+            }
           }
         }
-      }
 
-      console.log('✅ [EMBEDDED] Generation complete', {
-        responseLength: response.length,
-      });
+        console.log('✅ [EMBEDDED] Generation complete', {
+          responseLength: response.length,
+        });
+      } finally {
+        session.dispose({ disposeSequence: false });
+      }
     } catch (error) {
       console.error('❌ [EMBEDDED] Generation error:', error);
       throw error;
     } finally {
       this.isGenerating = false;
     }
-  }
-
-  /**
-   * Génère une réponse sans sources (contexte simple)
-   */
-  async *generateResponseStream(
-    prompt: string,
-    context: string[],
-    systemPrompt?: string
-  ): AsyncGenerator<string> {
-    // Convertir le contexte simple en format utilisable
-    yield* this.generateResponseStreamWithSources(
-      prompt,
-      [],
-      context.join('\n'),
-      systemPrompt
-    );
   }
 
   /**

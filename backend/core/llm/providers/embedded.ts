@@ -20,7 +20,7 @@
  * permet au registre de le fabriquer sans coût quand il ne sert pas.
  */
 
-import { EmbeddedLLMClient } from '../EmbeddedLLMClient.js';
+import { EmbeddedLLMClient, EmbeddedPromptTooLongError } from '../EmbeddedLLMClient.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -183,26 +183,29 @@ export class EmbeddedProvider extends EmbeddedBase implements LLMProvider {
       return;
     }
 
-    // `EmbeddedLLMClient` prend un prompt et un system prompt séparés : on
-    // aplatit la conversation en préservant les tours, le modèle voyant
-    // ensuite le format ChatML qu'il attend.
+    // Chaque chose à sa place (S05-1-25) : les messages système réunis partent en vrai rôle système,
+    // les tours précédents en historique structuré, la dernière question brute, avec les options du
+    // tour. Le modèle embarqué n'a pas d'outils : aucun message `tool` n'arrive ici.
     const system = messages
       .filter((m) => m.role === 'system')
       .map((m) => m.content)
       .join('\n\n');
-    const turns = messages.filter((m) => m.role !== 'system');
+    const turns = messages.flatMap((m) =>
+      m.role === 'user' || m.role === 'assistant' ? [{ role: m.role, content: m.content }] : []
+    );
     const last = turns[turns.length - 1];
-    const history = turns
-      .slice(0, -1)
-      .map((m) => `${m.role === 'user' ? 'Question' : 'Réponse'} : ${m.content}`);
 
     let emitted = false;
     try {
-      for await (const delta of this.client.generateResponseStream(
-        last?.content ?? '',
-        history,
-        system || undefined
-      )) {
+      for await (const delta of this.client.generateChat({
+        system: system || undefined,
+        history: turns.slice(0, -1),
+        prompt: last?.content ?? '',
+        maxTokens: opts.maxTokens,
+        temperature: opts.temperature,
+        topP: opts.topP,
+        signal: opts.signal,
+      })) {
         if (opts.signal?.aborted) {
           yield { delta: '', done: true, finishReason: 'cancelled' };
           return;
@@ -217,7 +220,9 @@ export class EmbeddedProvider extends EmbeddedBase implements LLMProvider {
       this.status = {
         state: 'degraded',
         lastError: {
-          code: 'embedded_generation_failed',
+          // Une question trop longue pour la fenêtre a son code : le renderer le traduit, et le
+          // compacteur compte son résumé refusé comme un résumé raté (L08-4).
+          code: e instanceof EmbeddedPromptTooLongError ? e.code : 'embedded_generation_failed',
           message: message(e),
           at: now(),
         },
