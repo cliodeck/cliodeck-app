@@ -1097,6 +1097,90 @@ describe('moteur embarqué : la fenêtre réelle du tour (L08-4)', () => {
     await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
   });
 
+  /**
+   * Le plafond de 4 extraits suppose des consignes courtes et un français propre. Les indications du
+   * projet (`context.md`, jusqu'à 32 000 caractères), un mode bavard ou un texte d'OCR en laissent
+   * tenir moins : la coupe des consignes effaçait alors les derniers extraits sans rien dire, et le
+   * panneau des sources en montrait quatre que le modèle n'avait pas lus (revue de L08-4). Vrai
+   * fournisseur et vrai client embarqués, mesure au tokeniseur du modèle (un jeton par mot).
+   */
+  it('indications du projet volumineuses : les sources montrées sont exactement les extraits que le modèle lit', async () => {
+    useConfig(EMBEDDED);
+    bench.registry = () =>
+      instrumentLLM(new EmbeddedProvider({ modelPath: EMBEDDED.embeddedModelPath, modelId: 'qwen2.5-0.5b' }), 'embedded');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // 1 300 mots d'indications, sous la borne de 32 000 caractères du garde.
+    fs.writeFileSync(path.join(project, 'context.md'), Array.from({ length: 1300 }, (_, i) => `c${i % 10}`).join(' '));
+    // Quatre extraits de 452 mots, chacun marqué au début et à la fin, sous les 1 500 caractères gardés.
+    const hitOf = (i: number): RetrievalSearchWithStatsResult['hits'][number] =>
+      ({
+        ...secondaryHit,
+        chunk: {
+          ...secondaryHit.chunk,
+          id: `s-${i}`,
+          documentId: `doc-${i}`,
+          content: [`DEBUT-${i}`, ...Array.from({ length: 450 }, (_, k) => `m${k % 10}`), `FIN-${i}`].join(' '),
+        },
+        document: { ...secondaryHit.document, id: `doc-${i}`, title: `Document ${i}` },
+        similarity: 0.9 - i / 100,
+      }) as RetrievalSearchWithStatsResult['hits'][number];
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValue({
+      hits: [1, 2, 3, 4].map(hitOf), manuscriptHits: [], readingNoteHits: [], outcomes: [], securityEvents: [],
+      stats: {
+        search: {
+          query: 'Qui était Jules Durand ?', totalResults: 4, searchDurationMs: 1, cacheHit: false, sourceType: 'both', documents: [],
+          corpora: [{ source: 'secondary', attempted: true, ok: true, hitCount: 4, selectedCount: 4 }],
+        },
+        timing: { searchMs: 1 },
+      },
+    });
+
+    const sent = await turn({ topK: 25 });
+
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    const shown = (sent.find((e) => e.channel === 'fusion:chat:context')?.payload as { sources: Array<{ title: string }> } | undefined)
+      ?.sources.map((s) => s.title) ?? [];
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.length).toBeLessThan(4);
+    const system = fakeLlama.sessions[0].systemPrompt ?? '';
+    // Rien n'a été coupé : chaque extrait montré est lu en entier, aucun autre n'est lu.
+    expect(system.endsWith('[…]')).toBe(false);
+    for (const i of [1, 2, 3, 4]) {
+      const read = shown.includes(`Document ${i}`);
+      expect(system.includes(`DEBUT-${i}`)).toBe(read);
+      expect(system.includes(`FIN-${i}`)).toBe(read);
+    }
+    // Les plus pertinents restent ; l'explication dit combien le modèle en a lu.
+    expect(shown).toEqual([1, 2, 3, 4].slice(0, shown.length).map((i) => `Document ${i}`));
+    expect(explanationOf(sent)?.search.extractsCap).toBe(shown.length);
+  });
+
+  // La bande partagée du manuscrit et des notes se calcule sur le `topK` plafonné : sur 25 demandés,
+  // elle vaudrait 5 places dans une recherche qui n'en a que 4, et le manuscrit pourrait les prendre
+  // toutes, sans aucune source.
+  it('les bandes de l’auteur se calculent sur le plafond : une place pour le manuscrit, trois pour une question de rappel', async () => {
+    useConfig(EMBEDDED);
+    bench.registry = () => benchLLM('embedded', 'qwen2.5-0.5b', async () => ({ state: 'ready' }));
+    vi.mocked(manuscriptIndexService.isEnabled).mockReturnValue(true);
+    const searched = (): { topK?: number; includeManuscript?: boolean; manuscriptSlots?: number } | undefined =>
+      vi.mocked(retrievalService.searchWithStats).mock.calls.at(-1)?.[0] as
+        | { topK?: number; includeManuscript?: boolean; manuscriptSlots?: number }
+        | undefined;
+
+    await turn({ topK: 25 });
+    expect(searched()).toMatchObject({ topK: 4, includeManuscript: true, manuscriptSlots: 1 });
+
+    const { webContents, sent } = captureWebContents();
+    fusionChatService.start({
+      webContents,
+      messages: [{ role: 'user', content: 'Qu’ai-je déjà écrit sur Jules Durand ?' }],
+      systemPrompt: { language: 'fr' },
+      retrievalOptions: { topK: 25 },
+    });
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(searched()).toMatchObject({ topK: 4, includeManuscript: true, manuscriptSlots: 3 });
+  });
+
   it('le sondage n’inscrit rien au journal d’usage : seule la réponse, au nom du modèle embarqué', async () => {
     const recorded: RecordInferenceInput[] = [];
     setInferenceSink((e) => recorded.push(e));

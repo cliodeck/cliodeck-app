@@ -48,10 +48,12 @@ import { isLocalProvider } from '../../usage-journal/is-local.js';
 import type { InferenceStatus } from '../../usage-journal/types.js';
 import { collectCompletion, ProviderCallError } from './collect.js';
 import {
+  embeddedTokenizerOf,
   FallbackEmbeddingProvider,
   FallbackLLMProvider,
   resolveEmbeddingProvider,
 } from './fallback.js';
+import type { EmbeddedTokenizer } from '../EmbeddedLLMClient.js';
 
 /** Estimation grossière de tokens quand l'API n'en fournit pas (~4 caractères/token). */
 function estimateTokens(chars: number): number {
@@ -178,6 +180,14 @@ class InstrumentedLLM implements LLMProvider {
    */
   get activeId(): string {
     return this.servedBy();
+  }
+
+  /**
+   * Le tokeniseur du modèle embarqué qui servira l'appel, à travers le décorateur
+   * (`embeddedTokenizerOf`, L08-4). Mesurer n'est pas un appel au modèle : rien au journal.
+   */
+  embeddedTokenizer(signal?: AbortSignal): Promise<EmbeddedTokenizer | null> {
+    return embeddedTokenizerOf(this.inner, signal);
   }
 
   private emitCompletion(

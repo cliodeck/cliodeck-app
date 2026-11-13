@@ -1248,7 +1248,9 @@
       "append": "Am Ende anhängen",
       "output": "Ergebnis",
       "noContent": "Kein Inhalt zum Umwandeln.",
-      "unknownError": "Unbekannter Fehler bei der Generierung."
+      "unknownError": "Unbekannter Fehler bei der Generierung.",
+      "embeddedPromptTooLong": "Die Bibliographie des Projekts passt zusammen mit den Folienanweisungen nicht in das Kontextfenster des eingebetteten Modells: Wählen Sie in den Einstellungen ein anderes Modell.",
+      "sourceCut": "Das eingebettete Modell hat nur den Anfang des Dokuments gelesen (etwa {{percent}} %): Der Rest überschreitet sein Kontextfenster. Um ihn abzudecken, wählen Sie einen Abschnitt daraus aus."
     },
     "navigator": {
       "count": "{{count}} Folie",

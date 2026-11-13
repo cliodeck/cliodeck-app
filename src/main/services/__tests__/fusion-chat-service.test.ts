@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  fitExtractsToWindow,
   formatContextAsSystemPrompt,
   formatManuscriptContext,
   formatReadingNotesContext,
@@ -22,6 +23,8 @@ import type {
 import type { LLMConfig } from '../../../../backend/types/config.js';
 import type { MultiSourceSearchResult } from '../retrieval-service.js';
 import { runChatTurn } from '../chat-engine.js';
+import { manuscriptSlots } from '../retrieval-quota.js';
+import { recallSlots } from '../manuscript-policy.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -591,5 +594,72 @@ describe('resolveTurnWindow — la fenêtre du modèle qui répondra', () => {
       maxExtracts: 4,
     });
     expect(probes).toBe(0);
+  });
+});
+
+/**
+ * Les extraits que le modèle embarqué lira (revue de L08-4) : retirés un à un, mesurés, avant d'être
+ * montrés. Un jeton par mot ici ; chaque extrait pèse 100 mots, les consignes 50.
+ */
+describe('fitExtractsToWindow — ce qui ne tient pas part avant d’être montré', () => {
+  const tokenizer = {
+    tokenize: (text: string) => text.match(/\S+/g) ?? [],
+    detokenize: (tokens: readonly unknown[]) => tokens.map(String).join(' '),
+  };
+  const body = (tag: string) => Array.from({ length: 99 }, () => tag).join(' ');
+  const source = (i: number, similarity: number) =>
+    ({ sourceType: 'secondary', similarity, chunk: { content: `S${i} ${body('s')}` }, document: { title: `S${i}` } }) as unknown as MultiSourceSearchResult;
+  const own = (i: number, similarity: number) =>
+    ({ sourceType: 'manuscript', similarity, chunk: { content: `M${i} ${body('m')}` } }) as unknown as ManuscriptMappedSearchResult;
+  const blocksFor = (read: { hits: MultiSourceSearchResult[]; own: ManuscriptMappedSearchResult[] }) => ({
+    systemPrompt: [...read.hits, ...read.own].map((h) => h.chunk.content).join('\n'),
+  });
+  const fixedSystem = [Array.from({ length: 50 }, () => 'consigne').join(' ')];
+  const ids = (read: { hits: MultiSourceSearchResult[]; own: ManuscriptMappedSearchResult[] }) =>
+    [...read.hits, ...read.own].map((h) => h.chunk.content.split(' ')[0]);
+  // Trois sources et un passage du manuscrit, comme une recherche à 4 extraits (bande d'une place).
+  const found = {
+    hits: [source(1, 0.8), source(2, 0.7), source(3, 0.6)],
+    own: [own(1, 0.95)],
+    notes: [] as ReadingNoteMappedSearchResult[],
+  };
+  const fit = (budget: number, bandsFor = (n: number) => ({ manuscript: manuscriptSlots(n) })) =>
+    fitExtractsToWindow({ found, blocksFor, fixedSystem, question: 'Qui ?', budget, tokenizer, bandsFor });
+
+  it('tout tient : rien ne part', () => {
+    expect(ids(fit(1000).read)).toEqual(['S1', 'S2', 'S3', 'M1']);
+  });
+
+  it('les sources les moins pertinentes partent d’abord ; la voix de l’auteur garde sa place tant qu’il en reste deux', () => {
+    // 50 + 1 + 8 de réserve : trois extraits tiennent dans 360, deux dans 260, un dans 160.
+    expect(ids(fit(360).read)).toEqual(['S1', 'S2', 'M1']);
+    expect(ids(fit(260).read)).toEqual(['S1', 'M1']);
+    // Un seul extrait : la seule place va aux sources.
+    expect(ids(fit(160).read)).toEqual(['S1']);
+    expect(ids(fit(100).read)).toEqual([]);
+  });
+
+  it('question de rappel : le manuscrit garde ses places, les sources partent', () => {
+    const recall = {
+      hits: [source(1, 0.8)],
+      own: [own(1, 0.95), own(2, 0.9), own(3, 0.85)],
+      notes: [] as ReadingNoteMappedSearchResult[],
+    };
+    const { read } = fitExtractsToWindow({
+      found: recall,
+      blocksFor,
+      fixedSystem,
+      question: 'Qu’ai-je écrit ?',
+      // Trois extraits : 50 + 300 + 3 + 8 de réserve.
+      budget: 361,
+      tokenizer,
+      bandsFor: (n) => ({ manuscript: recallSlots(n) }),
+    });
+    expect(ids(read)).toEqual(['S1', 'M1', 'M2']);
+  });
+
+  it('les blocs rendus sont ceux des extraits gardés', () => {
+    const { read, blocks } = fit(260);
+    expect(blocks.systemPrompt).toBe(blocksFor(read).systemPrompt);
   });
 });

@@ -20,7 +20,7 @@
  * permet au registre de le fabriquer sans coût quand il ne sert pas.
  */
 
-import { EmbeddedLLMClient, EmbeddedPromptTooLongError } from '../EmbeddedLLMClient.js';
+import { EmbeddedLLMClient, EmbeddedPromptTooLongError, type EmbeddedTokenizer } from '../EmbeddedLLMClient.js';
 import type {
   ChatChunk,
   ChatMessage,
@@ -167,6 +167,15 @@ export class EmbeddedProvider extends EmbeddedBase implements LLMProvider {
   async healthCheck(): Promise<ProviderStatus> {
     await this.ensureLoaded();
     return this.status;
+  }
+
+  /**
+   * Le tokeniseur du modèle, chargé au besoin (le tour l'aurait chargé juste après) ; `null` quand il
+   * ne se charge pas. Mesure ce qui tiendra dans la fenêtre avant l'envoi (L08-4). Le chargement ne
+   * s'interrompt pas : l'appelant n'attend que jusqu'à l'abandon (`embeddedTokenizerOf`).
+   */
+  async embeddedTokenizer(): Promise<EmbeddedTokenizer | null> {
+    return (await this.ensureLoaded()) ? this.client.tokenizer() : null;
   }
 
   /**

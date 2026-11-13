@@ -14,6 +14,7 @@ import {
   NUM_CTX_MIN,
   EMBEDDED_CONTEXT_SIZE,
   embeddedInputBudget,
+  embeddedReplyTokens,
   maxExtractsForWindow,
 } from '../context-windows';
 
@@ -126,6 +127,16 @@ describe('fenêtre du moteur embarqué', () => {
     expect(embeddedInputBudget(4096)).toBe(2663);
     // Une réponse plus longue prend sur l'entrée.
     expect(embeddedInputBudget(4096, 1500)).toBe(2187);
+  });
+
+  // Une recette pouvait demander 4 000 jetons de réponse : le budget d'entrée devenait négatif, et
+  // chaque appel au modèle embarqué était refusé. La réponse ne prend jamais plus de la moitié.
+  it('la réponse ne prend jamais plus de la moitié de la fenêtre : le budget d’entrée reste positif', () => {
+    expect(embeddedReplyTokens(4096)).toBe(1024);
+    expect(embeddedReplyTokens(4096, 1500)).toBe(1500);
+    expect(embeddedReplyTokens(4096, 4000)).toBe(2048);
+    expect(embeddedReplyTokens(4096, 0)).toBe(1024);
+    expect(embeddedInputBudget(4096, 4000)).toBe(1639);
   });
 
   it('4 extraits à 4 096, 9 à 8 192, jamais moins d’un', () => {

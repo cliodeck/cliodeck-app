@@ -809,7 +809,7 @@
       "searchHeading": "Search",
       "resultsFound": "Results found:",
       "duration": "Duration:",
-      "extractsCapLabel": "Excerpt limit:",
+      "extractsCapLabel": "Extract limit:",
       "extractsCapReason": "(the model's context window)",
       "cacheHitSuffix": "(cache)",
       "sourceTypeLabel": "Source type:",
@@ -1248,7 +1248,9 @@
       "append": "Append to end",
       "output": "Result",
       "noContent": "No content to transform.",
-      "unknownError": "Unknown error during generation."
+      "unknownError": "Unknown error during generation.",
+      "embeddedPromptTooLong": "The project bibliography does not fit in the embedded model's context window together with the slide instructions: choose another model in Settings.",
+      "sourceCut": "The embedded model only read the beginning of the document (about {{percent}}%): the rest exceeds its context window. To cover it, select a passage from it."
     },
     "navigator": {
       "count": "{{count}} slide",

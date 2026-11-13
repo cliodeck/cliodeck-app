@@ -16,8 +16,11 @@
 import { existsSync } from 'fs';
 import { afterAll, describe, expect, it } from 'vitest';
 import { EmbeddedProvider } from '../providers/embedded.js';
+import { embeddedTokenizerOf, FallbackLLMProvider } from '../providers/fallback.js';
+import { instrumentLLM } from '../providers/instrument.js';
+import { fitTextToTokens } from '../EmbeddedLLMClient.js';
 import { EMBEDDED_CONTEXT_SIZE } from '../context-windows.js';
-import type { ChatChunk, ChatMessage, ChatOptions, ProviderStatus } from '../providers/base.js';
+import type { ChatChunk, ChatMessage, ChatOptions, LLMProvider, ProviderStatus } from '../providers/base.js';
 
 const GGUF = process.env.CLIODECK_TEST_GGUF;
 const available = !!GGUF && existsSync(GGUF);
@@ -80,6 +83,33 @@ describe.skipIf(!available)('moteur embarqué réel (GGUF donné par CLIODECK_TE
     expect(status.lastError?.message ?? '').not.toMatch(/Failed to compress/);
     expect(last).toMatchObject({ done: true, finishReason: 'stop' });
     expect(text.trim().length).toBeGreaterThan(0);
+  }, 180_000);
+
+  // Le tour de chat et les slides mesurent ce qui tiendra avant de l'envoyer (revue de L08-4) : le
+  // tokeniseur du vrai modèle doit les atteindre à travers le décorateur du journal d'usage et le
+  // repli « auto », et la coupe tenir au jeton près sur un vrai tokeniseur.
+  it('le tokeniseur du modèle, à travers le journal d’usage et le repli : la coupe tient au jeton près', async () => {
+    const deadOllama = {
+      id: 'ollama', name: 'Ollama', model: 'llama3.2',
+      capabilities: { chat: true, streaming: true, tools: false, embeddings: false },
+      getStatus: () => ({ state: 'failed' }),
+      healthCheck: async () => ({ state: 'failed' }),
+      chat: () => { throw new Error('Ollama arrêté'); },
+      complete: async () => '',
+      dispose: async () => undefined,
+    } as unknown as LLMProvider;
+    const wrapped = instrumentLLM(new FallbackLLMProvider(deadOllama, provider), 'ollama', 'http://127.0.0.1:9');
+    const tokenizer = await embeddedTokenizerOf(wrapped);
+    expect(tokenizer).not.toBeNull();
+    if (!tokenizer) return;
+    const text = SENTENCE.repeat(40);
+    expect(tokenizer.tokenize(text).length).toBeGreaterThan(200);
+    const cut = fitTextToTokens(text, 200, tokenizer);
+    expect(tokenizer.tokenize(cut).length).toBeLessThanOrEqual(200);
+    expect(cut.startsWith('La grève des dockers du Havre')).toBe(true);
+    expect(cut.endsWith('[…]')).toBe(true);
+    // Ollama présent : aucun tokeniseur, rien n'est mesuré ni coupé.
+    expect(await embeddedTokenizerOf(instrumentLLM(deadOllama, 'ollama', 'http://127.0.0.1:9'))).toBeNull();
   }, 180_000);
 
   it('une question plus longue que la fenêtre : refusée avant le moteur, par une erreur lisible', async () => {

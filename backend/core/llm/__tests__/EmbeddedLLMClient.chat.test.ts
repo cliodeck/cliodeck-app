@@ -140,6 +140,21 @@ describe('EmbeddedLLMClient — génération structurée', () => {
     expect(cause?.message).not.toMatch(/Failed to compress/);
   });
 
+  // Une recette peut demander une réponse plus longue que la fenêtre ne le permet (`maxTokens: 4000`).
+  // Le client l'ignorait sur main (2 048 en dur) ; la prendre telle quelle rendait le budget d'entrée
+  // négatif, et chaque appel était refusé. Elle est bornée à la moitié de la fenêtre.
+  it('une réponse demandée trop longue est bornée à la moitié de la fenêtre, et l’appel part', async () => {
+    const { chunks } = await run(
+      [
+        { role: 'system', content: 'Réponds en français.' },
+        { role: 'user', content: 'Écris un plan détaillé.' },
+      ],
+      { maxTokens: 4000 }
+    );
+    expect(chunks.at(-1)).toMatchObject({ done: true, finishReason: 'stop' });
+    expect(fakeLlama.sessions[0].prompts[0].options.maxTokens).toBe(EMBEDDED_CONTEXT_SIZE / 2);
+  });
+
   it('complete() — le résumé du compacteur — part à température 0', async () => {
     const provider = new EmbeddedProvider({ modelPath: '/modeles/qwen.gguf', modelId: 'qwen2.5-0.5b' });
     await expect(provider.complete('Résume la conversation.', { temperature: 0 })).resolves.toBe(

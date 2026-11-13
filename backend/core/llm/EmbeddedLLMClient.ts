@@ -5,7 +5,7 @@
  * Supporte la génération de texte ET les embeddings via des modèles GGUF séparés.
  */
 
-import { EMBEDDED_CONTEXT_SIZE, embeddedInputBudget } from './context-windows.js';
+import { EMBEDDED_CONTEXT_SIZE, embeddedInputBudget, embeddedReplyTokens } from './context-windows.js';
 import { forgetEmbeddedClient, isEmbeddedEngineClosing, trackEmbeddedClient } from './embedded-engine-pool.js';
 
 // Types pour node-llama-cpp (évite les problèmes d'import ESM)
@@ -107,25 +107,12 @@ export interface EmbeddedTokenizer {
 const CUT_MARK = '\n[…]';
 
 /**
- * Les consignes qui tiennent dans `budget` jetons avec la question. La question n'est jamais
- * coupée ; c'est la fin des consignes qui part, coupée au jeton et marquée « […] » : les consignes du
- * mode et les indications sont en tête, les extraits les moins pertinents et les blocs de l'auteur en
- * fin. Sans cette coupe, llama.cpp, qui ne coupe jamais la première consigne système, lève « Failed
- * to compress chat history » (mesuré).
- *
- * Lève `EmbeddedPromptTooLongError` quand la question seule dépasse le budget.
+ * La tête de `text` qui tient en `room` jetons, coupée au jeton et marquée « […] » ; `text` entier
+ * s'il tient. Vide quand même la marque ne tient pas.
  */
-export function fitSystemToWindow(
-  system: string,
-  question: string,
-  budget: number,
-  tokenizer: EmbeddedTokenizer
-): string {
-  const questionTokens = tokenizer.tokenize(question).length;
-  if (questionTokens > budget) throw new EmbeddedPromptTooLongError(questionTokens, budget);
-  const room = budget - questionTokens;
-  const tokens = Array.from(tokenizer.tokenize(system));
-  if (tokens.length <= room) return system;
+export function fitTextToTokens(text: string, room: number, tokenizer: EmbeddedTokenizer): string {
+  const tokens = Array.from(tokenizer.tokenize(text));
+  if (tokens.length <= room) return text;
   // Une tête recollée se retokenise parfois en quelques jetons de plus : on recule d'autant.
   let keep = room - tokenizer.tokenize(CUT_MARK).length;
   while (keep > 0) {
@@ -137,6 +124,28 @@ export function fitSystemToWindow(
     keep -= overshoot;
   }
   return '';
+}
+
+/**
+ * Les consignes qui tiennent dans `budget` jetons avec la question. La question n'est jamais
+ * coupée ; c'est la fin des consignes qui part, coupée au jeton et marquée « […] » : les consignes du
+ * mode et les indications sont en tête, les extraits les moins pertinents et les blocs de l'auteur en
+ * fin. Sans cette coupe, llama.cpp, qui ne coupe jamais la première consigne système, lève « Failed
+ * to compress chat history » (mesuré). Le tour de chat retire avant elle les extraits qui ne tiennent
+ * pas (`fusion-chat-service`) : elle ne frappe plus que ce qu'il ne mesure pas, le résumé du
+ * compacteur en fin de consignes.
+ *
+ * Lève `EmbeddedPromptTooLongError` quand la question seule dépasse le budget.
+ */
+export function fitSystemToWindow(
+  system: string,
+  question: string,
+  budget: number,
+  tokenizer: EmbeddedTokenizer
+): string {
+  const questionTokens = tokenizer.tokenize(question).length;
+  if (questionTokens > budget) throw new EmbeddedPromptTooLongError(questionTokens, budget);
+  return fitTextToTokens(system, budget - questionTokens, tokenizer);
 }
 
 export interface EmbeddedModelInfo {
@@ -445,6 +454,23 @@ export class EmbeddedLLMClient {
   }
 
   /**
+   * Le tokeniseur du modèle de génération chargé, `null` sans modèle ou sans tokeniseur. Sert à
+   * mesurer ce qui tiendra dans la fenêtre avant de l'envoyer : le tour de chat y retire les extraits
+   * que le modèle ne lirait pas, les diapositives y coupent le document (L08-4). À n'utiliser que le
+   * temps d'un appel : une libération du client rend le modèle inutilisable.
+   */
+  tokenizer(): EmbeddedTokenizer | null {
+    const model = this.model;
+    if (!model?.tokenize || !model.detokenize) return null;
+    const { tokenize, detokenize } = model as LlamaModelInstance & EmbeddedTokenizer;
+    // Les méthodes du modèle gardent leur `this`.
+    return {
+      tokenize: (text) => tokenize.call(model, text),
+      detokenize: (tokens) => detokenize.call(model, tokens),
+    };
+  }
+
+  /**
    * Vérifie si le modèle d'embedding est disponible
    */
   isEmbeddingAvailable(): boolean {
@@ -606,14 +632,12 @@ export class EmbeddedLLMClient {
     this.isGenerating = true;
 
     try {
-      const model = this.model;
-      const maxTokens = req.maxTokens ?? Math.floor(EMBEDDED_CONTEXT_SIZE / 4);
-      const budget = embeddedInputBudget(EMBEDDED_CONTEXT_SIZE, maxTokens);
+      // La réponse ne prend jamais plus de la moitié de la fenêtre : le budget d'entrée reste positif.
+      const maxTokens = embeddedReplyTokens(EMBEDDED_CONTEXT_SIZE, req.maxTokens);
+      const budget = embeddedInputBudget(EMBEDDED_CONTEXT_SIZE, req.maxTokens);
       const { history, question } = closeOnQuestion(req.history, req.prompt);
       // Fenêtre ou tokeniseur inconnus : on laisse le moteur trancher, comme pour les embeddings.
-      // Le modèle lui-même sert de tokeniseur : ses méthodes gardent leur `this`.
-      const tokenizer =
-        model.tokenize && model.detokenize ? (model as LlamaModelInstance & EmbeddedTokenizer) : null;
+      const tokenizer = this.tokenizer();
       const system = tokenizer
         ? fitSystemToWindow(req.system ?? '', question, budget, tokenizer)
         : (req.system ?? '');

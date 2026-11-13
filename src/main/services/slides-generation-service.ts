@@ -1,5 +1,8 @@
 import { BrowserWindow } from 'electron';
 import { getSlideGenerationPrompt } from '../../../backend/core/llm/SystemPrompts.js';
+import { EMBEDDED_CONTEXT_SIZE, embeddedInputBudget } from '../../../backend/core/llm/context-windows.js';
+import { fitTextToTokens, type EmbeddedTokenizer } from '../../../backend/core/llm/EmbeddedLLMClient.js';
+import { embeddedTokenizerOf } from '../../../backend/core/llm/providers/fallback.js';
 import { logger } from '../utils/logger.js';
 
 // ── Post-processing: normalise any LLM output into reveal.js format ─────
@@ -131,6 +134,54 @@ function normaliseToRevealFormat(raw: string): string {
   return parts.join('\n\n').trim();
 }
 
+// ── Fenêtre du modèle embarqué ──────────────────────────────────────────
+
+/**
+ * Jetons gardés en réserve : consignes, demande et document sont comptés séparément, et un texte
+ * recollé se tokenise parfois à quelques jetons près de la somme de ses morceaux.
+ */
+const FIT_MARGIN_TOKENS = 16;
+
+/** La part du document que le modèle a lue, quand il n'a pas pu tout lire. */
+export interface SlidesSourceCut {
+  readChars: number;
+  totalChars: number;
+}
+
+/**
+ * Le document que le modèle embarqué peut lire avec les consignes et la demande, dans sa fenêtre de
+ * 4 096 jetons (L08-4). Le moteur ne coupe jamais la question, et le document y est : sans cette
+ * coupe, un document de plus de 9 000 caractères environ était refusé, et, juste en deçà, ce sont
+ * les consignes des diapositives, en rôle système, qui partaient. C'est la fin du document qui part,
+ * marquée « […] », comme le moteur le faisait avant L08-4 ; les diapositives sont tirées de son début.
+ */
+function fitSourceToWindow(
+  source: string,
+  system: string,
+  promptFor: (source: string) => string,
+  tokenizer: EmbeddedTokenizer
+): { source: string; cut?: SlidesSourceCut } {
+  const fixed =
+    tokenizer.tokenize(system).length + tokenizer.tokenize(promptFor('')).length + FIT_MARGIN_TOKENS;
+  const room = embeddedInputBudget(EMBEDDED_CONTEXT_SIZE) - fixed;
+  const kept = fitTextToTokens(source, Math.max(0, room), tokenizer);
+  if (kept === source) return { source };
+  // Ce qui a été lu, sans la marque de coupe.
+  const readChars = kept.endsWith('[…]') ? kept.slice(0, -'[…]'.length).trimEnd().length : kept.length;
+  return { source: kept, cut: { readChars, totalChars: source.length } };
+}
+
+/** Le modèle a fini en erreur : son code (`embedded_prompt_too_long`…) va au panneau, qui le traduit. */
+class SlidesGenerationError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string
+  ) {
+    super(message);
+    this.name = 'SlidesGenerationError';
+  }
+}
+
 // ── Service ─────────────────────────────────────────────────────────────
 
 export class SlidesGenerationService {
@@ -206,19 +257,31 @@ export class SlidesGenerationService {
       bibliographySection = `\n\n${t.bibHeader} :\n${bibLines}`;
     }
 
-    const prompt = `${t.intro} :${bibliographySection}\n\n---\n${sourceText}\n---\n\n${t.go}`;
+    const promptFor = (source: string): string =>
+      `${t.intro} :${bibliographySection}\n\n---\n${source}\n---\n\n${t.go}`;
 
     let fullResponse = '';
+    const llm = this.llm;
 
     try {
       logger.info('slides', 'generateSlides:start', { textLength: sourceText.length, language });
 
+      // Le modèle embarqué (réglage « embarqué », ou « auto » Ollama arrêté) ne lit que ce qui tient
+      // dans sa fenêtre : le document y est mesuré et coupé par la fin. Les autres le reçoivent entier.
+      const tokenizer = await embeddedTokenizerOf(llm, signal);
+      const fitted = tokenizer
+        ? fitSourceToWindow(sourceText, systemPrompt, promptFor, tokenizer)
+        : { source: sourceText };
+      if (fitted.cut) {
+        logger.warn('slides', 'generateSlides:source-cut', { ...fitted.cut });
+      }
+
       // Stream via the typed provider. Single system+user turn,
       // per-token forwarding to the renderer, signal-driven cancellation.
-      const iter = this.llm.chat(
+      const iter = llm.chat(
         [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt },
+          { role: 'user', content: promptFor(fitted.source) },
         ],
         { temperature: 0.3, signal }
       );
@@ -231,13 +294,22 @@ export class SlidesGenerationService {
           fullResponse += chunk.delta;
           window.webContents.send('slides:stream', chunk.delta);
         }
+        // Le contrat des fournisseurs : une panne finit le flux par un terminal `error`, sans lever.
+        // Sans cette lecture, un refus du modèle devenait un résultat vide, « terminé » sans un mot.
+        if (chunk.done && chunk.finishReason === 'error' && !signal.aborted) {
+          const cause = llm.getStatus().lastError;
+          throw new SlidesGenerationError(cause?.message ?? 'Slide generation failed', cause?.code);
+        }
         if (chunk.done) break;
       }
 
       // Post-process: normalise LLM output to reveal.js format
       const normalised = normaliseToRevealFormat(fullResponse);
 
-      window.webContents.send('slides:stream-done', { content: normalised });
+      window.webContents.send('slides:stream-done', {
+        content: normalised,
+        ...(fitted.cut ? { sourceCut: fitted.cut } : {}),
+      });
       logger.info('slides', 'generateSlides:done', { outputLength: normalised.length });
 
       return normalised;
@@ -247,8 +319,10 @@ export class SlidesGenerationService {
         window.webContents.send('slides:stream-done', { content: normalised, cancelled: true });
         return normalised;
       }
-      logger.error('slides', 'generateSlides:error', { error: (error instanceof Error ? error.message : String(error)) });
-      window.webContents.send('slides:stream-error', { error: (error instanceof Error ? error.message : String(error)) });
+      const message = error instanceof Error ? error.message : String(error);
+      const code = error instanceof SlidesGenerationError ? error.code : undefined;
+      logger.error('slides', 'generateSlides:error', { error: message, ...(code ? { code } : {}) });
+      window.webContents.send('slides:stream-error', { error: message, ...(code ? { code } : {}) });
       throw error;
     } finally {
       this.abortController = null;
