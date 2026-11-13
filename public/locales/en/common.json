@@ -1517,7 +1517,11 @@
       "export": "Export",
       "delete": "Delete",
       "confirmDelete": "Click to confirm deletion",
-      "noCustom": "No custom modes"
+      "noCustom": "No custom modes",
+      "importFailed": "The mode could not be imported",
+      "exportFailed": "The mode could not be exported",
+      "deleteFailed": "The mode could not be deleted",
+      "duplicateFailed": "The mode could not be duplicated"
     },
     "warning": {
       "modelTooSmall": "Current model may be too small for this mode",

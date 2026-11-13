@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ResolvedMode, ModeCategory } from '../../../../backend/types/mode';
+import { unwrapIpc } from '../utils/ipc-outcome';
 
 // MARK: - Types
 
@@ -68,7 +69,8 @@ export const useModeStore = create<ModeState>()(
 
       setActiveMode: async (modeId: string) => {
         try {
-          await window.electron.mode.setActive(modeId);
+          // Le main répond un refus sans lever (S06-1-14) : `unwrapIpc` en fait une erreur.
+          unwrapIpc(await window.electron.mode.setActive(modeId));
           const mode = get().modes.find((m) => m.metadata.id === modeId) || null;
           set({ activeModeId: modeId, activeMode: mode });
 
@@ -138,7 +140,7 @@ export const useModeStore = create<ModeState>()(
         target: 'global' | 'project'
       ) => {
         try {
-          await window.electron.mode.save(mode, target);
+          unwrapIpc(await window.electron.mode.save(mode, target));
           await get().loadModes();
           console.log(`✅ Custom mode saved: ${mode.metadata?.id}`);
         } catch (error) {
@@ -149,7 +151,8 @@ export const useModeStore = create<ModeState>()(
 
       deleteCustomMode: async (modeId: string, source: 'global' | 'project') => {
         try {
-          await window.electron.mode.delete(modeId, source);
+          // Une suppression refusée ne bascule pas sur le mode par défaut.
+          unwrapIpc(await window.electron.mode.delete(modeId, source));
           // If we deleted the active mode, switch to default
           if (get().activeModeId === modeId) {
             await get().setActiveMode('default-assistant');
@@ -171,7 +174,7 @@ export const useModeStore = create<ModeState>()(
 
           if (result.canceled || !result.filePaths?.[0]) return;
 
-          await window.electron.mode.import(result.filePaths[0], target);
+          unwrapIpc(await window.electron.mode.import(result.filePaths[0], target));
           await get().loadModes();
           console.log(`📦 Mode imported from: ${result.filePaths[0]}`);
         } catch (error) {
@@ -189,7 +192,7 @@ export const useModeStore = create<ModeState>()(
 
           if (result.canceled || !result.filePath) return;
 
-          await window.electron.mode.export(modeId, result.filePath);
+          unwrapIpc(await window.electron.mode.export(modeId, result.filePath));
           console.log(`📦 Mode exported to: ${result.filePath}`);
         } catch (error) {
           console.error('❌ Failed to export mode:', error);

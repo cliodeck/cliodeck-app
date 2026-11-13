@@ -1517,7 +1517,11 @@
       "export": "Exporter",
       "delete": "Supprimer",
       "confirmDelete": "Cliquer pour confirmer la suppression",
-      "noCustom": "Aucun mode personnalisé"
+      "noCustom": "Aucun mode personnalisé",
+      "importFailed": "Le mode n'a pas pu être importé",
+      "exportFailed": "Le mode n'a pas pu être exporté",
+      "deleteFailed": "Le mode n'a pas pu être supprimé",
+      "duplicateFailed": "Le mode n'a pas pu être dupliqué"
     },
     "warning": {
       "modelTooSmall": "Le modèle actuel pourrait être trop petit pour ce mode",

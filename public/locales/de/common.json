@@ -1517,7 +1517,11 @@
       "export": "Exportieren",
       "delete": "Löschen",
       "confirmDelete": "Zum Bestätigen klicken",
-      "noCustom": "Keine benutzerdefinierten Modi"
+      "noCustom": "Keine benutzerdefinierten Modi",
+      "importFailed": "Der Modus konnte nicht importiert werden",
+      "exportFailed": "Der Modus konnte nicht exportiert werden",
+      "deleteFailed": "Der Modus konnte nicht gelöscht werden",
+      "duplicateFailed": "Der Modus konnte nicht dupliziert werden"
     },
     "warning": {
       "modelTooSmall": "Das aktuelle Modell ist möglicherweise zu klein für diesen Modus",
