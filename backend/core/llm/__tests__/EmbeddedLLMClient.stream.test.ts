@@ -167,7 +167,8 @@ describe('EmbeddedProvider.chat — arrêté pendant la génération', () => {
   });
 
   // Le modèle lit encore les consignes (le préremplissage) : node-llama-cpp lève la raison du signal,
-  // `stopOnAbortSignal` ou non, puisqu'il n'a rien à rendre.
+  // `stopOnAbortSignal` ou non, puisqu'il n'a rien à rendre. Le double ne simule pas la durée de la
+  // lecture : le vrai moteur ne lit le signal qu'à sa fin, mesuré dans EmbeddedLLMClient.live.test.ts.
   it('avant le premier morceau : terminal cancelled, ni degraded ni cause, et rien de produit', async () => {
     const provider = new EmbeddedProvider({ modelPath: '/modeles/qwen.gguf', modelId: 'qwen2.5-0.5b' });
     const controller = new AbortController();

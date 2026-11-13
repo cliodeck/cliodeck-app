@@ -4,14 +4,18 @@
  *   CLIODECK_TEST_GGUF=/chemin/qwen2.5-0.5b-instruct-q4_k_m.gguf \
  *     npx vitest run backend/core/llm/__tests__/EmbeddedLLMClient.live.test.ts
  *
- * Le petit Qwen 2.5 0,5B suffit, et ce n'est pas le modèle de génération de production : ce test
- * vérifie le chemin, pas la qualité des réponses. Des consignes plus longues que la fenêtre font
- * lever « Failed to compress chat history » à llama.cpp, qui ne coupe jamais la première consigne
- * système : la coupe de `fitSystemToWindow` doit l'empêcher, sur le vrai tokeniseur. Une question
- * plus longue que la fenêtre est refusée avant le moteur.
+ * Le Qwen 2.5 0,5B est le modèle de génération par défaut (`DEFAULT_EMBEDDED_MODEL`) ; la variante
+ * 1,5B, proposée en option, n'est pas mesurée ici. Ce test vérifie le chemin, pas la qualité des
+ * réponses.
+ *
+ * Des consignes plus longues que la fenêtre font lever « Failed to compress chat history » à
+ * llama.cpp, qui ne coupe jamais la première consigne système : la coupe de `fitSystemToWindow`
+ * doit l'empêcher, sur le vrai tokeniseur. Une question plus longue que la fenêtre est refusée avant
+ * le moteur.
  *
  * Le texte arrive au fil de la génération, et « Arrêter » coupe llama.cpp (L09-10) : le temps entre
- * `abort()` et la fin du tour, et le processeur que le moteur rend, sont mesurés sur le vrai moteur.
+ * `abort()` et la fin du tour, et le processeur que le moteur rend, sont mesurés sur le vrai moteur,
+ * pendant l'écriture et pendant la lecture des consignes, que rien ne coupe (revue de L09-10).
  * `CLIODECK_TEST_REPORT` : fichier où écrire ce qui a été mesuré.
  *
  * Le modèle est libéré à la fin (A16) : sortir avec un modèle chargé sur Metal plante le processus.
@@ -219,6 +223,90 @@ describe.skipIf(!available)('moteur embarqué réel (GGUF donné par CLIODECK_TE
       const next = await ask([{ role: 'user', content: 'Qui était Jules Durand ?' }]);
       expect(next.last).toMatchObject({ done: true, finishReason: 'stop' });
       expect(next.text.trim().length).toBeGreaterThan(0);
+    } finally {
+      setInferenceSink(undefined);
+    }
+  }, 180_000);
+
+  /**
+   * « Arrêter » pendant que le modèle lit encore les consignes (le préremplissage, revue de L09-10).
+   * node-llama-cpp 3.18.1 ne lit le signal qu'entre deux jetons générés, et un décodage commencé va
+   * au bout de ses lots : l'arrêt attend la fin de la lecture, jamais celle de la réponse. Ce temps
+   * croît avec la longueur des consignes et dépend du moteur (Metal sur un Mac Apple, processeur
+   * seul sur un Mac Intel) : il est mesuré et rapporté, pas borné à 2 s. Relancer ce test sur un Mac
+   * Intel donne le chiffre du cas réel.
+   */
+  it('« Arrêter » pendant la lecture des consignes : le tour attend la fin de la lecture, pas celle de la réponse', async () => {
+    expect((await provider.healthCheck()).state).toBe('ready');
+    // Des consignes au budget de la fenêtre, comme un tour chargé d'extraits : `fitSystemToWindow`
+    // les coupe, et la lecture dure.
+    const extracts = Array.from({ length: 64 }, (_, i) => `[${i + 1}] EXTRAIT : ${SENTENCE.repeat(4)}`).join('\n');
+    const messages: ChatMessage[] = [
+      { role: 'system', content: `Réponds en français.\n\nDocuments de travail :\n${extracts}` },
+      LONG_ANSWER[1],
+    ];
+    const opts: ChatOptions = { temperature: 0, maxTokens: 384 };
+
+    // Sans arrêt, la lecture seule : huit jetons de réponse, et un budget d'entrée un peu plus large
+    // qu'à 384 (`embeddedInputBudget`), donc une borne haute de la lecture. Elle ne dépend pas du
+    // flux : sur le code d'avant, le premier morceau arrivait avec le dernier.
+    const readingStart = performance.now();
+    for await (const _chunk of provider.chat(messages, { ...opts, maxTokens: 8 })) void _chunk;
+    const readingMs = performance.now() - readingStart;
+    // Sans arrêt, le tour entier.
+    const plainStart = performance.now();
+    let firstMs = 0;
+    let plainPieces = 0;
+    for await (const chunk of provider.chat(messages, opts)) {
+      if (!chunk.delta) continue;
+      plainPieces += 1;
+      if (plainPieces === 1) firstMs = performance.now() - plainStart;
+    }
+    const wholeMs = performance.now() - plainStart;
+
+    const events: RecordInferenceInput[] = [];
+    setInferenceSink((e) => events.push(e));
+    try {
+      const llm = instrumentLLM(provider, 'embedded');
+      const controller = new AbortController();
+      // Bien avant la fin de la lecture.
+      const abortAfterMs = Math.min(50, readingMs / 4);
+      let abortedAt = 0;
+      const startedAt = performance.now();
+      const timer = setTimeout(() => {
+        abortedAt = performance.now();
+        controller.abort();
+      }, abortAfterMs);
+      let text = '';
+      let last: ChatChunk = { delta: '' };
+      try {
+        for await (const chunk of llm.chat(messages, { ...opts, signal: controller.signal })) {
+          text += chunk.delta;
+          last = chunk;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+      const endedAt = performance.now();
+      report(
+        `arrêt pendant la lecture (${process.platform}-${process.arch}) : lecture seule ${readingMs.toFixed(0)} ms ; ` +
+          `tour entier ${wholeMs.toFixed(0)} ms, premier morceau à ${firstMs.toFixed(0)} ms (${plainPieces} morceaux) ; ` +
+          `arrêt à ${(abortedAt - startedAt).toFixed(0)} ms, ` +
+          `fin du tour ${(endedAt - abortedAt).toFixed(0)} ms après abort() ; ${text.length} caractères produits`
+      );
+
+      // La mesure n'a de sens que si la réponse entière dure bien plus que sa lecture.
+      expect(plainPieces).toBeGreaterThan(100);
+      expect(abortedAt).toBeGreaterThan(0);
+      // Rien n'a été généré : l'arrêt est tombé pendant la lecture, et llama.cpp lève sa raison.
+      expect(text).toBe('');
+      expect(last).toEqual({ delta: '', done: true, finishReason: 'cancelled' });
+      // Le tour finit avec la lecture, bien avant la fin d'une réponse écrite en entier : sur le code
+      // d'avant, le signal n'atteignait pas llama.cpp, qui écrivait toute la réponse.
+      expect(endedAt - startedAt).toBeLessThan(readingMs + (wholeMs - readingMs) / 2);
+      // Un arrêt n'est pas une panne.
+      expect(provider.getStatus()).toMatchObject({ state: 'ready' });
+      expect(events.at(-1)).toMatchObject({ provider: 'embedded', status: 'cancelled' });
     } finally {
       setInferenceSink(undefined);
     }

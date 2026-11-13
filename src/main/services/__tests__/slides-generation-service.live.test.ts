@@ -5,8 +5,9 @@
  *   CLIODECK_TEST_GGUF=/chemin/qwen2.5-0.5b-instruct-q4_k_m.gguf \
  *     npx vitest run src/main/services/__tests__/slides-generation-service.live.test.ts
  *
- * Le petit Qwen 2.5 0,5B suffit, et ce n'est pas le modèle de génération de production : ce test
- * vérifie le chemin, pas la qualité des slides. Avant le correctif, un document de 16 000
+ * Le Qwen 2.5 0,5B est le modèle de génération par défaut (`DEFAULT_EMBEDDED_MODEL`) ; la variante
+ * 1,5B, proposée en option, n'est pas mesurée ici. Ce test vérifie le chemin, pas la qualité des
+ * slides. Avant le correctif, un document de 16 000
  * caractères donnait un résultat vide (`embedded_prompt_too_long`, terminal ignoré par le service) ;
  * puis, avec une bibliographie de 50 références de taille courante, le document ne recevait plus
  * aucune place (revue de L08-4). « Arrêter » coupe llama.cpp, et le texte déjà reçu reste (L09-10).

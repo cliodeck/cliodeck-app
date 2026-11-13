@@ -305,7 +305,8 @@ export class EmbeddedEmbeddingProvider
    * Une passe llama.cpp — le chargement du modèle, le calcul d'un embedding — ne s'interrompt pas :
    * un abandon prend effet à la fin de la passe en cours, qui ne rend pas son vecteur, et la promesse
    * rejette alors par la raison du signal, comme `fetch` (J9). La génération, elle, s'arrête au jeton
-   * suivant (L09-10).
+   * suivant pendant l'écriture, et à la fin de la lecture des consignes pendant celle-ci (L09-10,
+   * `EmbeddedLLMClient.generateChat`).
    */
   async embed(
     texts: string[],
