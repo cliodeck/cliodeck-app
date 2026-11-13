@@ -16,6 +16,8 @@ import type {
   ProviderCapabilities,
   ProviderStatus,
 } from './base.js';
+import { collectCompletion } from './collect.js';
+import { readProviderError } from './provider-error.js';
 
 export interface OpenAICompatProviderConfig {
   baseUrl: string;
@@ -54,6 +56,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private readonly baseUrl: string;
   readonly model: string;
   private readonly apiKey?: string;
+  /** Préfixe des codes d'erreur : Mistral garde le sien, pour que le chat et le journal le nomment. */
+  protected readonly errorPrefix: string = 'openai_compat';
 
   constructor(cfg: OpenAICompatProviderConfig) {
     this.baseUrl = cfg.baseUrl.replace(/\/$/, '');
@@ -76,7 +80,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       this.status = {
         state: 'failed',
         lastError: {
-          code: 'openai_compat_unreachable',
+          code: `${this.errorPrefix}_unreachable`,
           message: e instanceof Error ? e.message : String(e),
           at: now(),
         },
@@ -140,7 +144,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       this.status = {
         state: 'failed',
         lastError: {
-          code: 'openai_compat_request_failed',
+          code: `${this.errorPrefix}_request_failed`,
           message: e instanceof Error ? e.message : String(e),
           at: now(),
         },
@@ -149,7 +153,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
       return;
     }
 
+    // La cause est posée avant le chunk terminal : `chat-engine` lit l'état à son arrivée, puis
+    // lâche le flux (S05-1-5).
     if (!res.ok || !res.body) {
+      this.status = {
+        state: 'degraded',
+        lastError: {
+          code: `${this.errorPrefix}_http_${res.status}`,
+          message: res.ok ? 'Réponse sans corps' : await readProviderError(res),
+          at: now(),
+        },
+      };
       yield { delta: '', done: true, finishReason: 'error' };
       return;
     }
@@ -204,6 +218,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
             }
             try {
               const obj = JSON.parse(payload) as {
+                error?: string | { message?: string };
                 choices?: Array<{
                   delta?: {
                     content?: string;
@@ -221,6 +236,22 @@ export class OpenAICompatibleProvider implements LLMProvider {
                   total_tokens?: number;
                 };
               };
+              // Une erreur en cours de flux (`data: {"error": …}`) coupe la réponse : elle
+              // n'a pas de `choices`, et passait pour un morceau vide.
+              if (obj.error) {
+                const message =
+                  typeof obj.error === 'string' ? obj.error : obj.error.message;
+                this.status = {
+                  state: 'degraded',
+                  lastError: {
+                    code: `${this.errorPrefix}_stream_error`,
+                    message: message || JSON.stringify(obj.error),
+                    at: now(),
+                  },
+                };
+                yield { delta: '', done: true, finishReason: 'error' };
+                return;
+              }
               const choice = obj.choices?.[0];
               const delta = choice?.delta?.content ?? '';
               const tcs = choice?.delta?.tool_calls;
@@ -270,37 +301,38 @@ export class OpenAICompatibleProvider implements LLMProvider {
           }
         }
       }
+      // Fermé sans `finish_reason` ni `[DONE]` : fin normale. Les serveurs locaux (llama.cpp,
+      // LM Studio…) ne sont pas fiables sur ce point ; l'exiger ferait échouer des réponses complètes.
       yield* flushToolCalls();
       yield { delta: '', done: true, finishReason: 'stop', usage: finalUsage };
     } catch (e) {
+      // La cause est posée avant le chunk terminal : `chat-engine` lit l'état à son arrivée, puis
+      // lâche le flux.
       const cancelled = opts.signal?.aborted;
-      yield {
-        delta: '',
-        done: true,
-        finishReason: cancelled ? 'cancelled' : 'error',
-      };
       if (!cancelled) {
         this.status = {
           state: 'degraded',
           lastError: {
-            code: 'openai_compat_stream_failed',
+            code: `${this.errorPrefix}_stream_failed`,
             message: e instanceof Error ? e.message : String(e),
             at: now(),
           },
         };
       }
+      yield {
+        delta: '',
+        done: true,
+        finishReason: cancelled ? 'cancelled' : 'error',
+      };
     }
   }
 
   async complete(prompt: string, opts: CompleteOptions = {}): Promise<string> {
-    let out = '';
-    for await (const chunk of this.chat(
-      [{ role: 'user', content: prompt }],
-      opts
-    )) {
-      out += chunk.delta;
-    }
-    return out;
+    const { text } = await collectCompletion(
+      this,
+      this.chat([{ role: 'user', content: prompt }], opts)
+    );
+    return text;
   }
 
   async dispose(): Promise<void> {

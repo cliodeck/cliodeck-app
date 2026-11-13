@@ -19,6 +19,7 @@ import type {
   ProviderStatus,
 } from './base.js';
 import { Agent } from 'undici';
+import { collectCompletion } from './collect.js';
 
 export interface OllamaProviderConfig {
   baseUrl?: string;
@@ -315,11 +316,19 @@ export class OllamaProvider implements LLMProvider {
     let buf = '';
     let toolCallCounter = 0;
     let sawToolCall = false;
+    // Une réponse complète se clôt par une ligne `done` ; sans elle, le flux a été coupé.
+    let sawDone = false;
+    let ended = false;
     try {
-      while (true) {
+      while (!ended) {
         const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
+        if (done) {
+          // Une dernière ligne sans saut de ligne final se lit quand même.
+          ended = true;
+          buf += decoder.decode() + '\n';
+        } else {
+          buf += decoder.decode(value, { stream: true });
+        }
         let nl: number;
         while ((nl = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, nl).trim();
@@ -327,6 +336,7 @@ export class OllamaProvider implements LLMProvider {
           if (!line) continue;
           try {
             const obj = JSON.parse(line) as {
+              error?: unknown;
               message?: {
                 content?: string;
                 thinking?: string;
@@ -342,6 +352,20 @@ export class OllamaProvider implements LLMProvider {
               prompt_eval_count?: number;
               eval_count?: number;
             };
+            // Les en-têtes 200 partis, Ollama signale un échec par une ligne `{"error": …}` puis
+            // ferme le flux : un runner tombé faute de mémoire en pleine réponse (S05-1-2).
+            if (typeof obj.error === 'string') {
+              this.status = {
+                state: 'degraded',
+                lastError: {
+                  code: 'ollama_stream_error',
+                  message: obj.error || 'Erreur sans détail en cours de flux',
+                  at: now(),
+                },
+              };
+              yield { delta: '', done: true, finishReason: 'error' };
+              return;
+            }
             const delta = obj.message?.content ?? '';
             const thinking = obj.message?.thinking ?? '';
             if (thinking) {
@@ -368,6 +392,7 @@ export class OllamaProvider implements LLMProvider {
               }
             }
             if (obj.done) {
+              sawDone = true;
               const finishReason: ChatChunk['finishReason'] = sawToolCall
                 ? 'tool_call'
                 : obj.done_reason === 'length'
@@ -392,13 +417,21 @@ export class OllamaProvider implements LLMProvider {
           }
         }
       }
+      if (!sawDone) {
+        this.status = {
+          state: 'degraded',
+          lastError: {
+            code: 'ollama_stream_incomplete',
+            message: 'Le flux s’est fermé avant la fin de la réponse.',
+            at: now(),
+          },
+        };
+        yield { delta: '', done: true, finishReason: 'error' };
+      }
     } catch (e) {
+      // La cause est posée avant le chunk terminal : `chat-engine` lit l'état à son arrivée, puis
+      // lâche le flux.
       const cancelled = opts.signal?.aborted;
-      yield {
-        delta: '',
-        done: true,
-        finishReason: cancelled ? 'cancelled' : 'error',
-      };
       if (!cancelled) {
         this.status = {
           state: 'degraded',
@@ -409,18 +442,20 @@ export class OllamaProvider implements LLMProvider {
           },
         };
       }
+      yield {
+        delta: '',
+        done: true,
+        finishReason: cancelled ? 'cancelled' : 'error',
+      };
     }
   }
 
   async complete(prompt: string, opts: CompleteOptions = {}): Promise<string> {
-    let out = '';
-    for await (const chunk of this.chat(
-      [{ role: 'user', content: prompt }],
-      opts
-    )) {
-      out += chunk.delta;
-    }
-    return out;
+    const { text } = await collectCompletion(
+      this,
+      this.chat([{ role: 'user', content: prompt }], opts)
+    );
+    return text;
   }
 
   async dispose(): Promise<void> {

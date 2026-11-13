@@ -32,6 +32,7 @@ export interface MistralEmbeddingConfig
 export class MistralProvider extends OpenAICompatibleProvider {
   readonly id = 'mistral';
   readonly name = 'Mistral';
+  protected readonly errorPrefix = 'mistral';
 
   constructor(cfg: MistralProviderConfig) {
     super({ ...cfg, baseUrl: cfg.baseUrl ?? MISTRAL_BASE });

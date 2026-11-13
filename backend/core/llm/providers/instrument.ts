@@ -11,6 +11,9 @@
  *  - `LLMProvider.complete()` jette l'usage dans tous les providers → on ré-implémente
  *    `complete()` en consommant le `chat()` interne pour récupérer les tokens.
  *
+ * Un tour qui finit par un chunk terminal `error` est une erreur au journal, même sans exception :
+ * le contrat de `base.ts` interdit de lever une fois le flux commencé (L09-7).
+ *
  * Agrégation des indexations en masse : à l'intérieur d'un scope `runBatch`, `embed()`
  * accumule dans le contexte au lieu d'émettre un événement par chunk.
  *
@@ -35,6 +38,7 @@ import {
   recordInference,
 } from '../../usage-journal/context.js';
 import { isLocalProvider } from '../../usage-journal/is-local.js';
+import { collectCompletion, ProviderCallError } from './collect.js';
 import { resolveEmbeddingProvider } from './fallback.js';
 
 /** Estimation grossière de tokens quand l'API n'en fournit pas (~4 caractères/token). */
@@ -90,6 +94,7 @@ class InstrumentedLLM implements LLMProvider {
       for await (const chunk of this.inner.chat(messages, opts)) {
         completionChars += chunk.delta.length;
         if (chunk.usage) usage = chunk.usage;
+        if (chunk.done && chunk.finishReason === 'error') errored = true;
         yield chunk;
       }
     } catch (err) {
@@ -103,6 +108,7 @@ class InstrumentedLLM implements LLMProvider {
   async complete(prompt: string, opts?: CompleteOptions): Promise<string> {
     // Les providers implémentent complete() en consommant leur propre chat() et
     // jettent l'usage ; on reproduit ce comportement mais on capture les tokens.
+    // `collectCompletion` lève sur un terminal `error` ou `cancelled`, comme leurs complete().
     const start = Date.now();
     const workspaceRoot = originWorkspaceRoot();
     const promptChars = prompt.length;
@@ -110,15 +116,13 @@ class InstrumentedLLM implements LLMProvider {
     let usage: ChatChunk['usage'];
     let errored = false;
     try {
-      for await (const chunk of this.inner.chat(
-        [{ role: 'user', content: prompt }],
-        opts
-      )) {
-        out += chunk.delta;
-        if (chunk.usage) usage = chunk.usage;
-      }
+      ({ text: out, usage } = await collectCompletion(
+        this.inner,
+        this.inner.chat([{ role: 'user', content: prompt }], opts)
+      ));
     } catch (err) {
-      errored = true;
+      // Un appel annulé n'est pas une panne : il reste « ok », comme un chat() annulé.
+      errored = !(err instanceof ProviderCallError && err.finishReason === 'cancelled');
       throw err;
     } finally {
       this.emitCompletion(start, workspaceRoot, promptChars, out.length, usage, errored);

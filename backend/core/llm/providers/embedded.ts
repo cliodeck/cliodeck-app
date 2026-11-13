@@ -31,6 +31,7 @@ import type {
   ProviderCapabilities,
   ProviderStatus,
 } from './base.js';
+import { collectCompletion } from './collect.js';
 
 export interface EmbeddedProviderConfig {
   /** Chemin absolu du fichier GGUF (config `llm.embeddedModelPath`). */
@@ -231,11 +232,11 @@ export class EmbeddedProvider extends EmbeddedBase implements LLMProvider {
   }
 
   async complete(prompt: string, opts: CompleteOptions = {}): Promise<string> {
-    let out = '';
-    for await (const chunk of this.chat([{ role: 'user', content: prompt }], opts)) {
-      out += chunk.delta;
-    }
-    return out;
+    const { text } = await collectCompletion(
+      this,
+      this.chat([{ role: 'user', content: prompt }], opts)
+    );
+    return text;
   }
 
   async dispose(): Promise<void> {
