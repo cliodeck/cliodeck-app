@@ -39,6 +39,8 @@ interface ChunkEnv {
     finishReason?: string;
   };
   error?: { code: string; message: string };
+  /** Terminal seulement : le modèle qui a servi le tour (S16-1-23). */
+  model?: string;
 }
 
 export interface FusionChatApi {
@@ -118,7 +120,7 @@ function onChunk(env: ChunkEnv): void {
   if (!aId) return;
   const store = useChatStore.getState();
   if (env.error) {
-    store.finishAssistant(aId, env.chunk.finishReason ?? 'error', errorMessage(env.error));
+    store.finishAssistant(aId, env.chunk.finishReason ?? 'error', errorMessage(env.error), env.model);
     assistantBySession.delete(env.sessionId);
     return;
   }
@@ -127,7 +129,7 @@ function onChunk(env: ChunkEnv): void {
   if (env.chunk.thinking) store.appendThinking(aId, env.chunk.thinking);
   if (env.chunk.delta) store.appendDelta(aId, env.chunk.delta);
   if (env.chunk.done) {
-    store.finishAssistant(aId, env.chunk.finishReason);
+    store.finishAssistant(aId, env.chunk.finishReason, undefined, env.model);
     assistantBySession.delete(env.sessionId);
   }
 }

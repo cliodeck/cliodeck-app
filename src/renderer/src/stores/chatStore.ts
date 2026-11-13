@@ -68,6 +68,12 @@ export interface BrainstormMessage {
   ragCitation?: boolean;
   finishReason?: string;
   error?: string;
+  /**
+   * Le modèle qui a écrit la réponse, dit par le main au terminal du tour. Il signe les brouillons
+   * et les propositions (S16-1-23). Absent d'une réponse arrêtée par l'auteur (le terminal n'est pas
+   * attendu) : elle est signée « unknown ».
+   */
+  model?: string;
   sources?: BrainstormSource[];
   toolCalls?: BrainstormToolCall[];
   // Legacy-parity fields (carried for Write mode):
@@ -183,7 +189,8 @@ interface State {
   finishAssistant: (
     assistantId: string,
     finishReason?: string,
-    error?: string
+    error?: string,
+    model?: string
   ) => void;
   cancel: () => void;
   reset: () => void;
@@ -318,7 +325,7 @@ export const useChatStore = create<State>((set) => ({
     }));
   },
 
-  finishAssistant: (assistantId, finishReason, error) => {
+  finishAssistant: (assistantId, finishReason, error, model) => {
     // Seule la fin du tour en cours le clôt : celle d'un tour effacé, arrivée après l'envoi du
     // suivant, ôtait à celui-ci son bouton Stop et sa session (S16-1-3).
     set((s) => ({
@@ -330,6 +337,7 @@ export const useChatStore = create<State>((set) => ({
               pending: false,
               finishReason,
               error,
+              ...(model !== undefined && { model }),
               isError: error ? true : m.isError,
             }
           : m

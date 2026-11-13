@@ -268,6 +268,7 @@ import type {
   ChatChunk,
   ChatMessage,
   CompleteOptions,
+  LLMProvider,
 } from '../../../backend/core/llm/providers/base.js';
 
 /**
@@ -502,6 +503,12 @@ export interface ChatStreamEnvelope {
   chunk: ChatChunk;
   /** When present, terminal envelope carrying a fatal error message. */
   error?: { code: string; message: string };
+  /**
+   * Terminal seulement : le modèle qui a servi le tour, lu après le choix d'un repli. Le renderer en
+   * signe les brouillons et les propositions (S16-1-23). Absent quand le tour n'a atteint aucun
+   * fournisseur (configuration invalide, envoi distant refusé).
+   */
+  model?: string;
 }
 
 /**
@@ -587,9 +594,12 @@ class FusionChatService {
         // Renderer gone — abandon silently.
       }
     };
+    // Le fournisseur du tour, une fois construit : le terminal dit son modèle.
+    let turnLLM: LLMProvider | null = null;
     const sendChunk = (chunk: ChatChunk, error?: { code: string; message: string }): void => {
       const envelope: ChatStreamEnvelope = { sessionId, chunk };
       if (error) envelope.error = error;
+      if (chunk.done && turnLLM) envelope.model = turnLLM.model;
       safeSend('fusion:chat:chunk', envelope);
     };
 
@@ -747,6 +757,7 @@ class FusionChatService {
     }
 
     const llm = registry.getLLM();
+    turnLLM = llm;
 
     // Options du tour (voir `resolveTurnOptions`). La fenêtre `num_ctx`
     // est transmise à Ollama ET sert de budget au compacteur, pour que les

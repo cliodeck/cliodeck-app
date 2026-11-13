@@ -19,7 +19,7 @@
  * accidentel ne dédoublerait rien.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowRight, Check, Highlighter, Inbox, Library, Loader2, Settings, ShieldAlert, SlidersHorizontal, X } from 'lucide-react';
 import { securityBadgeColor } from '../Brainstorm/security-badge';
@@ -208,43 +208,6 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   const indexedCount = indexedFilePaths.size;
   const hasProject = useProjectStore((st) => st.currentProject !== null);
 
-  // Modèle actif, dérivé de la config LLM (résolue côté main au chat) —
-  // transmis aux propositions « draft » (source.model, Phase 4b).
-  const activeModelRef = useRef<string>('unknown');
-  // Le modèle choisi dans le panneau du chat : c'est lui que le main
-  // applique à la génération Ollama, pas celui lu une fois au montage.
-  const ragModel = useRAGQueryStore((s) => s.params.model);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const llm: {
-          backend: string;
-          ollamaChatModel?: string;
-          claudeModel?: string;
-          openaiModel?: string;
-          mistralModel?: string;
-          geminiModel?: string;
-        } | null = await window.electron.config.get('llm');
-        if (cancelled || !llm) return;
-        const byBackend: Record<string, string | undefined> = {
-          ollama: ragModel?.trim() || llm.ollamaChatModel,
-          claude: llm.claudeModel,
-          openai: llm.openaiModel,
-          mistral: llm.mistralModel,
-          gemini: llm.geminiModel,
-        };
-        activeModelRef.current = byBackend[llm.backend] ?? 'unknown';
-      } catch {
-        // Config inaccessible (préload partiel, tests) : 'unknown' reste.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [ragModel]);
-
   // Project RAG params + active mode onto chatStore.chatSettings so every
   // `fusion.chat.start` picks up current filters.
   useChatSettingsProjection();
@@ -287,9 +250,12 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     }
   }, [isStreaming, ragStatus]);
 
+  // Le modèle qui a écrit la réponse, dit par le main au terminal du tour (S16-1-23). Le deviner
+  // dans les réglages signait du modèle Ollama du panneau une réponse du modèle embarqué, et le
+  // journal d'usage le publiait avec l'adjudication. Sans terminal (réponse arrêtée), « unknown ».
   const draftSource = useCallback(
-    () => ({
-      model: activeModelRef.current,
+    (m: BrainstormMessage) => ({
+      model: m.model ?? 'unknown',
       task: useChatStore.getState().chatSettings.modeId ?? 'brainstorm',
     }),
     []
@@ -300,15 +266,15 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
   // d'être proposée immédiatement. Le brouillon porte le projet de la réponse
   // (Q12), lu au clic comme sa source.
   const sendToDrafts = useCallback(
-    (m: BrainstormMessage, source = draftSource(), projectPath = answerProject()): void => {
+    (m: BrainstormMessage, source = draftSource(m), projectPath = answerProject()): void => {
       useDraftsStore.getState().enqueue({ content: messageToDraft(m), source, projectPath });
       setDraftedId(m.id);
     },
     [draftSource]
   );
 
-  // Une proposition au curseur de l'éditeur, qui porte le modèle et le mode actifs
-  // (fusion 2.6, A13 option a). Passer en Écriture peut démonter ce composant :
+  // Une proposition au curseur de l'éditeur, qui porte le modèle de la réponse et le
+  // mode actif (fusion 2.6, A13 option a). Passer en Écriture peut démonter ce composant :
   // la source se lit avant l'attente, et le repli ne dépend que du store. Un
   // éditeur qui ne monte pas n'efface pas la réponse : elle part au brouillon.
   // Le projet aussi se lit avant : une bascule pendant l'attente montrerait B,
@@ -317,7 +283,7 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
     async (m: BrainstormMessage): Promise<void> => {
       if (sendingToWrite.has(m.id)) return;
       sendingToWrite.add(m.id);
-      const source = draftSource();
+      const source = draftSource(m);
       const projectPath = answerProject();
       const outcome = await sendDraftToWrite(messageToDraft(m), source);
       sendingToWrite.delete(m.id);

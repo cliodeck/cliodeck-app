@@ -315,6 +315,55 @@ describe('banc du pump de chat', () => {
   });
 });
 
+/**
+ * Le terminal porte le modèle du tour (S16-1-23) : le renderer en signe les brouillons et les
+ * propositions, que le journal d'usage reçoit ensuite. Il les signait d'un modèle deviné dans les
+ * réglages (le modèle Ollama du panneau, même en génération embarquée).
+ */
+describe('le terminal porte le modèle du tour (S16-1-23)', () => {
+  it('fin ordinaire, annulation, délai d’inactivité, panne du fournisseur : le modèle qui a servi', async () => {
+    bench.provider = async function* () {
+      yield { delta: 'Réponse.', done: false };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    const done = startTurn();
+    await vi.waitFor(() => expect(terminal(done.sent)).toBeDefined(), WAIT);
+
+    bench.provider = waitForAbort;
+    const stopped = startTurn();
+    await vi.waitFor(() => expect(bench.seenOpts).toHaveLength(2), WAIT);
+    fusionChatService.cancel(stopped.sessionId);
+    await vi.waitFor(() => expect(terminal(stopped.sent)).toBeDefined(), WAIT);
+
+    const idle = startTurn({ timeoutMs: 30 });
+    await vi.waitFor(() => expect(terminal(idle.sent)).toBeDefined(), WAIT);
+
+    bench.provider = async function* () {
+      yield { delta: '', done: true, finishReason: 'error' };
+    };
+    const failed = startTurn();
+    await vi.waitFor(() => expect(terminal(failed.sent)).toBeDefined(), WAIT);
+
+    expect(
+      [done, stopped, idle, failed].map(({ sent }) => [terminal(sent)?.chunk.finishReason, terminal(sent)?.model])
+    ).toEqual([
+      ['stop', 'fake-model'],
+      ['cancelled', 'fake-model'],
+      ['error', 'fake-model'],
+      ['error', 'fake-model'],
+    ]);
+    // Les morceaux de la réponse ne le portent pas : seul le terminal le dit.
+    expect(chunks(done.sent).filter((e) => !e.chunk.done).every((e) => e.model === undefined)).toBe(true);
+  });
+
+  it('configuration invalide : aucun modèle n’a servi, le terminal n’en nomme aucun', async () => {
+    bench.configError = 'clé API absente';
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(terminal(sent)?.model).toBeUndefined();
+  });
+});
+
 describe('consentement distant : modèle Ollama hébergé (L04-1)', () => {
   const NOTE = 'La longue durée écrase l’événement.';
   const noteHit: ReadingNoteMappedSearchResult = {
