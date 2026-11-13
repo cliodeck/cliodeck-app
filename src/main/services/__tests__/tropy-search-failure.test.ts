@@ -525,7 +525,10 @@ describe.skipIf(!sqliteAvailable)('au chat : la bande et la consigne d’échec'
     expect(status).toBe('failed');
     expect(corpora.primary).toMatchObject({ attempted: true, ok: false, hitCount: 0 });
     expect(corpora.secondary).toMatchObject({ attempted: true, ok: false });
-    expect(prompt).toContain('searches failed');
+    // Au modèle aussi, la consigne d'une recherche qui n'a pas eu lieu, pas « certaines
+    // recherches » : celle que le moteur écrit quand la recherche lève (S04-2-1).
+    expect(prompt).toContain('The source search failed');
+    expect(prompt).not.toContain('searches failed');
   });
 
   it('projet sans Tropy, embeddings en panne : la bande vient des autres corpus, les archives restent à 0', async () => {

@@ -241,10 +241,15 @@ export interface RunChatTurnArgs<TSource = unknown> {
   promptLanguage?: 'fr' | 'en';
 }
 
-/** Consigne au modèle quand la recherche lève : il ne doit rien prétendre avoir lu. */
-const RETRIEVAL_FAILED_TEXT: Record<'fr' | 'en', string> = {
-  fr: 'La recherche dans les sources a échoué. Aucun extrait n’a été récupéré. Ne prétends pas avoir consulté des sources et ne fabrique pas de citations.',
-  en: 'The source search failed. No evidence was retrieved. Do not imply that sources were consulted or invent citations.',
+/**
+ * Consigne au modèle quand la recherche lève : il ne doit rien prétendre avoir lu, ni conclure que
+ * les sources se taisent, et doit le dire à l'utilisateur (S04-2-1). Le service la reprend telle
+ * quelle quand chaque corpus a échoué de son côté (`CONTEXT_TEXT.searchFailed`) : une seule
+ * consigne pour une recherche qui n'a pas eu lieu.
+ */
+export const RETRIEVAL_FAILED_TEXT: Record<'fr' | 'en', string> = {
+  fr: 'La recherche dans les sources a échoué pour ce tour. Aucun extrait n’a été récupéré. Dis à l’utilisateur que ses sources n’ont pas pu être consultées : ne conclus pas qu’elles ne disent rien sur la question, ne prétends pas les avoir consultées et ne fabrique pas de citations.',
+  en: 'The source search failed for this turn. No evidence was retrieved. Tell the user that their sources could not be searched: do not conclude that they say nothing about the question, do not imply that they were consulted, and do not invent citations.',
 };
 
 /**

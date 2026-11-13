@@ -85,7 +85,8 @@ import { projectManager } from '../project-manager.js';
 import { retrievalService } from '../retrieval-service.js';
 import { manuscriptIndexService } from '../manuscript-index-service.js';
 import { readingNotesIndexService } from '../reading-notes-index-service.js';
-import type { ReadingNoteMappedSearchResult } from '../retrieval-service.js';
+import type { ReadingNoteMappedSearchResult, RetrievalSearchWithStatsResult } from '../retrieval-service.js';
+import type { RAGExplanation } from '../../../../backend/types/chat-source.js';
 import { cloudConsent } from '../../../../backend/security/cloud-consent.js';
 import { historyService } from '../history-service.js';
 import { mcpClientsService } from '../mcp-clients-service.js';
@@ -588,5 +589,104 @@ describe('bascule de projet pendant un tour (L03-6)', () => {
     await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
 
     expect(seen).toEqual([A, A]);
+  });
+});
+
+/**
+ * La recherche en panne (S04-2-1). Ollama arrêté, la bibliographie et le coffre échouent et Tropy,
+ * sans projet lié, ne rend rien : l'historien voyait Claude répondre de culture générale, ou conclure
+ * que l'information « est absente des sources ». L'explication « échec » existe (#212) ; la consigne
+ * au modèle doit dire que la recherche a échoué, lui demander de le dire, et ne pas varier selon que
+ * la recherche a levé ou que chaque corpus a échoué de son côté. « Arrêter » pendant la recherche
+ * n'est pas une panne (J9).
+ */
+describe('recherche en échec : le modèle et l’écran le disent (S04-2-1)', () => {
+  let project = '';
+
+  beforeEach(() => {
+    project = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-recherche-en-panne-'));
+    vi.mocked(projectManager.getCurrentProjectPath).mockReturnValue(project);
+    bench.provider = async function* () {
+      yield { delta: 'réponse', done: false };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+  });
+
+  afterEach(() => {
+    fs.rmSync(project, { recursive: true, force: true });
+  });
+
+  type Corpus = 'secondary' | 'primary' | 'vault';
+  const corpus = (source: Corpus, ok: boolean) =>
+    ({ source, attempted: true, ok, hitCount: 0, selectedCount: 0 });
+  const withCorpora = (corpora: Array<ReturnType<typeof corpus>>): RetrievalSearchWithStatsResult => ({
+    hits: [], manuscriptHits: [], readingNoteHits: [], outcomes: [], securityEvents: [],
+    stats: { search: { query: 'question', totalResults: 0, searchDurationMs: 1, cacheHit: false, sourceType: 'both', documents: [], corpora }, timing: { searchMs: 1 } },
+  });
+
+  /** Les messages système reçus par le modèle au dernier appel. */
+  const systemText = (): string =>
+    (bench.seenMessages.at(-1) ?? []).filter((m) => m.role === 'system').map((m) => m.content).join('\n').trim();
+  const explanationOf = (sent: Sent[]): RAGExplanation | undefined =>
+    (sent.find((e) => e.channel === 'fusion:chat:explanation')?.payload as { explanation: RAGExplanation } | undefined)
+      ?.explanation;
+
+  async function turn(): Promise<Sent[]> {
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    return sent;
+  }
+
+  it('tous les corpus tentés en échec : explication « failed », et la consigne d’une recherche qui a levé', async () => {
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValueOnce(
+      withCorpora([corpus('secondary', false), corpus('primary', false), corpus('vault', false)])
+    );
+    const allFailed = await turn();
+    expect(terminal(allFailed)?.error).toBeUndefined();
+    expect(explanationOf(allFailed)?.search.retrievalStatus).toBe('failed');
+    const failedNote = systemText();
+
+    vi.mocked(retrievalService.searchWithStats).mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:11434'));
+    const thrown = await turn();
+    expect(terminal(thrown)?.error).toBeUndefined();
+    expect(explanationOf(thrown)?.search.retrievalStatus).toBe('failed');
+
+    expect(bench.seenOpts).toHaveLength(2);
+    expect(failedNote).toBe(systemText());
+    expect(failedNote).toMatch(/Dis à l['’]utilisateur/);
+    expect(failedNote).toMatch(/ne conclus pas/);
+  });
+
+  it('une partie des corpus en échec, aucun extrait : la consigne demande de le dire, pas de conclure à une absence', async () => {
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValueOnce(
+      withCorpora([corpus('secondary', false), corpus('primary', true)])
+    );
+    const sent = await turn();
+    expect(explanationOf(sent)?.search.retrievalStatus).toBe('partial');
+    expect(systemText()).toMatch(/Dis à l['’]utilisateur/);
+    expect(systemText()).toMatch(/ne conclus pas/);
+  });
+
+  it('témoin J9 : « Arrêter » pendant la recherche ne donne ni consigne, ni échec affiché, ni appel au modèle', async () => {
+    let searching = false;
+    vi.mocked(retrievalService.searchWithStats).mockImplementationOnce(
+      (q) =>
+        new Promise((_resolve, reject) => {
+          searching = true;
+          const signal = q.signal;
+          if (!signal) return reject(new Error('la recherche n’a pas reçu le signal du tour'));
+          // Comme la recherche réelle : arrêtée, elle rejette par la raison du signal.
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        })
+    );
+    const { sessionId, sent } = startTurn();
+    await vi.waitFor(() => expect(searching).toBe(true), WAIT);
+    expect(fusionChatService.cancel(sessionId)).toBe(true);
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(terminal(sent)?.chunk.finishReason).toBe('cancelled');
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(explanationOf(sent)).toBeUndefined();
+    expect(bench.seenOpts).toHaveLength(0);
   });
 });
