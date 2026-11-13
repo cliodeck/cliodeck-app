@@ -231,7 +231,8 @@ export interface RunChatTurnArgs<TSource = unknown> {
    * runs `compactor.compact(messages)` at the start of each agent-loop
    * iteration so long sessions don't saturate the provider's window.
    * Compaction failures are swallowed (logged + skipped) so a faulty
-   * summarisation never aborts the user's chat turn.
+   * summarisation never aborts the user's chat turn. Arrêté pendant le
+   * résumé, le tour finit annulé (S06-1-18).
    */
   compactor?: ContextCompactor;
   /**
@@ -481,12 +482,18 @@ export async function runChatTurn<TSource = unknown>(
       // Compaction: only when a compactor is wired AND the conversation
       // already crossed its trigger threshold. The compactor itself
       // returns the same array reference when it decides nothing needs
-      // changing, so we can detect that without computing tokens twice.
-      if (args.compactor) {
+      // changing (or when its summary came back empty).
+      // Le résumé fait partie du tour (S06-1-18) : annoncé avant l'appel, il reçoit le signal du
+      // tour, et chacun de ses chunks relance le statut, ce qui nourrit le délai d'inactivité du
+      // service sans masquer un résumé dont plus rien ne vient.
+      if (args.compactor?.needsCompaction(messages)) {
+        safeStatus({ phase: 'compressing' });
         try {
-          const compacted = await args.compactor.compact(messages);
+          const compacted = await args.compactor.compact(messages, {
+            signal: args.signal,
+            onActivity: () => safeStatus({ phase: 'compressing' }),
+          });
           if (compacted !== messages) {
-            safeStatus({ phase: 'compressing' });
             console.log('[chat-engine] context compacted', {
               before: messages.length,
               after: compacted.length,
@@ -494,11 +501,30 @@ export async function runChatTurn<TSource = unknown>(
             messages = compacted;
           }
         } catch (e) {
-          console.warn(
-            '[chat-engine] compaction skipped:',
-            e instanceof Error ? e.message : e
-          );
+          // Arrêté avec le tour, le résumé n'a pas échoué : le tour finit annulé, juste en dessous.
+          if (!args.signal?.aborted) {
+            console.warn(
+              '[chat-engine] compaction skipped:',
+              e instanceof Error ? e.message : e
+            );
+          }
         }
+        // « Arrêter » (ou le délai d'inactivité, ou la fermeture du projet) pendant le résumé : le
+        // tour finit annulé, comme arrêté pendant la réponse, sans demander au modèle une réponse
+        // que plus personne n'attend.
+        if (args.signal?.aborted) {
+          finalFinishReason = 'cancelled';
+          generationMs = Date.now() - generationStart;
+          emitExplanation();
+          safeStatus({ phase: 'done' });
+          hooks.onDone?.({ delta: '', done: true, finishReason: 'cancelled' });
+          logTurnDone();
+          return;
+        }
+        // La phase qui suit se redit : après un passage d'outils, « generating » ne repartait
+        // pas, et le bandeau restait sur « Compression du contexte… » pendant toute la réponse.
+        firstFrameSeen = false;
+        thinkingSeen = false;
       }
 
       for await (const chunk of args.provider.chat(messages, {

@@ -719,3 +719,101 @@ describe('recherche en échec : le modèle et l’écran le disent (S04-2-1)', (
     expect(bench.seenOpts).toHaveLength(0);
   });
 });
+
+/**
+ * Le résumé du compacteur dans un vrai tour (S06-1-18). Il partait avec `{ temperature: 0 }` seul :
+ * sans la fenêtre `num_ctx` du tour (Ollama tronquait la conversation à résumer à sa fenêtre par
+ * défaut), sans `think: false`, sans le signal du tour (« Arrêter » et le délai d'inactivité ne
+ * l'arrêtaient pas), et le délai d'inactivité ne le voyait pas avancer.
+ */
+describe('résumé du compacteur dans le tour (S06-1-18)', () => {
+  const isSummaryCall = (messages: ChatMessage[]): boolean =>
+    messages.some((m) => m.content.startsWith('You are compressing'));
+
+  async function* answer(): AsyncIterable<ChatChunk> {
+    yield { delta: 'Réponse.', done: false };
+    yield { delta: '', done: true, finishReason: 'stop' };
+  }
+
+  /** Six échanges de 1 200 caractères par message : bien au-delà de 70 % de 4 096 jetons. */
+  function startLongTurn(opts: { timeoutMs?: number } = {}): { sessionId: string; sent: Sent[] } {
+    const messages: ChatMessage[] = [];
+    for (let i = 1; i <= 6; i++) {
+      messages.push({ role: 'user', content: `Q${i} ${'x'.repeat(1200)}` });
+      messages.push({ role: 'assistant', content: `R${i} ${'y'.repeat(1200)}` });
+    }
+    messages.push({ role: 'user', content: 'Et le préfet Chiappe ?' });
+    const { webContents, sent } = captureWebContents();
+    const sessionId = fusionChatService.start({
+      webContents,
+      messages,
+      systemPrompt: { language: 'fr' },
+      opts: { numCtx: 4096, ...opts },
+    });
+    return { sessionId, sent };
+  }
+
+  beforeEach(() => {
+    // Comme les vrais fournisseurs, enveloppés par le journal d'usage : `complete()` passe par `chat()`.
+    bench.instrumented = true;
+  });
+
+  it('le résumé part avec la fenêtre du tour, sans raisonnement, sous le signal du tour', async () => {
+    bench.provider = async function* (messages) {
+      if (isSummaryCall(messages)) {
+        yield { delta: 'Résumé fidèle.', done: false };
+        yield { delta: '', done: true, finishReason: 'stop' };
+        return;
+      }
+      yield* answer();
+    };
+    const { sessionId, sent } = startLongTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    expect(bench.seenMessages.map(isSummaryCall)).toEqual([true, false]);
+    expect(bench.seenOpts[0]).toMatchObject({ temperature: 0, numCtx: 4096, think: false });
+    expect(bench.seenOpts[0].signal).toBeDefined();
+    expect(bench.seenOpts[0].signal).toBe(bench.seenOpts[1].signal);
+    expect(bench.seenMessages[1].some((m) => m.content.includes('Résumé fidèle.'))).toBe(true);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+  });
+
+  it("délai d'inactivité : un résumé dont rien ne vient le fait tomber, sans appel au modèle ensuite", async () => {
+    bench.provider = (messages, opts) => (isSummaryCall(messages) ? waitForAbort(messages, opts) : answer());
+    const { sessionId, sent } = startLongTurn({ timeoutMs: 30 });
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    expect(terminal(sent)?.chunk.finishReason).toBe('error');
+    expect(terminal(sent)?.error?.code).toBe('timeout');
+    expect(bench.seenMessages.map(isSummaryCall)).toEqual([true]);
+    expect(bench.seenOpts[0].signal?.aborted).toBe(true);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+  });
+
+  it("délai d'inactivité : un résumé qui avance le nourrit, même plus long que le délai", async () => {
+    const TIMEOUT_MS = 600;
+    // Un chunk toutes les 100 ms : chaque écart reste loin sous le délai, leur somme le dépasse.
+    const GAP_MS = 100;
+    let summaryMs = 0;
+    bench.provider = async function* (messages) {
+      if (!isSummaryCall(messages)) {
+        yield* answer();
+        return;
+      }
+      const startedAt = Date.now();
+      for (let i = 0; i < 9; i++) {
+        await new Promise((resolve) => setTimeout(resolve, GAP_MS));
+        yield { delta: `Partie ${i}. `, done: false };
+      }
+      summaryMs = Date.now() - startedAt;
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    const { sessionId, sent } = startLongTurn({ timeoutMs: TIMEOUT_MS });
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+    // Le résumé a duré plus que le délai : seul son avancement a gardé le tour en vie.
+    expect(summaryMs).toBeGreaterThan(TIMEOUT_MS);
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    expect(bench.seenMessages.map(isSummaryCall)).toEqual([true, false]);
+    await vi.waitFor(() => expect(operations.find(sessionId)).toBeNull(), WAIT);
+  });
+});
