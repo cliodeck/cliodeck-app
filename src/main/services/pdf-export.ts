@@ -111,6 +111,73 @@ const getSystemFonts = (): { mainFont: string; sansFont: string; monoFont: strin
   }
 };
 
+/**
+ * Ce que pandoc écrit et que seul SON gabarit par défaut définit (J19). Sans ce préambule, tout
+ * tableau échouait sur « Environment longtable undefined » (puis « No counter 'none' defined »),
+ * toute image sur « Undefined control sequence \pandocbounded », tout texte barré sur `\st`,
+ * toute liste de tâches sur `\square` ; le souligné, les formules alignées et le code dans une
+ * note de même.
+ *
+ * Recopié de pandoc 3.13 : `amsmath,amssymb` du gabarit (`pandoc --print-default-template
+ * latex`), `\VerbatimFootnotes` du partiel `after-header-includes.latex`, le reste du partiel
+ * `common.latex` (`pandoc --print-default-data-file templates/common.latex`), avec ses
+ * conditions — un document sans tableau ne charge ni longtable ni caption. N'en restent que les
+ * branches de xelatex hors beamer : xelatex est le seul moteur de l'export, et les présentations
+ * compilent avec le gabarit beamer de pandoc lui-même.
+ *
+ * Inclure le partiel (`$common.latex()$`) au lieu de le recopier ne tient pas : il redéfinit les
+ * macros de coloration et `CSLReferences` de ces gabarits (« Command \VerbBar already defined »),
+ * met les paragraphes sans alinéa (parskip) et n'existe qu'à partir de pandoc 3.5. Une version
+ * suivante de pandoc peut écrire une macro de plus : `pdf-export-latex.test.ts` compile chaque
+ * construction avec le pandoc installé.
+ */
+const PANDOC_OUTPUT_PREAMBLE = `% Ce que pandoc ecrit et que seul son gabarit par defaut definit : recopie
+% de pandoc 3.13 (default.latex, partiels common.latex et after-header-includes.latex),
+% branches xelatex hors beamer.
+\\usepackage{amsmath,amssymb}
+$if(verbatim-in-note)$
+\\usepackage{fancyvrb}
+\\VerbatimFootnotes % allow verbatim text in footnotes
+$endif$
+$if(tables)$
+\\usepackage{longtable,booktabs,array}
+\\usepackage{caption}
+\\captionsetup[table]{skip=6pt}
+\\newcounter{none} % for unnumbered tables
+$if(multirow)$
+\\usepackage{multirow}
+$endif$
+\\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \\paragraph or \\subparagraph
+\\usepackage{etoolbox}
+\\makeatletter
+\\patchcmd\\longtable{\\par}{\\if@noskipsec\\mbox{}\\fi\\par}{}{}
+\\makeatother
+$endif$
+$if(graphics)$
+\\usepackage{graphicx}
+\\makeatletter
+\\newsavebox\\pandoc@box
+\\newcommand*\\pandocbounded[1]{% scales image to fit in text height/width
+  \\sbox\\pandoc@box{#1}%
+  \\Gscale@div\\@tempa{\\textheight}{\\dimexpr\\ht\\pandoc@box+\\dp\\pandoc@box\\relax}%
+  \\Gscale@div\\@tempb{\\linewidth}{\\wd\\pandoc@box}%
+  \\ifdim\\@tempb\\p@<\\@tempa\\p@\\let\\@tempa\\@tempb\\fi% select the smaller of both
+  \\ifdim\\@tempa\\p@<\\p@\\scalebox{\\@tempa}{\\usebox\\pandoc@box}%
+  \\else\\usebox{\\pandoc@box}%
+  \\fi%
+}
+% Set default figure placement to htbp
+\\def\\fps@figure{htbp}
+\\makeatother
+$endif$
+$if(svg)$
+\\usepackage{svg}
+$endif$
+$if(strikeout)$
+\\usepackage{soul}
+$endif$`;
+
 const getLatexTemplate = (projectType: string): string => {
   // Get platform-appropriate system fonts
   const { mainFont, sansFont, monoFont } = getSystemFonts();
@@ -147,6 +214,8 @@ const getLatexTemplate = (projectType: string): string => {
 % par defaut. Sans cette variable, tout document contenant un bloc de code
 % echoue a la compilation (« Environment Shaded undefined »).
 $highlighting-macros$
+
+${PANDOC_OUTPUT_PREAMBLE}
 
 % CSLReferences environment and commands for pandoc citeproc
 \\newlength{\\cslhangindent}
@@ -248,6 +317,8 @@ $endif$
 % par defaut. Sans cette variable, tout document contenant un bloc de code
 % echoue a la compilation (« Environment Shaded undefined »).
 $highlighting-macros$
+
+${PANDOC_OUTPUT_PREAMBLE}
 
 % CSLReferences environment and commands for pandoc citeproc
 \\newlength{\\cslhangindent}

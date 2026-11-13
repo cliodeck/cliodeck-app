@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import Database from 'better-sqlite3';
+import { extendedToolPath } from '../../core/tools/external-tools.js';
 
 /** Message à coller en commentaire au point d'usage, pour un skip lisible. */
 export const SQLITE_SKIP_REASON =
@@ -64,6 +65,22 @@ export async function ollamaAvailable(
 export function pandocAvailable(): boolean {
   try {
     execFileSync('pandoc', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Vrai si un vrai xelatex répond, cherché comme l'export PDF le cherche (MacTeX n'est pas
+ * toujours au PATH) : à utiliser avec `describe.skipIf(!xelatexAvailable())`.
+ */
+export function xelatexAvailable(): boolean {
+  try {
+    execFileSync('xelatex', ['--version'], {
+      stdio: 'ignore',
+      env: { ...process.env, PATH: extendedToolPath(process.env.PATH ?? '') },
+    });
     return true;
   } catch {
     return false;
