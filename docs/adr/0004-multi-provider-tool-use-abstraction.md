@@ -31,7 +31,7 @@ The agent loop in `fusion-chat-service` stays provider-agnostic: it receives `to
 
 ### Trade-offs (honest)
 
-- **Gemini call ids are synthetic.** Gemini doesn't issue ids for `functionCall` parts. The provider generates `gemini-fc-N` per stream and maintains an id→name map to route the tool response back into the matching `functionResponse` part. If a stream restarts, the counter restarts — ids are not globally unique, only unique within a single assistant turn. That is enough for the round-trip but would break any persistence layer that assumed global uniqueness.
+- **Gemini call ids are synthetic.** Gemini doesn't issue ids for `functionCall` parts. The provider generates `gemini-fc-N` and maintains an id→name map to route the tool response back into the matching `functionResponse` part. ~~If a stream restarts, the counter restarts — ids are not globally unique, only unique within a single assistant turn.~~ **Amended 2026-11-13** — the counter now lives on the provider instance (see the note below). Ids are still not globally unique across instances or app restarts, which would break any persistence layer that assumed global uniqueness.
 - **"String everywhere" for `arguments`** matches Anthropic and OpenAI/Mistral but is lossy for Gemini, which natively passes an object. We serialize on ingest and parse on egress — two JSON hops per Gemini call. Cost is negligible but it is a real double-translation, and a malformed argument from Gemini would surface as a parse error on the wrong side of the boundary.
 - ~~**Ollama still has `tools: false`.**~~ **Amended 2026-07-25** — see the note below.
 - **Three mapping points per provider is the real cost** — new providers are not "just plug in." A half-implemented provider (e.g. request tools wired but history serialization missed) fails only on the second turn of an agent loop, which is a bad failure mode because it looks like a model error.
@@ -56,6 +56,20 @@ the other four providers. What is new is that `capabilities` became a function
 of configuration rather than of provider identity — a caller must not cache a
 provider's `tools` capability across a model change. The four cloud providers
 still advertise tool-use unconditionally.
+
+## Amendment — Gemini thought signatures (2026-11-13, L08-5)
+
+Gemini 3 and 4 attach an opaque `thoughtSignature` to the first `functionCall`
+part of each step, and reject the next request of the turn (HTTP 400) unless it
+comes back « in the exact part where it was received » (Gemini API page
+« Thought signatures », read 2026-11-13). The cross-provider shape has no field
+for it, and `base.ts` is not changed: `GeminiProvider` keeps each signature on
+the instance, keyed by the synthetic call id, and `toGeminiPayload` puts it back
+on the matching `functionCall` part. This is why the id counter moved from the
+stream to the instance: two steps of one turn both used to get `gemini-fc-1`,
+and one call's signature would have gone back on the other. Google validates
+the current turn only, so a signature lost with the instance (registry rebuilt,
+app restarted) only matters inside a turn in flight.
 
 ## References
 
