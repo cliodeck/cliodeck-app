@@ -252,7 +252,8 @@ export const AssistantChat: React.FC<AssistantChatProps> = ({ variant }) => {
 
   // Le modèle qui a écrit la réponse, dit par le main au terminal du tour (S16-1-23). Le deviner
   // dans les réglages signait du modèle Ollama du panneau une réponse du modèle embarqué, et le
-  // journal d'usage le publiait avec l'adjudication. Sans terminal (réponse arrêtée), « unknown ».
+  // journal d'usage le publiait avec l'adjudication. Une réponse arrêtée le reçoit du terminal
+  // `cancelled`, qui suit l'arrêt (`chatStream`) ; avant lui, ou sans fournisseur atteint, « unknown ».
   const draftSource = useCallback(
     (m: BrainstormMessage) => ({
       model: m.model ?? 'unknown',

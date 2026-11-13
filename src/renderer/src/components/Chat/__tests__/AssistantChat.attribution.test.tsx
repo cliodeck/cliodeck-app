@@ -180,6 +180,49 @@ describe('le modèle d’une réponse, jusqu’au brouillon et au journal d’us
     expect(recordAdjudication.mock.calls[0][0]).toMatchObject({ decision: 'accepted', model: EMBEDDED });
   });
 
+  it('« Arrêter » : la réponse arrêtée est signée du modèle que dit le terminal `cancelled`, arrivé après l’arrêt', async () => {
+    await act(async () => {
+      render(<AssistantChat variant="full" />);
+    });
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'Qui a interdit la manifestation ?' } });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    });
+    await wait(10);
+    const stopped = session();
+    act(() => emitChunk({ sessionId: stopped, chunk: { delta: ANSWER } }));
+
+    // L'auteur arrête : la bulle est close tout de suite, avant la réponse du main.
+    await act(async () => {
+      fireEvent.click(document.querySelector('.cancel-btn') as HTMLElement);
+    });
+    // Il repose aussitôt une question ; le terminal du tour arrêté arrive pendant celle-ci.
+    fireEvent.change(textarea, { target: { value: 'Et le lendemain ?' } });
+    await act(async () => {
+      fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+    });
+    await wait(10);
+    expect(session()).not.toBe(stopped);
+    // Une dernière bribe du tour arrêté, partie avant l'arrêt, n'entre pas dans sa bulle : seul le
+    // modèle du terminal y est posé.
+    act(() => emitChunk({ sessionId: stopped, chunk: { delta: ' Et la suite.' } }));
+    act(() =>
+      emitChunk({ sessionId: stopped, chunk: { delta: '', done: true, finishReason: 'cancelled' }, model: EMBEDDED })
+    );
+    await wait(10);
+
+    // Le tour suivant n'est pas clos par le terminal de l'autre.
+    expect(useChatStore.getState().sessionId).toBe(session());
+    expect(useChatStore.getState().pendingAssistantId).not.toBeNull();
+    const bubble = useChatStore.getState().messages.find((m) => m.role === 'assistant' && !m.pending);
+    expect(bubble).toMatchObject({ content: ANSWER, finishReason: 'cancelled', model: EMBEDDED });
+
+    fireEvent.click(screen.getByText('drafts.enqueue'));
+    expect(queued()).toHaveLength(1);
+    expect(queued()[0].source?.model).toBe(EMBEDDED);
+  });
+
   it('une réponse dont le terminal ne dit pas le modèle est signée « unknown », jamais devinée', async () => {
     await act(async () => {
       render(<AssistantChat variant="full" />);

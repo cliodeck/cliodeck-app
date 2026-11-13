@@ -84,17 +84,19 @@ comme une panne.
 Cas particuliers :
 
 - **Préchauffage du modèle** — à l'ouverture d'un projet, l'app charge le modèle
-  d'embeddings par un appel (`warmup query`) pour que la première question n'attende pas.
-  Ce geste de l'app n'a pas de conséquence méthodologique pour l'auteur : il **n'est pas
+  d'embeddings de l'indexation par un appel (`warmup query`). Avec le moteur embarqué,
+  elle charge aussi celui de la recherche, qui a son propre client llama.cpp, sans
+  calculer aucun embedding. La première question n'attend donc pas ces chargements. Ce
+  geste de l'app n'a pas de conséquence méthodologique pour l'auteur : il **n'est pas
   inscrit** (`runUnrecorded`, J11). Une indexation que l'ouverture lance d'elle-même
   (notes de lecture, sources primaires à refaire) s'inscrit comme toute indexation. Les
-  23 termes du dictionnaire d'expansion FR↔EN, qui partaient aussi à chaque ouverture, ne
-  sont plus envoyés.
-- **Repli Ollama → modèle embarqué** — en réglage `auto`, un appel de génération est
-  attribué au fournisseur qui a répondu (`embedded` quand Ollama est arrêté), pas à celui
-  de la configuration, et sa localité se calcule pour lui. Les lignes écrites avant
-  restent attribuées à `ollama`. Les embeddings servis par le repli portent encore
-  `ollama` comme fournisseur, avec le nom du modèle embarqué.
+  23 termes du dictionnaire d'expansion FR↔EN, qui partaient aussi à l'ouverture du
+  premier projet de chaque lancement, ne sont plus envoyés.
+- **Repli Ollama → modèle embarqué** — en réglage `auto`, un appel est attribué au
+  fournisseur qui a répondu (`embedded` quand Ollama est arrêté), pas à celui de la
+  configuration, et sa localité se calcule pour lui : génération comme embeddings. Les
+  lignes écrites avant restent attribuées à `ollama`, et leur `is_local` suit l'adresse
+  d'Ollama, même pour un calcul du modèle embarqué.
 - **Appel tombé ou annulé avant toute réponse** — rien de produit, aucun usage annoncé :
   l'événement ne porte aucun jeton (`tokens_estimated: false`). Le fournisseur n'a
   peut-être jamais reçu le prompt ; l'estimer inventait une consommation.

@@ -221,6 +221,15 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
     return this.picker.current().model;
   }
 
+  /**
+   * L'identifiant du fournisseur retenu au dernier sondage (`ollama-embedding`,
+   * `embedded-embedding`), comme `FallbackLLMProvider.activeId` : lu à la fin d'un `embed`, il nomme
+   * celui qui a calculé les vecteurs (S10-1-11).
+   */
+  get activeId(): string {
+    return this.picker.current().id;
+  }
+
   getStatus(): ProviderStatus {
     return this.picker.current().getStatus();
   }

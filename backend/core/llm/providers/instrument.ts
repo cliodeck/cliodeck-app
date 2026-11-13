@@ -16,9 +16,10 @@
  * une fois le flux commencé (L09-7, L09-16). Un appel tombé ou annulé sans rien produire ni annoncer
  * n'a pas de jetons : le fournisseur n'a peut-être jamais reçu le prompt (S06-2-5).
  *
- * Derrière un repli (`FallbackLLMProvider`), l'appel est au fournisseur retenu, pas à celui de la
- * configuration : le modèle embarqué qui répond, Ollama arrêté, n'est pas inscrit comme Ollama, et sa
- * localité se calcule pour lui, à chaque appel (S05-1-17).
+ * Derrière un repli (`FallbackLLMProvider`, `FallbackEmbeddingProvider`), l'appel est au fournisseur
+ * retenu, pas à celui de la configuration : le modèle embarqué qui répond ou calcule les vecteurs,
+ * Ollama arrêté, n'est pas inscrit comme Ollama, et sa localité se calcule pour lui, à chaque appel
+ * (S05-1-17, S10-1-11).
  *
  * Agrégation des indexations en masse : à l'intérieur d'un scope `runBatch`, `embed()`
  * accumule dans le contexte au lieu d'émettre un événement par chunk.
@@ -46,7 +47,11 @@ import {
 import { isLocalProvider } from '../../usage-journal/is-local.js';
 import type { InferenceStatus } from '../../usage-journal/types.js';
 import { collectCompletion, ProviderCallError } from './collect.js';
-import { FallbackLLMProvider, resolveEmbeddingProvider } from './fallback.js';
+import {
+  FallbackEmbeddingProvider,
+  FallbackLLMProvider,
+  resolveEmbeddingProvider,
+} from './fallback.js';
 
 /** Estimation grossière de tokens quand l'API n'en fournit pas (~4 caractères/token). */
 function estimateTokens(chars: number): number {
@@ -210,25 +215,51 @@ class InstrumentedLLM implements LLMProvider {
   }
 }
 
-class InstrumentedEmbedding implements EmbeddingProvider {
-  private readonly isLocal: boolean;
+/**
+ * L'identifiant de configuration (`ollama`, `embedded`) d'un fournisseur d'embeddings, tiré de son
+ * identifiant de classe (`ollama-embedding`, `embedded-embedding`) : le journal inscrit le premier,
+ * comme pour la génération, dont les deux identifiants se confondent.
+ */
+function embeddingConfigId(classId: string): string {
+  return classId.replace(/-embedding$/, '');
+}
 
+class InstrumentedEmbedding implements EmbeddingProvider {
   constructor(
     private readonly inner: EmbeddingProvider,
     private readonly providerId: string,
     private readonly baseUrl?: string
-  ) {
-    this.isLocal = isLocalProvider(providerId, baseUrl, inner.model);
-  }
+  ) {}
 
   /**
-   * Repli enveloppé : le fournisseur choisi, enveloppé à son tour. Le déballer contournerait le
-   * journal ; ne pas exposer `resolve` laissait un cache rangé par modèle lire la clé du dernier
-   * choix, pas celle du modèle qui produira le vecteur.
+   * Repli enveloppé : le fournisseur choisi, enveloppé à son tour, sous son propre nom. Le déballer
+   * contournerait le journal ; ne pas exposer `resolve` laissait un cache rangé par modèle lire la
+   * clé du dernier choix, pas celle du modèle qui produira le vecteur.
    */
   async resolve(opts: { signal?: AbortSignal } = {}): Promise<EmbeddingProvider> {
     const chosen = await resolveEmbeddingProvider(this.inner, opts.signal);
-    return chosen === this.inner ? this : new InstrumentedEmbedding(chosen, this.providerId, this.baseUrl);
+    if (chosen === this.inner) return this;
+    const { providerId, baseUrl } = this.attribution(chosen.id);
+    return new InstrumentedEmbedding(chosen, providerId, baseUrl);
+  }
+
+  /**
+   * À qui inscrire les vecteurs du fournisseur `classId`, retenu par un repli : le primaire garde
+   * l'identifiant et l'URL de la configuration ; le secours (le modèle embarqué) prend son propre
+   * identifiant, sans l'URL d'Ollama, qui ne dit rien de lui.
+   */
+  private attribution(classId: string): { providerId: string; baseUrl?: string } {
+    const id = embeddingConfigId(classId);
+    return id === this.providerId ? { providerId: this.providerId, baseUrl: this.baseUrl } : { providerId: id };
+  }
+
+  /** Le fournisseur qui a servi l'appel et sa localité : derrière un repli, lus après son choix. */
+  private servedBy(): { provider: string; isLocal: boolean } {
+    const { providerId, baseUrl } =
+      this.inner instanceof FallbackEmbeddingProvider
+        ? this.attribution(this.inner.activeId)
+        : { providerId: this.providerId, baseUrl: this.baseUrl };
+    return { provider: providerId, isLocal: isLocalProvider(providerId, baseUrl, this.inner.model) };
   }
 
   get id(): string {
@@ -269,27 +300,28 @@ class InstrumentedEmbedding implements EmbeddingProvider {
       status = opts?.signal?.aborted ? 'cancelled' : 'error';
       throw err;
     } finally {
+      const { provider, isLocal } = this.servedBy();
       const ctx = getJournalContext();
       if (ctx?.batch) {
         // Indexation en masse : accumuler, ne pas émettre par chunk.
         ctx.batch.chunkCount += texts.length;
         ctx.batch.totalTokens += tokens;
-        ctx.batch.provider ??= this.providerId;
+        ctx.batch.provider ??= provider;
         ctx.batch.model ??= this.inner.model;
-        ctx.batch.isLocal ??= this.isLocal;
+        ctx.batch.isLocal ??= isLocal;
         // Un lot ne dit que `ok` ou `error` : un abandon y compte comme une panne, comme avant.
         if (status !== 'ok') ctx.batch.anyError = true;
       } else {
         recordInference({
           kind: 'embedding',
-          provider: this.providerId,
+          provider,
           model: this.inner.model,
           durationMs: Math.max(0, Date.now() - start),
           totalTokens: tokens,
           tokensEstimated: true,
           chunkCount: texts.length,
           status,
-          isLocal: this.isLocal,
+          isLocal,
           workspaceRoot,
         });
       }

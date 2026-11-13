@@ -70,8 +70,9 @@ export interface BrainstormMessage {
   error?: string;
   /**
    * Le modèle qui a écrit la réponse, dit par le main au terminal du tour. Il signe les brouillons
-   * et les propositions (S16-1-23). Absent d'une réponse arrêtée par l'auteur (le terminal n'est pas
-   * attendu) : elle est signée « unknown ».
+   * et les propositions (S16-1-23). Une réponse arrêtée par l'auteur le reçoit du terminal
+   * `cancelled`, arrivé après l'arrêt (`setModel`). Absent tant que ce terminal n'est pas arrivé, ou
+   * quand le tour n'a atteint aucun fournisseur : la réponse est alors signée « unknown ».
    */
   model?: string;
   sources?: BrainstormSource[];
@@ -192,6 +193,8 @@ interface State {
     error?: string,
     model?: string
   ) => void;
+  /** Le modèle d'une réponse déjà close (arrêtée), sans rien changer d'autre. */
+  setModel: (assistantId: string, model: string) => void;
   cancel: () => void;
   reset: () => void;
 }
@@ -342,6 +345,12 @@ export const useChatStore = create<State>((set) => ({
             }
           : m
       ),
+    }));
+  },
+
+  setModel: (assistantId, model) => {
+    set((s) => ({
+      messages: s.messages.map((m) => (m.id === assistantId ? { ...m, model } : m)),
     }));
   },
 

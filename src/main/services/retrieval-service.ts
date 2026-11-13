@@ -406,6 +406,7 @@ export interface RetrievalQuery {
 // `backend/core/rag/retrievers/secondary-retriever.ts` (fusion 3.11).
 // Ses termes ne sont plus embarqués à l'ouverture (J11) : l'expansion embarque la question
 // entière, réécrite, et un terme seul en cache ne servait qu'à une question réduite à ce terme.
+// Ils chargeaient aussi le modèle embarqué de la recherche : `preloadEmbeddedEngine` le fait.
 
 /**
  * Map a retrieved chunk onto the SourceInspector input shape. The
@@ -505,6 +506,7 @@ class RetrievalService {
       this.registry = null;
       this.embedding = null;
     }
+    void this.preloadEmbeddedEngine();
 
     // Invalidate any previously opened vault store — the project may have
     // changed underneath us.
@@ -521,6 +523,33 @@ class RetrievalService {
     // Refresh the inspector mode for the new workspace. Best-effort —
     // a missing config falls back to `warn`, an unreadable one to `block`.
     void this.refreshInspectorMode();
+  }
+
+  /**
+   * Charge le modèle d'embeddings embarqué de la recherche, sans rien calculer ni envoyer : la
+   * première question n'attend pas son chargement. Ce registre a son propre client llama.cpp (le
+   * partage d'un GGUF entre clients est à venir, L08-16) : `warmup query`, chez `pdfService`, charge
+   * celui de l'indexeur. Les 23 termes du dictionnaire d'expansion, embarqués à la première ouverture,
+   * le chargeaient en passant ; ils ne partent plus (J11).
+   *
+   * Le moteur embarqué seul : Ollama tient son modèle dans son démon, que `warmup query` a chargé, et
+   * le `healthCheck` d'un fournisseur distant peut envoyer un texte (celui de Gemini embarque
+   * « ping »). En réglage « auto », le repli sonde Ollama (la liste de ses modèles, aucun texte).
+   * Rien ne s'inscrit au journal d'usage : aucun embedding n'est calculé.
+   */
+  private async preloadEmbeddedEngine(): Promise<void> {
+    const embedding = this.embedding;
+    if (!embedding) return;
+    try {
+      const chosen = await resolveEmbeddingProvider(embedding);
+      // Registre libéré pendant le sondage (projet fermé, réglages changés) : le modèle chargé ici
+      // resterait à un client que plus rien ne libère avant la sortie de l'app.
+      if (this.embedding !== embedding || chosen.id !== 'embedded-embedding') return;
+      await chosen.healthCheck();
+    } catch (e) {
+      // Best-effort : la première question chargera le modèle, et dira l'échec s'il y en a un.
+      console.warn('[retrieval] préchargement du modèle d’embeddings embarqué impossible :', e);
+    }
   }
 
   private async disposePreviousRegistry(): Promise<void> {
