@@ -22,7 +22,7 @@ import {
   syntaxHighlighting,
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { createDocState, readDocText, toDocLineBreaks, toDocText } from '@/editor/cm/fidelity';
+import { createDocState, documentEol, readDocText, toDocLineBreaks, toDocText } from '@/editor/cm/fidelity';
 import { restoreEditorState, serializeEditorState } from '@/editor/cm/state-cache';
 import {
   liveRender,
@@ -311,17 +311,12 @@ function createFacade(
     setValue: (text, cursorOffset, origin) => {
       // Remplacer tout le document ramenait le curseur en tête et retirait toutes les propositions
       // en attente (L01-6) : seul ce qui diffère change. Le texte reçu est celui de `getValue` : dans
-      // un fichier CRLF, ses `\r\n` sont une fin de ligne du document.
-      const next = view.state.lineBreak === '\r\n' ? text.replace(/\r\n/g, '\n') : text;
+      // un fichier CRLF, ses `\r\n` sont une fin de ligne du document. Dans un fichier mixte, ses `\r`
+      // sont des caractères : ils restent.
+      const next = view.state.facet(documentEol) === '\r\n' ? text.replace(/\r\n?/g, '\n') : text;
       applyChanges(view, minimalChanges(view.state.doc.toString(), next), cursorOffset, origin);
     },
     applyChanges: (changes, cursorOffset, origin) => applyChanges(view, changes, cursorOffset, origin),
-    appendText: (text, origin) => {
-      view.dispatch({
-        changes: { from: view.state.doc.length, insert: text },
-        annotations: changeOrigin.of(origin ?? 'programmatic'),
-      });
-    },
     getProposalRanges: () => view.state.field(proposalsInstance.field).map((p) => p.range),
     propose: (partial) => {
       // L'effet passerait, pas le texte : accepter journaliserait une décision sans rien écrire.

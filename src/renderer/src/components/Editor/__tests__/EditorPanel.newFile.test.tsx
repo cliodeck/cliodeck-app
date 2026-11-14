@@ -31,6 +31,7 @@ vi.mock('../CodeMirrorEditor', async () => {
       let destroyed = false;
       store.getState().setEditorFacade({
         getValue: () => text,
+        getDocText: () => text,
         setValue: (next: string) => {
           if (destroyed) return;
           text = next;

@@ -25,6 +25,7 @@ function facadeAt(offset: number): FakeFacade {
   return {
     facade: {
       getCursorOffset: () => offset,
+      getDocText: () => DECK,
       onContentChange: () => () => undefined,
       onSelectionChange: (callback: (position: number) => void) => {
         listeners.add(callback);

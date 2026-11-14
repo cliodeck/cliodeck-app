@@ -59,7 +59,7 @@ export const SlidePreviewPanel: React.FC = () => {
     if (!editorFacade) return;
 
     const unsubscribe = editorFacade.onContentChange((text) => {
-      deckRef.current = parseSlides(text);
+      deckRef.current = parseSlides(editorFacade.getDocText());
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(() => loadPreview(text), DEBOUNCE_MS);
     });
@@ -74,6 +74,9 @@ export const SlidePreviewPanel: React.FC = () => {
   // curseur entre dans une autre slide (pas de script dans l'iframe, CSP).
   useEffect(() => {
     if (!editorFacade) return;
+    // Découpé sur le texte de la vue, celui que comptent ses offsets : dans un fichier CRLF, celui
+    // du fichier compte deux caractères par fin de ligne (S14-1-5). L'aperçu, lui, rend le fichier.
+    deckRef.current = parseSlides(editorFacade.getDocText());
     const followCursor = (offset: number) => {
       const index = slideIndexAtOffset(deckRef.current, offset);
       if (index === activeIndexRef.current) return;

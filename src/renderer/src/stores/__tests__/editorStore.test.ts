@@ -51,9 +51,6 @@ function fakeFacade(
       calls.setValue.push({ text, cursor: cursorOffset });
     },
     applyChanges: () => false,
-    appendText: (text) => {
-      current += text;
-    },
     propose: (p: Partial<Proposal>) => {
       calls.proposals.push(p);
       return accepts;

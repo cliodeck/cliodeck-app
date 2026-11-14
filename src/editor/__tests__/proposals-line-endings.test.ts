@@ -74,7 +74,8 @@ describe('les fins de ligne d’une proposition', () => {
     instance.accept(view, id);
 
     expect(view.state.selection.main.head).toBe(2 + '\nA\nB'.length);
-    expect(view.state.sliceDoc(0, view.state.selection.main.head)).toBe('Un\r\nA\r\nB');
+    expect(readDocText(view.state).startsWith('Un\r\nA\r\nB\r\n')).toBe(true);
+    expect(view.state.doc.sliceString(0, view.state.selection.main.head)).toBe('Un\nA\nB');
   });
 
   it('un texte en CRLF accepté tout au bout du document ne fait pas sortir le curseur', () => {

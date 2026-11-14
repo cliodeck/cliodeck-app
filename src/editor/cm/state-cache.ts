@@ -1,6 +1,6 @@
 import { EditorState, type Extension } from '@codemirror/state';
 import { historyField } from '@codemirror/commands';
-import { detectLineSeparator, readDocText } from './fidelity';
+import { docExtensions, readDocText } from './fidelity';
 
 /**
  * Cache d'état par document (plan chapitres, Phase 2).
@@ -63,9 +63,9 @@ export function serializeEditorState(
   state: EditorState,
   scrollTop: number
 ): CachedEditorState {
-  // `toJSON` sérialise le document via `doc.toString()`, qui ignore le
-  // séparateur déclaré : on mémorise à part le texte exact, seul juge de la
-  // fraîcheur de l'entrée (un fichier CRLF ne doit pas paraître périmé).
+  // `toJSON` sérialise le document via `sliceDoc()`, en fins de ligne de
+  // l'éditeur : on mémorise à part le texte exact, seul juge de la fraîcheur
+  // de l'entrée (un fichier CRLF ne doit pas paraître périmé).
   return {
     json: state.toJSON(SERIALIZED_FIELDS),
     text: readDocText(state),
@@ -76,7 +76,7 @@ export function serializeEditorState(
 /**
  * Reconstruit un état depuis le cache, ou `null` si l'entrée est périmée.
  * `source` est la vérité (contenu chargé depuis le disque) : c'est lui, et
- * non le JSON, qui décide de la validité et du séparateur de ligne.
+ * non le JSON, qui décide de la validité et des fins de ligne.
  */
 export function restoreEditorState(
   cached: CachedEditorState | undefined,
@@ -91,16 +91,13 @@ export function restoreEditorState(
     const restored = EditorState.fromJSON(
       json,
       {
-        extensions: [
-          EditorState.lineSeparator.of(detectLineSeparator(source)),
-          ...extensions,
-        ],
+        extensions: [docExtensions(source), ...extensions],
       },
       SERIALIZED_FIELDS
     );
     // Garde-fou : `fromJSON` reconstruit le document depuis un texte joint
-    // en "\n". Si la restauration ne rend pas le texte d'origine (fichier
-    // CRLF), on repart du contenu disque plutôt que de le normaliser.
+    // en "\n". Si la restauration ne rend pas le texte d'origine, on repart
+    // du contenu disque plutôt que de le normaliser.
     return readDocText(restored) === source ? restored : null;
   } catch {
     // Un JSON d'une version antérieure du schéma d'historique ne doit jamais

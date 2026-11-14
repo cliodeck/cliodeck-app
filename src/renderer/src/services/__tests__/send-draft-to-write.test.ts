@@ -32,7 +32,6 @@ function fakeFacade(proposals: Array<Partial<Proposal>>, accepts = true): Editor
     editSelection: () => false,
     setValue: () => undefined,
     applyChanges: () => false,
-    appendText: () => undefined,
     propose: (p) => {
       proposals.push(p);
       return accepts;
