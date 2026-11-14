@@ -237,6 +237,99 @@ function firstHeading(
   return found;
 }
 
+// MARK: - Parties d'une slide et notes du présentateur
+
+/**
+ * Une diapositive reveal.js tirée d'un segment du découpage : le segment entier, ou, quand il
+ * ouvre sur un titre de niveau 1, chacune de ses parties ouvertes par un titre de niveau 2 (les
+ * verticales de reveal). Offsets relatifs au segment ; les parties le couvrent bout à bout.
+ */
+export interface SlidePart {
+  from: number;
+  to: number;
+  /** Début de la ligne `Note:` qui ouvre les notes du présentateur, null sans notes. */
+  notesLineFrom: number | null;
+  /** Ce qui se projette : la partie jusqu'aux notes, sans les blancs de bord. */
+  markdown: string;
+  /** Les notes, sans le `Note:` qui les ouvre ni les blancs de bord. */
+  notes: string;
+}
+
+/** La ligne qui ouvre les notes : `Note:` ou `Notes:`, en toute casse, en tête de ligne. */
+const NOTES_LINE = /^\s*notes?:/i;
+
+/** Le segment ouvre-t-il sur un titre `# …` ? Il commence alors une section reveal. */
+export function startsWithH1(segment: string): boolean {
+  return slidesParser.parse(segment).topNode.firstChild?.name === 'ATXHeading1';
+}
+
+/**
+ * Parties d'un segment et leurs notes, sur l'arbre Lezer comme parseSlides : le contenu d'un
+ * bloc de code n'est jamais un séparateur. Les regex qui faisaient ce travail ignoraient les
+ * blocs de code : un commentaire R (`## …`) coupait la diapositive, et un `Note:` cité dans du
+ * code en envoyait la suite aux notes (S12-2-3). Les notes courent de la première ligne `Note:`
+ * hors code jusqu'à la fin de la partie. Règle unique de l'aperçu, des exports reveal.js et de
+ * l'export beamer (`speakerNotesToPandoc`).
+ */
+export function splitSlideParts(segment: string): SlidePart[] {
+  if (segment.trim() === '') return [];
+  const tree = slidesParser.parse(segment);
+  const code = codeRanges(tree);
+
+  // Une partie par titre `## ` du premier niveau, sous un `# ` d'ouverture : un `## ` de bloc
+  // de code n'est pas un nœud de titre.
+  const starts = [0];
+  const first = tree.topNode.firstChild;
+  if (first?.name === 'ATXHeading1') {
+    for (let node = first.nextSibling; node; node = node.nextSibling) {
+      if (node.name === 'ATXHeading2') starts.push(segment.lastIndexOf('\n', node.from - 1) + 1);
+    }
+  }
+
+  const lines = splitLines(segment);
+  return starts.map((from, i) => {
+    const to = i + 1 < starts.length ? starts[i + 1] : segment.length;
+    const notesLine = lines.find(
+      (l) => l.from >= from && l.from < to && NOTES_LINE.test(l.text) && !inRanges(code, l.from, l.to)
+    );
+    return {
+      from,
+      to,
+      notesLineFrom: notesLine?.from ?? null,
+      markdown: segment.slice(from, notesLine?.from ?? to).trim(),
+      notes: notesLine ? segment.slice(notesLine.from, to).replace(NOTES_LINE, '').trim() : '',
+    };
+  });
+}
+
+/**
+ * Le deck avec chaque note du présentateur en bloc `::: notes`, que pandoc écrit `\note{…}` pour
+ * beamer. Pandoc ne connaît pas les lignes `Note:` du format reveal.js : il les imprimait sur la
+ * diapositive projetée (S12-1-8). Seules les notes changent, découpées comme dans l'aperçu ; un
+ * `Note:` sans texte disparaît.
+ */
+export function speakerNotesToPandoc(source: string): string {
+  let out = '';
+  let last = 0;
+  for (const slide of parseSlides(source).slides) {
+    const segment = source.slice(slide.from, slide.to);
+    for (const part of splitSlideParts(segment)) {
+      if (part.notesLineFrom === null) continue;
+      const start = slide.from + part.notesLineFrom;
+      out += source.slice(last, start);
+      if (part.notes) {
+        // Pandoc ne lit un bloc `:::` qu'après une ligne vide : collé à un paragraphe, il en
+        // devient le texte (mesuré).
+        if (!/(^|\n)[ \t]*\n$/.test(out) && out !== '') out += '\n';
+        out += `::: notes\n${part.notes}\n:::`;
+      }
+      // Les blancs qui suivent les notes restent : ils séparent la partie suivante.
+      last = slide.from + part.from + segment.slice(part.from, part.to).trimEnd().length;
+    }
+  }
+  return out + source.slice(last);
+}
+
 /**
  * Index (0-based) de la slide au droit d'un offset. Un offset situé sur un
  * séparateur appartient à la slide QUI SUIT (la frontière annonce la slide

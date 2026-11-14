@@ -4,7 +4,12 @@ import { tmpdir } from 'os';
 import { app, BrowserWindow, shell } from 'electron';
 import { load as loadYaml } from 'js-yaml';
 import { marked } from 'marked';
-import { parseSlides as parseDeck, type DeckInfo } from '../../editor/slides.js';
+import {
+  parseSlides as parseDeck,
+  splitSlideParts,
+  startsWithH1,
+  type DeckInfo,
+} from '../../editor/slides.js';
 import { refuseMarkdownOutput } from './export-output-path.js';
 import {
   withExportTimeLimit,
@@ -191,6 +196,9 @@ export function extractDeck(content: string): ExtractedDeck {
  *  ---            → explicit slide separator (vertical within current section)
  *  Note: …        → speaker notes (everything after "Note:" until end of slide block)
  *
+ * Les parties `##` et les notes viennent de `splitSlideParts` (src/editor/slides.ts) : rien
+ * de ce qui est dans un bloc de code ne coupe ni n'ouvre de notes.
+ *
  * `aIndex` rattache chaque slide reveal à l'index du découpage partagé
  * (SlideInfo.index) — c'est la clé de la synchro curseur ↔ preview. Les
  * sous-découpes `##` d'un segment H1 partagent l'aIndex de leur segment.
@@ -199,30 +207,20 @@ interface ParsedSlide { markdown: string; notes: string; aIndex: number }
 type SlideSection = ParsedSlide[];
 
 function buildSections(content: string, deck: DeckInfo): SlideSection[] {
-  const extractNotes = (raw: string, aIndex: number): ParsedSlide => {
-    const m = raw.match(/\n\s*Notes?:\s*([\s\S]*)$/im);
-    if (m) return { markdown: raw.slice(0, m.index!).trim(), notes: m[1].trim(), aIndex };
-    return { markdown: raw.trim(), notes: '', aIndex };
-  };
-
   const sections: SlideSection[] = [];
   let cur: ParsedSlide[] = [];
 
   for (const slide of deck.slides) {
-    const trimmed = content.slice(slide.from, slide.to).trim();
-    if (!trimmed) continue;
+    const segment = content.slice(slide.from, slide.to);
+    const parts = splitSlideParts(segment);
+    if (parts.length === 0) continue;
 
-    const firstLine = trimmed.split('\n')[0];
-    const startsWithH1 = /^#(?!#)\s+/.test(firstLine);
-
-    if (startsWithH1) {
-      if (cur.length) { sections.push(cur); cur = []; }
-      for (const part of trimmed.split(/\n(?=##(?!#)\s)/)) {
-        const p = part.trim();
-        if (p) cur.push(extractNotes(p, slide.index));
-      }
-    } else {
-      cur.push(extractNotes(trimmed, slide.index));
+    if (startsWithH1(segment) && cur.length) {
+      sections.push(cur);
+      cur = [];
+    }
+    for (const part of parts) {
+      cur.push({ markdown: part.markdown, notes: part.notes, aIndex: slide.index });
     }
   }
   if (cur.length) sections.push(cur);
@@ -350,6 +348,21 @@ html,body{height:100%;overflow:hidden;font-family:Source Sans Pro,Helvetica,sans
 // MARK: - Reveal.js export templates
 
 /**
+ * Le plugin markdown de reveal.js redécoupe chaque section `data-markdown` dans le navigateur,
+ * sans rien savoir des blocs de code : sur `---` (`data-separator`, défaut `\r?\n---\r?\n`),
+ * puis sur `Note:` (`data-separator-notes`, défaut `notes?:` en tête de ligne), et ne tire des
+ * notes que si ce second découpage rend deux morceaux. Un `---` ou un `Note:` cité dans du code
+ * coupait donc la diapositive exportée ou en envoyait la suite aux notes, et deux `Note:` dans
+ * une section faisaient afficher la vraie note sur la diapositive (S12-2-3). Le découpage est
+ * déjà fait ici (`splitSlideParts`) : le séparateur posé sur chaque section ne correspond à
+ * aucune ligne écrite, et les notes s'ouvrent par un repère que l'auteur n'écrit pas. Vérifié
+ * sur la copie 5.0.4 que l'app met en cache : à revérifier si REVEAL_VERSION change (l'e2e
+ * `journey-presentation-pdf.spec.ts` le couvre).
+ */
+const NO_SPLIT_SEPARATOR = '^CLIODECK-NO-SPLIT$';
+const SPEAKER_NOTES_MARKER = 'CLIODECK-SPEAKER-NOTES';
+
+/**
  * Résolution de la config effective d'un deck : frontmatter > reveal-config
  * pour theme/transition ; saisie du modal > frontmatter pour titre/auteur.
  * Exportée pour l'export offline (choix des assets) et les tests.
@@ -375,13 +388,12 @@ const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inline
   const sections = buildSections(content, deck);
 
   // ── Build slides HTML ─────────────────────────────────────────────────
-  // Notes stay inside the <textarea>; the reveal.js markdown plugin
-  // extracts them via its built-in notesSeparator regex.
+  // Les notes restent dans le <textarea>, derrière un repère que le plugin markdown de
+  // reveal.js reconnaît par `data-separator-notes` (voir NO_SPLIT_SEPARATOR).
 
   const slideToHTML = (s: ParsedSlide): string => {
-    // Re-assemble the markdown with notes for the reveal.js markdown plugin
-    const fullMd = s.notes ? `${s.markdown}\n\nNote:\n${s.notes}` : s.markdown;
-    return `          <section data-markdown>\n            <textarea data-template>\n${fullMd}\n            </textarea>\n          </section>`;
+    const fullMd = s.notes ? `${s.markdown}\n\n${SPEAKER_NOTES_MARKER}\n${s.notes}` : s.markdown;
+    return `          <section data-markdown data-separator="${NO_SPLIT_SEPARATOR}" data-separator-notes="^${SPEAKER_NOTES_MARKER}$">\n            <textarea data-template>\n${fullMd}\n            </textarea>\n          </section>`;
   };
 
   const slidesHTML = sections.map(section => {

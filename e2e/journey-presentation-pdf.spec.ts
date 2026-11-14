@@ -13,19 +13,30 @@
  * propose pour un projet nommé « Séminaire d'histoire » : la validation de l'IPC les
  * refusait, reste d'un temps où ce chemin passait par un shell (S12-1-3).
  *
- * reveal.js est chargé depuis son CDN : sans réseau, le test est sauté.
+ * Une diapositive cite du code qui contient `---` et `Note:`, puis porte une vraie note : le
+ * plugin markdown de reveal.js redécoupait chaque section dans le navigateur, sans rien savoir
+ * des blocs de code. Le `---` du code ajoutait une page, et la vraie note s'imprimait sur la
+ * diapositive (S12-2-3). Le texte du PDF, lu par pdftotext quand il est là, le montre : le
+ * code reste entier, la note n'est pas imprimée (`showNotes` est faux).
+ *
+ * reveal.js est chargé depuis son CDN : sans réseau, le test est sauté. C'est le seul test qui
+ * passe par le vrai plugin : à relancer si `REVEAL_VERSION` change.
  */
 
 import { test, expect } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pdftotextAvailable, toolEnv } from '../backend/__tests__/helpers/native-guards';
 import { launchApp } from './_helpers/launch';
 
 const DECK = [
   '# Les archives et la machine\n\nIntroduction',
   '## Deuxième diapositive\n\n- premier point\n- second point',
   '## Troisième diapositive\n\nConclusion',
+  '## Exemple de syntaxe\n\n```markdown\n---\nNote: CODENOTE dans le code\n```\n\nSuite du texte visible.\n\n' +
+    'Note:\nVRAIENOTE à ne pas projeter.',
 ].join('\n\n---\n\n');
 
 type ExportBridge = {
@@ -82,7 +93,13 @@ test('l’export PDF d’une présentation rend une page par diapositive', async
     );
     const payload = response as { metadata?: { pageCount?: number } };
     const metadata = payload.metadata ?? (payload as { pageCount?: number });
-    expect(metadata.pageCount).toBe(3);
+    if (pdftotextAvailable()) {
+      const text = execFileSync('pdftotext', [outputPath, '-'], { encoding: 'utf8', env: toolEnv() });
+      expect(text).not.toContain('VRAIENOTE');
+      expect(text).toContain('Note: CODENOTE dans le code');
+      expect(text).toContain('Suite du texte visible.');
+    }
+    expect(metadata.pageCount).toBe(4);
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });

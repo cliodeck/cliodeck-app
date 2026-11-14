@@ -7,6 +7,8 @@ import {
   detectFrontmatterLines,
   parseSlides,
   slideIndexAtOffset,
+  speakerNotesToPandoc,
+  splitSlideParts,
 } from '../slides';
 
 const CORPUS = fileURLToPath(new URL('../../../test-fixtures/editor/', import.meta.url));
@@ -134,5 +136,116 @@ describe('slideIndexAtOffset', () => {
   it('au-delà de la fin → dernière slide ; deck vide → 0', () => {
     expect(slideIndexAtOffset(deck, src.length + 50)).toBe(deck.slides.length - 1);
     expect(slideIndexAtOffset(parseSlides(''), 3)).toBe(0);
+  });
+});
+
+/**
+ * Parties d'une diapositive et notes du présentateur (S12-2-3) : une seule règle, sur l'arbre
+ * Lezer, pour l'aperçu, les trois exports reveal.js et l'export beamer. Le contenu d'un bloc de
+ * code n'est jamais un séparateur : un commentaire R (`## …`) ne coupe pas la diapositive, et un
+ * `Note:` cité dans du code n'en fait pas des notes.
+ */
+describe('splitSlideParts — parties et notes, hors blocs de code', () => {
+  it('un `## ` dans un bloc de code ne coupe pas une diapositive de niveau 1', () => {
+    const segment = '# Analyse\n\n```r\n## Charger les données\nx <- read.csv("a.csv")\n```\n';
+    const parts = splitSlideParts(segment);
+    expect(parts).toHaveLength(1);
+    expect(parts[0].markdown).toBe(segment.trim());
+    expect(parts[0].notes).toBe('');
+  });
+
+  it('un `Note:` dans un bloc de code n’ouvre pas les notes', () => {
+    const segment =
+      '## Exemple de syntaxe\n\n```markdown\nNote: ceci est du code\nSuite du code\n```\n\nSuite du texte visible.\n';
+    const parts = splitSlideParts(segment);
+    expect(parts).toHaveLength(1);
+    expect(parts[0].notesLineFrom).toBeNull();
+    expect(parts[0].notes).toBe('');
+    expect(parts[0].markdown).toBe(segment.trim());
+  });
+
+  it('la vraie note qui suit un bloc de code citant `---` et `Note:`', () => {
+    const segment = '## Ex\n\n```markdown\n---\nNote: du code\n```\n\nVisible.\n\nNote:\nLa vraie note.\n';
+    const [part] = splitSlideParts(segment);
+    expect(part.markdown).toBe('## Ex\n\n```markdown\n---\nNote: du code\n```\n\nVisible.');
+    expect(part.notes).toBe('La vraie note.');
+    expect(segment.slice(part.notesLineFrom ?? 0)).toBe('Note:\nLa vraie note.\n');
+  });
+
+  it('`Note:` en première ligne : une partie faite de notes seules', () => {
+    const segment = 'Note: rien à projeter\nsuite de la note\n';
+    expect(splitSlideParts(segment)).toEqual([
+      { from: 0, to: segment.length, notesLineFrom: 0, markdown: '', notes: 'rien à projeter\nsuite de la note' },
+    ]);
+  });
+
+  it('`Notes:`, la casse et une indentation sont admis, comme dans l’aperçu', () => {
+    expect(splitSlideParts('## A\n\ntexte\n\nNOTES: une\n')[0].notes).toBe('une');
+    expect(splitSlideParts('## A\n\ntexte\n\n  note: deux\n')[0].notes).toBe('deux');
+  });
+
+  it('plusieurs parties sous un H1, chacune avec ses notes, bout à bout', () => {
+    const segment = '# Section\n\nIntro\n\nNote: n1\n\n## V1\n\nUn\n\n## V2\n\nDeux\n\nNotes:\nn3\n';
+    const parts = splitSlideParts(segment);
+    expect(parts.map((p) => [p.markdown, p.notes])).toEqual([
+      ['# Section\n\nIntro', 'n1'],
+      ['## V1\n\nUn', ''],
+      ['## V2\n\nDeux', 'n3'],
+    ]);
+    expect(parts.map((p) => [p.from, p.to])).toEqual([
+      [0, segment.indexOf('## V1')],
+      [segment.indexOf('## V1'), segment.indexOf('## V2')],
+      [segment.indexOf('## V2'), segment.length],
+    ]);
+    expect(parts[0].notesLineFrom).toBe(segment.indexOf('Note: n1'));
+  });
+
+  it('hors diapositive de niveau 1, un `## ` ne coupe pas', () => {
+    expect(splitSlideParts('## A\n\ntexte\n\n## B\n\nsuite\n')).toHaveLength(1);
+  });
+
+  it('segment vide : aucune partie', () => {
+    expect(splitSlideParts('\n  \n')).toEqual([]);
+  });
+});
+
+/**
+ * Notes du présentateur pour beamer (S12-1-8) : pandoc ne connaît pas `Note:`, et imprimait ces
+ * lignes sur la diapositive projetée. Un bloc `::: notes` devient `\note{…}`.
+ */
+describe('speakerNotesToPandoc — chaque note en `::: notes`, le reste intact', () => {
+  it('balise chaque note, laisse le code, le frontmatter et les séparateurs', () => {
+    const deck = [
+      '---', 'title: Deck', '---', '',
+      '## Titre', '', 'Auteur', '', 'Note: Bienvenue.', '',
+      '---', '',
+      '## Code', '', '```markdown', 'Note: du code', '---', '```', '', 'Visible.', '',
+      'Note:', 'Vraie note,', 'sur deux lignes.', '',
+      '---', '',
+      '## Sans note', '', 'Fin.', '',
+    ].join('\n');
+    const expected = deck
+      .replace('Note: Bienvenue.', '::: notes\nBienvenue.\n:::')
+      .replace('Note:\nVraie note,\nsur deux lignes.', '::: notes\nVraie note,\nsur deux lignes.\n:::');
+    expect(speakerNotesToPandoc(deck)).toBe(expected);
+  });
+
+  it('notes d’une partie de niveau 1 : jusqu’au titre de niveau 2 suivant', () => {
+    expect(speakerNotesToPandoc('# H\n\nTexte\n\nNote: n1\n\n## Sous\n\nB\n')).toBe(
+      '# H\n\nTexte\n\n::: notes\nn1\n:::\n\n## Sous\n\nB\n'
+    );
+  });
+
+  it('une ligne vide avant le bloc quand la note suit un paragraphe : pandoc ne le lirait pas', () => {
+    expect(speakerNotesToPandoc('## A\n\nTexte\nNote: n\n')).toBe('## A\n\nTexte\n\n::: notes\nn\n:::\n');
+  });
+
+  it('un `Note:` sans texte disparaît', () => {
+    expect(speakerNotesToPandoc('## A\n\nTexte\n\nNote:\n\n---\n\n## B\n')).toBe('## A\n\nTexte\n\n\n\n---\n\n## B\n');
+  });
+
+  it('un deck sans note ressort octet pour octet', () => {
+    const src = read('slides-sans-frontmatter.md');
+    expect(speakerNotesToPandoc(src)).toBe(src);
   });
 });

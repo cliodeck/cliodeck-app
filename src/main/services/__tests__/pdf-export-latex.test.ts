@@ -20,7 +20,8 @@
  * avec le gabarit de pandoc, en sort pour ce chemin (voir `failsIn`).
  *
  * Compiler ne suffit pas toujours : le texte du PDF (pdftotext, gardé par sa présence) montre où
- * vont les notes d'un tableau dans un livre à notes de fin, et ce que devient une citation liée.
+ * vont les notes d'un tableau dans un livre à notes de fin, ce que devient une citation liée, et
+ * où vont les notes du présentateur d'une présentation (L10-3).
  *
  * Une image en chemin relatif au projet (`images/relative.png`) y est depuis L07-2 : pandoc tourne
  * dans le dossier temporaire de l'export, et sans `--resource-path` la remplaçait par sa légende,
@@ -50,6 +51,8 @@ import { delimiter, join } from 'path';
 import { inflateSync } from 'zlib';
 import { pdfExportService } from '../pdf-export.js';
 import type { ExportResult } from '../export-time-limit.js';
+import type { BeamerConfig } from '../pandoc-args.js';
+import { speakerNotesToPandoc } from '../../../editor/slides.js';
 import {
   DEFAULT_BOOK_SETTINGS,
   type BookSettings,
@@ -260,7 +263,8 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
     async function exportAs(
       projectType: ProjectType,
       markdown: string | readonly string[],
-      book: Partial<BookSettings> = {}
+      book: Partial<BookSettings> = {},
+      beamerConfig?: BeamerConfig
     ): Promise<{ result: ExportResult; outputPath: string }> {
       // Une espace dans le chemin du projet : `--resource-path` le passe en un seul argument. Le
       // séparateur des listes de chemins : pandoc découperait la liste sur lui.
@@ -297,7 +301,7 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
       }
 
       const content = typeof markdown === 'string' ? markdown : markdown.join('\n');
-      const result = await pdfExportService.exportToPDF({ ...common, projectType, content });
+      const result = await pdfExportService.exportToPDF({ ...common, projectType, content, beamerConfig });
       return { result, outputPath };
     }
 
@@ -305,9 +309,10 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
     async function expectCompiles(
       projectType: ProjectType,
       markdown: string | readonly string[],
-      book?: Partial<BookSettings>
+      book?: Partial<BookSettings>,
+      beamerConfig?: BeamerConfig
     ): Promise<string> {
-      const { result, outputPath } = await exportAs(projectType, markdown, book);
+      const { result, outputPath } = await exportAs(projectType, markdown, book, beamerConfig);
 
       expect(latexErrors(result)).toEqual([]);
       expect(result, result.error).toMatchObject({ success: true });
@@ -423,5 +428,116 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
         );
       }
     );
+
+    /**
+     * Notes du présentateur (S12-1-8, L10-3). Le gabarit de présentation écrit des lignes `Note:` :
+     * pandoc ne les connaît pas et les imprimait sur la diapositive projetée. Balisées en
+     * `::: notes`, elles deviennent `\note{…}`, que beamer n'imprime que si la case « notes » des
+     * réglages beamer est cochée, sur une page à part après la diapositive. Un `Note:` cité dans un
+     * bloc de code reste du code : c'est le découpage partagé (`src/editor/slides.ts`).
+     */
+    describe.skipIf(!pdftotextAvailable())('présentation : notes du présentateur (texte du PDF)', () => {
+      const DECK = [
+        '## Ouverture',
+        '',
+        'Autrice',
+        '',
+        'Note: NOTESECRETE pour moi.',
+        '',
+        '---',
+        '',
+        '## Syntaxe',
+        '',
+        '```markdown',
+        '---',
+        'Note: CODENOTE dans le code',
+        '```',
+        '',
+        'Texte visible.',
+        '',
+        'Note:',
+        'NOTEDEUX ici.',
+        '',
+      ].join('\n');
+
+      /** Le texte du PDF, page par page. La première est la page de titre (titre du banc). */
+      function pdfPages(pdf: string): string[] {
+        return pdfText(pdf).split('\f').slice(0, -1);
+      }
+
+      it('pandoc -t beamer : une note devient \\note{…}, le `Note:` du code reste du code', () => {
+        const tex = execFileSync(
+          'pandoc',
+          ['--from=markdown+autolink_bare_uris', '--to=beamer', '--slide-level=1'],
+          { input: speakerNotesToPandoc(DECK), encoding: 'utf8', env: toolEnv() }
+        );
+        expect(tex.match(/\\note\{/g)).toHaveLength(2);
+        expect(tex).toContain('\\note{NOTESECRETE pour moi.}');
+        expect(tex).toContain('\\note{NOTEDEUX ici.}');
+        expect(tex).toMatch(/\\AnnotationTok\{Note:\}\\CommentTok\{ CODENOTE dans le code\}/);
+      });
+
+      it(
+        'case décochée : aucune note sur les diapositives, le code entier',
+        async () => {
+          const pages = pdfPages(await expectCompiles('presentation', DECK, undefined, { showNotes: false }));
+          expect(pages).toHaveLength(3);
+          expect(pages.join('\n')).not.toMatch(/NOTESECRETE|NOTEDEUX/);
+          expect(pages[1]).toContain('Ouverture');
+          expect(pages[2]).toContain('Note: CODENOTE dans le code');
+          expect(pages[2]).toContain('Texte visible.');
+        },
+        COMPILE_MS
+      );
+
+      it(
+        'case cochée : chaque note sur sa page de notes, après sa diapositive, jamais sur elle',
+        async () => {
+          const pages = pdfPages(await expectCompiles('presentation', DECK, undefined, { showNotes: true }));
+          // Titre (sans note, sans page de notes), puis chaque diapositive suivie de ses notes.
+          expect(pages).toHaveLength(5);
+          expect(pages[1]).toContain('Ouverture');
+          expect(pages[1]).not.toContain('NOTESECRETE');
+          expect(pages[2]).toContain('NOTESECRETE pour moi.');
+          expect(pages[3]).toContain('Note: CODENOTE dans le code');
+          expect(pages[3]).not.toContain('NOTEDEUX');
+          expect(pages[4]).toContain('NOTEDEUX ici.');
+        },
+        COMPILE_MS
+      );
+
+      /**
+       * Un bloc de code dans une note : `\note{…}` ne peut pas contenir de verbatim (fancyvrb), comme
+       * une note de bas de page (`failsIn: ['presentation']`). Mesuré avec pandoc 3.13 et xelatex :
+       * case décochée, beamer ne compose pas la note et le PDF sort ; case cochée, la compilation
+       * échoue (« Argument of \FV@BeginScanning has an extra } »). Avant L10-3, la note s'imprimait
+       * sur la diapositive et compilait. L'échec se dit par la ligne LaTeX, jamais un PDF muet.
+       */
+      const CODE_IN_NOTE = '## Diapo\n\nTexte visible.\n\nNote:\nMontrer ce code :\n\n```r\nx <- 1\n```\n';
+
+      it(
+        'code dans une note, case décochée : le PDF sort, sans la note',
+        async () => {
+          const pages = pdfPages(await expectCompiles('presentation', CODE_IN_NOTE, undefined, { showNotes: false }));
+          expect(pages).toHaveLength(2);
+          expect(pages[1]).toContain('Texte visible.');
+          expect(pages.join('\n')).not.toContain('Montrer ce code');
+        },
+        COMPILE_MS
+      );
+
+      it(
+        'code dans une note, case cochée : l’échec nomme l’erreur et la ligne LaTeX',
+        async () => {
+          const { result, outputPath } = await exportAs('presentation', CODE_IN_NOTE, undefined, { showNotes: true });
+          expect(result.success).toBe(false);
+          const errors = latexErrors(result);
+          expect(errors.some((line) => line.startsWith('! '))).toBe(true);
+          expect(errors.some((line) => /^l\.\d+ /.test(line))).toBe(true);
+          expect(() => readFileSync(outputPath)).toThrow();
+        },
+        COMPILE_MS
+      );
+    });
   }
 );
