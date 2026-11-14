@@ -2689,7 +2689,8 @@
       "imagesNotFound_one": "Image introuvable, remplacée par sa légende : {{files}}. Placez-la dans le dossier du projet (ou dans chapters/ pour un chapitre de livre), ou corrigez son chemin.",
       "imagesNotFound_other": "Images introuvables, remplacées par leur légende : {{files}}. Placez-les dans le dossier du projet (ou dans chapters/ pour un chapitre de livre), ou corrigez leur chemin.",
       "imageNeedsRsvgConvert": "L'image SVG {{file}} ne peut pas entrer dans le PDF sans l'outil rsvg-convert, qui n'est pas installé. Installez-le (sous macOS : brew install librsvg), ou enregistrez l'image en PNG, puis relancez l'export.",
-      "imageNotConverted": "L'export PDF ne sait pas lire le format de l'image {{file}}. Enregistrez-la en PNG ou en JPEG, puis relancez l'export."
+      "imageNotConverted": "L'export PDF ne sait pas lire le format de l'image {{file}}. Enregistrez-la en PNG ou en JPEG, puis relancez l'export.",
+      "beamerImageNotFound": "Image de la configuration Beamer introuvable ou illisible : {{file}}. La présentation est exportée sans elle. Placez-la dans le dossier du projet, ou corrigez son chemin dans la configuration Beamer."
     }
   }
 }

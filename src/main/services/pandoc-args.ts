@@ -16,7 +16,7 @@
  */
 
 import { delimiter, join } from 'path';
-import type { BookSettings } from '../../../backend/types/book.js';
+import { CHAPTERS_DIR, type BookSettings } from '../../../backend/types/book.js';
 import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 import { getLanguage } from '../i18n.js';
 import type { ExportImageErrorCode } from './export-time-limit.js';
@@ -85,13 +85,37 @@ export const DEFAULT_BOOK_SETTINGS: BookSettings = {
 // MARK: - Petites décisions pures
 
 /**
- * Les dossiers où chercher une image à chemin relatif : le projet, puis `chapters/`. L'éditeur
- * résout une image relative au fichier ouvert (`CodeMirrorEditor`) : `images/plan.png` sous le
- * projet pour un article, sous `chapters/` pour un chapitre de livre, et `../images/plan.png`
- * d'un chapitre retombe sous le projet par `chapters/`.
+ * Les dossiers où chercher une image à chemin relatif, dans l'ordre. L'éditeur résout une image
+ * relative au fichier ouvert (`CodeMirrorEditor`) : `images/plan.png` sous le projet pour un
+ * article ou une présentation, sous `chapters/` pour un chapitre de livre. Un livre cherche donc
+ * d'abord sous `chapters/` : chercher d'abord à la racine remettait dans le livre une autre image
+ * que celle que l'auteur voit, quand le projet en a une du même nom. Le `../images/plan.png` d'un
+ * chapitre retombe sous le projet par `chapters/`, et la racine reste en second recours.
+ *
+ * Un chapitre rattaché à la racine du projet (hors de `chapters/`) qui partage le nom d'une image
+ * avec `chapters/` prendrait celle de `chapters/` : pandoc ne cherche que dans une liste, commune
+ * à tout le document assemblé.
  */
-export function projectResourcePaths(projectPath: string): string[] {
-  return [projectPath, join(projectPath, 'chapters')];
+export function projectResourcePaths(
+  projectPath: string,
+  projectType: 'article' | 'book' | 'presentation'
+): string[] {
+  return projectType === 'book' ? [join(projectPath, CHAPTERS_DIR), projectPath] : [projectPath];
+}
+
+/**
+ * Le nom sous lequel l'export copie le logo ou l'image de titre d'une présentation dans son
+ * dossier de travail, où xelatex tourne. Pandoc recopie la variable telle quelle dans
+ * `\logo{\includegraphics{…}}` : un chemin absolu y portait les barres obliques inverses de
+ * Windows (« Undefined control sequence »), le `#` ou le `%` d'un nom de dossier (« Illegal
+ * parameter number », « File ended while scanning ») (S12-1-24). Le nom fixe n'a que des lettres ;
+ * l'extension est gardée quand elle n'a que des lettres et des chiffres, xelatex lisant le type
+ * de l'image sur elle.
+ */
+export function stagedBeamerImageName(kind: 'logo' | 'titlegraphic', source: string): string {
+  const base = source.split(/[\\/]/).pop() ?? '';
+  const ext = base.match(/\.[A-Za-z0-9]{1,8}$/)?.[0] ?? '';
+  return `${kind}${ext}`;
 }
 
 /** Réglages d'ouvrage complétés par les défauts. */
@@ -398,13 +422,31 @@ export function referenceSectionTitle(): string {
  * Les ressources que pandoc n'a pas trouvées (« Could not fetch resource X: replacing image with
  * description », pandoc 3.x ; d'anciennes versions mettent le chemin entre apostrophes). Pandoc
  * remplace l'image par sa légende et réussit : c'est la seule trace qu'il en reste.
+ *
+ * Pandoc y écrit l'espace d'un nom de fichier en `%20` (`images/mon%20image.png`) : le nom est
+ * rendu tel qu'il est sur le disque, pour que l'auteur le retrouve.
  */
 export function pandocMissingResources(stderr: string): string[] {
   const files = new Set<string>();
   for (const m of stderr.matchAll(/Could not fetch resource '?(.+?)'?(?:: replacing image with description)?\r?$/gm)) {
-    files.add(m[1]);
+    files.add(decodePercentEscapes(m[1]));
   }
   return [...files];
+}
+
+/**
+ * Décode les suites `%XX` d'un chemin, une suite à la fois : un `%` que ne suivent pas deux
+ * chiffres hexadécimaux (`images/100%.png`, que pandoc laisse tel quel) reste un `%`, là où
+ * `decodeURIComponent` lèverait sur tout le chemin.
+ */
+function decodePercentEscapes(path: string): string {
+  return path.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
 }
 
 /** Une seule réserve pour toutes les images introuvables : la modale la dit en une phrase. */

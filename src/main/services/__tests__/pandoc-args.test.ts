@@ -19,6 +19,7 @@ import {
   projectResourcePaths,
   resolveBibliographyMode,
   resolveBookSettings,
+  stagedBeamerImageName,
   type PandocArgsInput,
 } from '../pandoc-args.js';
 
@@ -146,11 +147,43 @@ describe('buildPandocArgs — dossiers des images', () => {
     expect(buildPandocArgs(BASE).some((a) => a.startsWith('--resource-path'))).toBe(false);
   });
 
-  it('les dossiers du projet : sa racine, puis chapters/ (images relatives à un chapitre)', () => {
-    expect(projectResourcePaths('/Users/h/Mon projet')).toEqual([
-      '/Users/h/Mon projet',
+  /**
+   * L'éditeur résout une image relative au fichier ouvert. Un chapitre qui écrit `images/x.png`
+   * montre `chapters/images/x.png` : si le projet a aussi un `images/x.png`, chercher d'abord à
+   * la racine remettait dans le livre une autre image que celle que l'auteur voit.
+   */
+  it('livre : chapters/ d’abord, puis la racine (où retombe le ../images/ d’un chapitre)', () => {
+    expect(projectResourcePaths('/Users/h/Mon projet', 'book')).toEqual([
       join('/Users/h/Mon projet', 'chapters'),
+      '/Users/h/Mon projet',
     ]);
+  });
+
+  it.each(['article', 'presentation'] as const)(
+    '%s : la racine seule, où vit le document',
+    (projectType) => {
+      expect(projectResourcePaths('/Users/h/Mon projet', projectType)).toEqual(['/Users/h/Mon projet']);
+    }
+  );
+});
+
+/**
+ * Le logo et l'image de titre d'une présentation : pandoc recopie la variable telle quelle dans
+ * `\logo{\includegraphics{…}}`. Un chemin absolu y portait les barres obliques inverses de Windows
+ * (« Undefined control sequence »), le `#` ou le `%` d'un nom de dossier (« Illegal parameter
+ * number », « File ended while scanning »). L'export les copie dans son dossier de travail, où
+ * xelatex tourne, sous un nom fixe : rien du chemin du projet n'atteint LaTeX.
+ */
+describe('stagedBeamerImageName', () => {
+  it.each([
+    ['logo', 'C:\\Users\\Jean\\Documents\\Mon projet #2\\logo.png', 'logo.png'],
+    ['logo', '/Users/h/Taux 100% & co/images/Logo final.PNG', 'logo.PNG'],
+    ['titlegraphic', 'C:\\Users\\Jean\\Mon projet\\titre.jpeg', 'titlegraphic.jpeg'],
+    ['titlegraphic', '/Users/h/Projet/images/couverture', 'titlegraphic'],
+    ['logo', '/Users/h/Projet.v2/logo', 'logo'],
+    ['logo', '/Users/h/Projet/logo.p#g', 'logo'],
+  ] as const)('%s depuis %s : %s', (kind, source, expected) => {
+    expect(stagedBeamerImageName(kind, source)).toBe(expected);
   });
 });
 
@@ -168,6 +201,26 @@ describe('avertissements de pandoc sur les images', () => {
       'chapters/images/carte été.png',
     ]);
     expect(pandocMissingResources('')).toEqual([]);
+  });
+
+  /**
+   * Pandoc écrit l'espace d'un nom de fichier en `%20` (relevé sur pandoc 3.13, `![X](<images/mon
+   * image.png>)`) : l'auteur ne retrouverait pas ce nom dans le Finder. Un `%` que ne suivent pas
+   * deux chiffres hexadécimaux est laissé tel quel, comme pandoc le laisse.
+   */
+  it('rend le nom du fichier tel qu’il est sur le disque, sans %20', () => {
+    const stderr = [
+      '[WARNING] Could not fetch resource images/mon%20image.png: replacing image with description',
+      '[WARNING] Could not fetch resource images/autre%20image%20%C3%A9t%C3%A9.png: replacing image with description',
+      '[WARNING] Could not fetch resource images/100%.png: replacing image with description',
+      '[WARNING] Could not fetch resource images/taux%2050%.png: replacing image with description',
+    ].join('\n');
+    expect(pandocMissingResources(stderr)).toEqual([
+      'images/mon image.png',
+      'images/autre image été.png',
+      'images/100%.png',
+      'images/taux 50%.png',
+    ]);
   });
 
   it('une seule réserve pour toutes les images introuvables, avec leur nombre', () => {

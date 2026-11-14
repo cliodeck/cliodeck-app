@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { writeFile, mkdtemp, readFile, rm } from 'fs/promises';
+import { copyFile, writeFile, mkdtemp, readFile, rm } from 'fs/promises';
 import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
@@ -28,7 +28,9 @@ import {
   projectResourcePaths,
   resolveBibliographyMode,
   resolveBookSettings,
+  stagedBeamerImageName,
 } from './pandoc-args.js';
+import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 
 // MARK: - Types
 
@@ -617,18 +619,38 @@ $body$
 };
 
 /**
- * Logo et image de titre de la présentation, résolus contre le projet. Le réglage les dit
- * « chemin relatif » (`logo.png`), mais xelatex compile dans un dossier temporaire : l'export
- * échouait sur « Unable to load picture or PDF file 'logo.png' » (S12-1-24). `pandoc-args` reste
- * pur : la résolution se fait ici.
+ * Logo et image de titre de la présentation, copiés dans le dossier de travail de l'export, où
+ * xelatex tourne, sous un nom fixe (`stagedBeamerImageName`). Le réglage les dit « chemin
+ * relatif » (`logo.png`), mais xelatex ne voit pas le projet : l'export échouait sur « Unable to
+ * load picture or PDF file 'logo.png' » (S12-1-24). Un chemin absolu ne suffit pas : pandoc le
+ * recopie tel quel dans le LaTeX, où les barres obliques inverses de Windows, le `#` ou le `%`
+ * d'un nom de dossier le font encore échouer.
+ *
+ * Une image introuvable (ou illisible) est retirée, avec une réserve : la présentation sort sans
+ * elle, au lieu d'échouer sur une erreur de LaTeX.
  */
-function projectBeamerConfig(projectPath: string, cfg?: BeamerConfig): BeamerConfig | undefined {
-  if (!cfg) return cfg;
-  return {
-    ...cfg,
-    ...(cfg.logo ? { logo: resolvePath(projectPath, cfg.logo) } : {}),
-    ...(cfg.titlegraphic ? { titlegraphic: resolvePath(projectPath, cfg.titlegraphic) } : {}),
-  };
+async function stageBeamerImages(
+  projectPath: string,
+  workDir: string,
+  cfg?: BeamerConfig
+): Promise<{ config?: BeamerConfig; warnings: OutcomeIssue[] }> {
+  if (!cfg) return { config: cfg, warnings: [] };
+  const config: BeamerConfig = { ...cfg };
+  const warnings: OutcomeIssue[] = [];
+  for (const kind of ['logo', 'titlegraphic'] as const) {
+    const declared = cfg[kind];
+    if (!declared) continue;
+    const name = stagedBeamerImageName(kind, declared);
+    try {
+      await copyFile(resolvePath(projectPath, declared), join(workDir, name));
+      config[kind] = name;
+    } catch (err) {
+      console.warn(`⚠️ pdf-export: ${kind} introuvable ou illisible, exporté sans lui :`, declared, err);
+      delete config[kind];
+      warnings.push({ code: 'export.beamerImageNotFound', params: { file: declared } });
+    }
+  }
+  return { config, warnings };
 }
 
 // MARK: - Service
@@ -934,6 +956,13 @@ export class PDFExportService {
         }
       }
 
+      // Le logo ne sert qu'à beamer : un article ou un livre ne copie rien et ne dit rien de lui.
+      const beamer = await stageBeamerImages(
+        options.projectPath,
+        tempDir,
+        options.projectType === 'presentation' ? options.beamerConfig : undefined
+      );
+
       const cslAvailable = !!options.cslPath && (await pathExists(options.cslPath));
       const pandocArgs = buildPandocArgs({
         mdPath,
@@ -941,7 +970,7 @@ export class PDFExportService {
         templatePath,
         projectType: options.projectType,
         bookSettings: options.bookSettings,
-        beamerConfig: projectBeamerConfig(options.projectPath, options.beamerConfig),
+        beamerConfig: beamer.config,
         metadata: options.metadata,
         abstract,
         bibPath,
@@ -949,7 +978,7 @@ export class PDFExportService {
         cslPath: options.cslPath,
         cslAvailable,
         headerIncludesPath,
-        resourcePaths: projectResourcePaths(options.projectPath),
+        resourcePaths: projectResourcePaths(options.projectPath, options.projectType),
       });
 
       if (bibPath && !useEnginePipeline && cslAvailable) {
@@ -1004,7 +1033,10 @@ export class PDFExportService {
 
       // Une image introuvable, pandoc la remplace par sa légende et réussit : sans cette réserve,
       // le PDF partait sans elle et sans un mot (S12-1-1).
-      const warnings = missingImagesWarnings(pandocMissingResources(pandocStderr));
+      const warnings = [
+        ...beamer.warnings,
+        ...missingImagesWarnings(pandocMissingResources(pandocStderr)),
+      ];
       if (warnings.length > 0) console.warn('⚠️ pdf-export: images introuvables:', warnings);
 
       console.log('✅ PDF exported successfully:', outputPath);

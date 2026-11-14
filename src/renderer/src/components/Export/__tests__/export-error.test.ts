@@ -82,6 +82,16 @@ describe.each(['fr', 'en', 'de'] as const)('échec d’une image, en %s', (lng) 
     expect(two).toContain('images/a.png, images/b.png');
     expect(one).not.toBe(two.replace('images/a.png, images/b.png', 'images/a.png'));
   });
+
+  it('un logo de présentation introuvable : nommé, et dit exporté sans lui', async () => {
+    const t = await translator(lng);
+    const issue = { code: 'export.beamerImageNotFound', params: { file: 'images/logo.png' } };
+
+    const message = translateMessage(t, issue);
+
+    expect(message).toContain('images/logo.png');
+    expect(message).not.toBe('messages.export.beamerImageNotFound');
+  });
 });
 
 describe.each(['fr', 'en', 'de'])('locale %s', (language) => {

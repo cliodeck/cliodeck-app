@@ -252,7 +252,7 @@ export class WordExportService {
         '-o', outputPath,
         '--from', 'markdown',
         '--to', 'docx',
-        `--resource-path=${projectResourcePaths(options.projectPath).join(delimiter)}`,
+        `--resource-path=${projectResourcePaths(options.projectPath, options.projectType).join(delimiter)}`,
       ];
 
       // Réglages d'ouvrage. La modale annonce qu'ils « pilotent l'assemblage

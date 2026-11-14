@@ -5,7 +5,9 @@
  *  - une image relative (`images/plan.png`), que l'éditeur affiche, était remplacée par sa
  *    légende, et l'export se disait réussi, PDF comme Word (S12-1-1) ;
  *  - le logo d'une présentation (« Logo (chemin relatif) » : `logo.png`) faisait échouer
- *    l'export beamer (S12-1-24) ;
+ *    l'export beamer (S12-1-24). Il est copié dans le dossier de travail sous un nom fixe : un
+ *    chemin absolu atteignait LaTeX tel quel, et un `#` ou un `%` du dossier du projet (les
+ *    barres obliques inverses de Windows aussi) le faisait encore échouer ;
  *  - un chemin de sortie relatif (`article.pdf`) était écrit dans le dossier temporaire, effacé
  *    avec lui : export « réussi », fichier introuvable (S12-1-28).
  * Et la sortie de pandoc était décodée morceau par morceau : un « é » coupé entre deux morceaux
@@ -45,6 +47,12 @@ const PIXEL_PNG = Buffer.from(
   'base64'
 );
 
+/** Une image PNG de 3 × 2 pixels : `pdfimages -list` la distingue de la précédente. */
+const PNG_3X2 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAIAAAASFvFNAAAAD0lEQVR4nGNgaPgPRXAWAFPeCPtx0iu3AAAAAElFTkSuQmCC',
+  'base64'
+);
+
 /** Une image WebP d'un pixel : un format que xelatex ne lit pas, ni pandoc pour le convertir. */
 const PIXEL_WEBP = Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA', 'base64');
 
@@ -75,9 +83,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** Un projet neuf, dont le chemin contient une espace, avec ses images. */
-function newProject(): string {
-  const project = join(mkdtempSync(join(root, 'p-')), 'Mon projet');
+/** Un projet neuf, dont le chemin contient une espace (par défaut), avec ses images. */
+function newProject(name = 'Mon projet'): string {
+  const project = join(mkdtempSync(join(root, 'p-')), name);
   mkdirSync(join(project, 'images'), { recursive: true });
   mkdirSync(join(project, 'chapters', 'images'), { recursive: true });
   writeFileSync(join(project, 'images', 'plan.png'), PIXEL_PNG);
@@ -205,7 +213,40 @@ describe('export PDF, pandoc simulé', () => {
     });
   });
 
-  it('pandoc reçoit les dossiers du projet, un chemin de sortie et un logo résolus contre le projet', async () => {
+  it('pandoc reçoit le dossier du projet et un chemin de sortie résolu contre lui ; logo et image de titre sont copiés dans son dossier de travail', async () => {
+    const project = newProject();
+    writeFileSync(join(project, 'images', 'titre.jpg'), PNG_3X2);
+    const staged = new Map<string, Buffer>();
+    const calls = simulatePandoc((call) => {
+      // Le dossier de travail part avec l'export : ce que xelatex y trouverait se lit au lancement.
+      for (const name of ['logo.png', 'titlegraphic.jpg']) {
+        const file = join(call.cwd, name);
+        if (existsSync(file)) staged.set(name, readFileSync(file));
+      }
+      answer(call.child);
+    });
+
+    const result = await pdfExportService.exportToPDF({
+      projectPath: project,
+      projectType: 'presentation',
+      content: '# Diapo\n\nTexte\n',
+      outputPath: 'diapos.pdf',
+      beamerConfig: { logo: 'logo.png', titlegraphic: 'images/titre.jpg' },
+      metadata: METADATA,
+    });
+
+    const args = calls.find(isFinalPdfCall)?.args ?? [];
+    expect(args[args.indexOf('-o') + 1]).toBe(join(project, 'diapos.pdf'));
+    expect(args).toContain(`--resource-path=${project}`);
+    expect(args).toContain('logo:logo.png');
+    expect(args).toContain('titlegraphic:titlegraphic.jpg');
+    expect(staged.get('logo.png')).toEqual(PIXEL_PNG);
+    expect(staged.get('titlegraphic.jpg')).toEqual(PNG_3X2);
+    expect(result).toMatchObject({ success: true, outputPath: join(project, 'diapos.pdf') });
+    expect(result.warnings).toBeUndefined();
+  });
+
+  it('un logo introuvable : la présentation est exportée sans lui, et l’export le dit', async () => {
     const project = newProject();
     const calls = simulatePandoc((call) => answer(call.child));
 
@@ -213,17 +254,31 @@ describe('export PDF, pandoc simulé', () => {
       projectPath: project,
       projectType: 'presentation',
       content: '# Diapo\n\nTexte\n',
-      outputPath: 'diapos.pdf',
-      beamerConfig: { logo: 'logo.png', titlegraphic: 'images/plan.png' },
+      outputPath: join(project, 'diapos.pdf'),
+      beamerConfig: { logo: 'images/logo absent.png' },
       metadata: METADATA,
     });
 
     const args = calls.find(isFinalPdfCall)?.args ?? [];
-    expect(args[args.indexOf('-o') + 1]).toBe(join(project, 'diapos.pdf'));
-    expect(args).toContain(`--resource-path=${[project, join(project, 'chapters')].join(delimiter)}`);
-    expect(args).toContain(`logo:${join(project, 'logo.png')}`);
-    expect(args).toContain(`titlegraphic:${join(project, 'images', 'plan.png')}`);
-    expect(result).toMatchObject({ success: true, outputPath: join(project, 'diapos.pdf') });
+    expect(args.some((a) => a.startsWith('logo:'))).toBe(false);
+    expect(result).toMatchObject({
+      success: true,
+      warnings: [{ code: 'export.beamerImageNotFound', params: { file: 'images/logo absent.png' } }],
+    });
+  });
+
+  it('livre : pandoc cherche d’abord sous chapters/, comme l’éditeur pour un chapitre', async () => {
+    const project = newProject();
+    const calls = simulatePandoc((call) => answer(call.child));
+
+    await pdfExportService.exportToPDF({
+      ...bookOptions(project, ['# Premier\n\nTexte.\n']),
+      outputPath: join(project, 'livre.pdf'),
+    });
+
+    expect(calls.find(isFinalPdfCall)?.args).toContain(
+      `--resource-path=${[join(project, 'chapters'), project].join(delimiter)}`
+    );
   });
 
   it('deux exports lancés dans la même milliseconde ont chacun leur dossier de travail', async () => {
@@ -285,7 +340,7 @@ describe.skipIf(!pandocAvailable())('export Word, pandoc simulé', () => {
       wordOptions(project, '![Carte](images/carte-été.png) [@dupont2020]\n', join(project, 'article.docx'))
     );
 
-    expect(calls[0]?.args).toContain(`--resource-path=${[project, join(project, 'chapters')].join(delimiter)}`);
+    expect(calls[0]?.args).toContain(`--resource-path=${project}`);
     expect(result).toMatchObject({
       success: true,
       warnings: [{ code: 'export.imagesNotFound', params: { files: 'images/carte-été.png', count: 1 } }],
@@ -325,6 +380,17 @@ function pdfImageCount(pdf: string): number {
     .split('\n')
     .slice(2)
     .filter((line) => line.trim().split(/\s+/)[2] === 'image').length;
+}
+
+/** Largeur et hauteur de chaque image du PDF (`pdfimages -list`), sans les masques. */
+function pdfImageSizes(pdf: string): string[] {
+  const list = execFileSync('pdfimages', ['-list', pdf], { encoding: 'utf8', env: toolEnv() });
+  return list
+    .split('\n')
+    .slice(2)
+    .map((line) => line.trim().split(/\s+/))
+    .filter((cols) => cols[2] === 'image')
+    .map((cols) => `${cols[3]}x${cols[4]}`);
 }
 
 /** Les fichiers de `word/media` du .docx. */
@@ -376,6 +442,25 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
       COMPILE_MS
     );
 
+    it.skipIf(!pdftotextAvailable())(
+      'livre : deux images homonymes, celle du chapitre entre dans le PDF, comme l’éditeur la montre',
+      async () => {
+        const project = newProject();
+        writeFileSync(join(project, 'images', 'x.png'), PNG_3X2);
+        writeFileSync(join(project, 'chapters', 'images', 'x.png'), PIXEL_PNG);
+        const outputPath = join(project, 'livre.pdf');
+
+        const result = await pdfExportService.exportToPDF({
+          ...bookOptions(project, ['# Premier\n\n![Carte](images/x.png)\n']),
+          outputPath,
+        });
+
+        expect(result, result.error).toMatchObject({ success: true });
+        expect(pdfImageSizes(outputPath)).toEqual(['1x1']);
+      },
+      COMPILE_MS
+    );
+
     it(
       'chemin de sortie relatif « article.pdf » : le PDF est dans le projet',
       async () => {
@@ -395,10 +480,14 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
       COMPILE_MS
     );
 
-    it.skipIf(!pdftotextAvailable())(
-      'présentation : Logo = « logo.png » (chemin relatif) donne un PDF, avec le logo',
-      async () => {
-        const project = newProject();
+    /**
+     * Le nom du dossier du projet n'atteint plus LaTeX : avant la copie, « Projet #2 » échouait
+     * sur « Illegal parameter number », « Taux 100% » sur « File ended while scanning ».
+     */
+    it.skipIf(!pdftotextAvailable()).each(['Mon projet', 'Projet #2', 'Taux 100%', 'A & B'])(
+      'présentation : Logo = « logo.png » (chemin relatif) donne un PDF, avec le logo (projet « %s »)',
+      async (name) => {
+        const project = newProject(name);
         const outputPath = join(project, 'diapos.pdf');
 
         const result = await pdfExportService.exportToPDF({
@@ -411,7 +500,32 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
         });
 
         expect(result, result.error).toMatchObject({ success: true });
+        expect(result.warnings).toBeUndefined();
         expect(pdfImageCount(outputPath)).toBeGreaterThanOrEqual(1);
+      },
+      COMPILE_MS
+    );
+
+    it(
+      'présentation : un logo introuvable, le PDF est écrit sans lui, et l’export le dit',
+      async () => {
+        const project = newProject();
+        const outputPath = join(project, 'diapos.pdf');
+
+        const result = await pdfExportService.exportToPDF({
+          projectPath: project,
+          projectType: 'presentation',
+          content: '# Diapo\n\nTexte\n',
+          outputPath,
+          beamerConfig: { logo: 'logo-absent.png' },
+          metadata: METADATA,
+        });
+
+        expect(result, result.error).toMatchObject({
+          success: true,
+          warnings: [{ code: 'export.beamerImageNotFound', params: { file: 'logo-absent.png' } }],
+        });
+        expect(readFileSync(outputPath).subarray(0, 5).toString('latin1')).toBe('%PDF-');
       },
       COMPILE_MS
     );
@@ -424,14 +538,20 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
         const result = await pdfExportService.exportToPDF({
           projectPath: project,
           projectType: 'article',
-          content: '# Un\n\n![Absente](images/absente.png)\n',
+          content: '# Un\n\n![Absente](images/absente.png)\n\n![Sans elle](<images/mon image.png>)\n',
           outputPath: join(project, 'article.pdf'),
           metadata: METADATA,
         });
 
+        // Pandoc écrit `images/mon%20image.png` : l'export dit le nom du fichier sur le disque.
         expect(result).toMatchObject({
           success: true,
-          warnings: [{ code: 'export.imagesNotFound', params: { files: 'images/absente.png', count: 1 } }],
+          warnings: [
+            {
+              code: 'export.imagesNotFound',
+              params: { files: 'images/absente.png, images/mon image.png', count: 2 },
+            },
+          ],
         });
       },
       COMPILE_MS
