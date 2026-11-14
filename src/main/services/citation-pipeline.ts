@@ -89,8 +89,11 @@ function parseCluster(inner: string): ClusterPart[] | null {
  * qui ne rend pas les citations laisse telles quelles. Même lecture que
  * {@link processMarkdownCitations} : rien dans un bloc de code ni dans un extrait de code en
  * ligne, et pas les `@nom` nus (plus souvent un pseudonyme qu'une citation).
+ *
+ * `narrative` : les `@clé` nues aussi, que pandoc tient pour des citations narratives. À
+ * rapprocher de la bibliographie par l'appelant : seule une clé qu'elle connaît est une citation.
  */
-export function citationKeysIn(markdown: string): string[] {
+export function citationKeysIn(markdown: string, options: { narrative?: boolean } = {}): string[] {
   const keys = new Set<string>();
   let inFence = false;
   for (const line of markdown.split('\n')) {
@@ -102,7 +105,10 @@ export function citationKeysIn(markdown: string): string[] {
     line.split(/(`[^`]*`)/).forEach((segment, i) => {
       if (i % 2 === 1) return;
       for (const m of segment.matchAll(CITATION_RE)) {
-        if (m[2] === undefined) continue;
+        if (m[2] === undefined) {
+          if (options.narrative && m[3] !== undefined) keys.add(m[3]);
+          continue;
+        }
         for (const part of parseCluster(m[2]) ?? []) keys.add(part.key);
       }
     });

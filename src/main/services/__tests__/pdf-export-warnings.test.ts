@@ -147,6 +147,41 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())('export PDF d’un li
     COMPILE_MS
   );
 
+  /**
+   * Revue de L09-12, seconde passe : pandoc tient `@clé` nue pour une citation narrative, et
+   * l'échec de citeproc la laisse brute dans le PDF. Elle compte quand la bibliographie connaît la
+   * clé ; un pseudonyme (`@inactinique`), que la bibliographie ignore, ne nomme pas son chapitre.
+   */
+  it(
+    'citeproc échoue : un chapitre aux seules citations narratives (@clé) est nommé, un pseudonyme ne l’est pas',
+    async () => {
+      writeFileSync(join(project, 'refs.bib'), BIBLIOGRAPHY);
+      writeFileSync(join(project, 'style.csl'), '<style>tronqué');
+      writeFileSync(join(project, 'chapters', '01.md'), '# Ouverture\n\nComme le montre @dupont2020, les archives parlent.\n');
+      writeFileSync(join(project, 'chapters', '02.md'), '# Réseaux\n\nSuivre @inactinique, ou écrire à jean@example.org.\n');
+
+      const result = await exportBook(
+        [
+          { id: 'a', title: 'Ouverture', filePath: 'chapters/01.md', order: 0 },
+          { id: 'b', title: 'Réseaux', filePath: 'chapters/02.md', order: 1 },
+        ],
+        { bibliographyPath: join(project, 'refs.bib'), cslPath: join(project, 'style.csl') },
+        { bibliography: 'per-chapter' }
+      );
+
+      expect(result, result.error).toMatchObject({ success: true });
+      expect(result.warnings).toEqual([
+        { code: 'export.chapterCitationsNotResolved', params: { title: 'Ouverture', file: 'chapters/01.md' } },
+      ]);
+      if (pdftotextAvailable()) {
+        const text = execFileSync('pdftotext', [join(project, 'livre.pdf'), '-'], { encoding: 'utf8', env: toolEnv() });
+        // Ce que la réserve dit : la clé est restée brute.
+        expect(text).toContain('@dupont2020');
+      }
+    },
+    COMPILE_MS
+  );
+
   it(
     'un chapitre vide, style valide : citeproc rend une sortie vide, ce n’est pas un échec',
     async () => {

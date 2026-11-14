@@ -38,8 +38,11 @@
 import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { crc32, deflateSync } from 'node:zlib';
 import { pdftotextAvailable, toolEnv } from '../backend/__tests__/helpers/native-guards';
 import { launchApp } from './_helpers/launch';
 
@@ -159,6 +162,107 @@ test('l’export PDF d’une présentation rend une page par diapositive, hors l
     expect(blocked.filter((url) => !/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(url))).toEqual([]);
   } finally {
     await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+/** Un PNG valide (CRC justes), en dégradé : Chromium le décode et l'imprime comme une image. */
+function gradientPng(width: number, height: number): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // 8 bits par composante
+  header[9] = 2; // RVB ; compression, filtre et entrelacement à 0
+  const rows = Array.from({ length: height }, (_, y) =>
+    Buffer.from([0, ...Array.from({ length: width }, (_, x) => [x * 5, y * 7, 128]).flat()]),
+  );
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.concat(rows))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/**
+ * Revue de L09-12, seconde passe : le chargement de la page d'impression était borné au total
+ * (30 s), et une image distante qui arrivait lentement, mais arrivait (image d'archive en lien
+ * direct, réseau d'hôtel), faisait échouer l'export. C'est l'inactivité qui est bornée : un serveur
+ * local envoie l'image par petits morceaux, un par seconde, pendant 36 s, et le PDF sort avec elle.
+ * Le seul test qui passe par le vrai protocole des outils de développement de Chromium, qui voit
+ * chaque morceau reçu (`Network.dataReceived`) : à relancer à chaque montée d'Electron.
+ */
+test('une image distante lente qui arrive passe dans le PDF, au-delà du délai d’inactivité', async () => {
+  test.setTimeout(180_000);
+  const image = gradientPng(48, 32);
+  const seconds = 36;
+  const size = Math.ceil(image.length / seconds);
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'image/png', 'content-length': String(image.length) });
+    let sent = 0;
+    const timer = setInterval(() => {
+      const part = image.subarray(sent, sent + size);
+      sent += part.length;
+      if (sent >= image.length) {
+        clearInterval(timer);
+        response.end(part);
+      } else response.write(part);
+    }, 1000);
+    response.on('close', () => clearInterval(timer));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    server.close();
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const outDir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-image-lente-'));
+  const outputPath = join(outDir, 'carte.pdf');
+
+  try {
+    const started = Date.now();
+    const result = await window.evaluate(
+      (options) => (window as unknown as ExportBridge).electron.revealJsExport.exportPDF(options),
+      {
+        projectPath: join(outDir, 'project.json'),
+        content: `# Carte\n\n![Carte d'archive](http://127.0.0.1:${port}/carte.png)\n`,
+        outputPath,
+        metadata: { title: 'Image lente' },
+      },
+    );
+    const elapsed = Date.now() - started;
+    test.skip(
+      result.errorCode === 'presentation.assetsUnavailable',
+      'reveal.js ni en cache ni téléchargeable : export PDF non vérifiable.',
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result).toMatchObject({ success: true });
+    expect(result.warnings).toBeUndefined();
+    // Au-delà du délai d'inactivité (30 s) : c'est bien la progression qui a fait attendre la page.
+    expect(elapsed).toBeGreaterThan(30_000);
+    if (pdftotextAvailable()) {
+      // pdfimages vient avec pdftotext (Poppler) : l'image est dans le PDF.
+      const list = execFileSync('pdfimages', ['-list', outputPath], { encoding: 'utf8', env: toolEnv() });
+      expect(list.split('\n').slice(2).filter(Boolean)).toHaveLength(1);
+    }
+  } finally {
+    await app.close();
+    server.closeAllConnections();
+    server.close();
     rmSync(userDataDir, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });
   }

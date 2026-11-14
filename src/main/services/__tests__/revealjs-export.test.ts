@@ -27,7 +27,23 @@ const browser = vi.hoisted(() => ({
   destroyed: 0,
   /** Les téléchargements passés par `net.fetch` (pile réseau de Chromium, proxy du système). */
   netCalls: 0,
+  /**
+   * Le protocole des outils de développement de la fenêtre, par lequel l'export observe ce que la
+   * page reçoit du réseau : ses écouteurs, et `broken` quand il ne démarre pas.
+   */
+  listeners: [] as Array<(event: unknown, method: string, params: unknown) => void>,
+  debuggerBroken: false,
+  detached: 0,
 }));
+
+/** Un événement du protocole, tel que Chromium l'envoie pour la page qui se charge. */
+function network(method: string, params: Record<string, unknown>): void {
+  for (const listener of [...browser.listeners]) listener({}, method, params);
+}
+const requestSent = (id: string, url: string) => network('Network.requestWillBeSent', { requestId: id, request: { url } });
+const dataReceived = (id: string) => network('Network.dataReceived', { requestId: id, dataLength: 64 });
+const loadingFinished = (id: string) => network('Network.loadingFinished', { requestId: id });
+const KATEX_URL = 'https://cdn.jsdelivr.net/npm/katex@latest/dist/katex.min.js';
 
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => browser.userData) },
@@ -50,7 +66,31 @@ vi.mock('electron', () => ({
         browser.printed++;
         return Buffer.from('%PDF-1.4\n');
       },
+      debugger: {
+        attached: false,
+        attach() {
+          if (browser.debuggerBroken) throw new Error('protocole indisponible');
+          browser.listeners = [];
+          this.attached = true;
+        },
+        isAttached() {
+          return this.attached;
+        },
+        detach() {
+          this.attached = false;
+          browser.detached++;
+        },
+        on(_event: string, listener: (event: unknown, method: string, params: unknown) => void) {
+          browser.listeners.push(listener);
+        },
+        removeListener(_event: string, listener: (event: unknown, method: string, params: unknown) => void) {
+          browser.listeners = browser.listeners.filter((l) => l !== listener);
+        },
+        sendCommand: async () => ({}),
+      },
     };
+    /** La page d'amorce, avant la page d'impression : le protocole ne répond qu'après elle. */
+    async loadURL() {}
     async loadFile(file: string) {
       browser.loadedHtml = readFileSync(file, 'utf-8');
       browser.loads.push(browser.loadedHtml);
@@ -418,6 +458,9 @@ describe('export PDF : reveal.js depuis le cache, mise en page attendue (S12-1-1
     browser.windows = 0;
     browser.destroyed = 0;
     browser.netCalls = 0;
+    browser.listeners = [];
+    browser.debuggerBroken = false;
+    browser.detached = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(SCRIPT(url), { headers: { 'content-type': 'application/javascript' } })));
   });
   afterEach(() => {
@@ -602,6 +645,9 @@ describe('export PDF et HTML autonome : ce que la page demande au dehors (revue 
     browser.windows = 0;
     browser.destroyed = 0;
     browser.netCalls = 0;
+    browser.listeners = [];
+    browser.debuggerBroken = false;
+    browser.detached = 0;
     fetched = [];
     vi.stubGlobal('fetch', network());
   });
@@ -678,7 +724,11 @@ describe('export PDF et HTML autonome : ce que la page demande au dehors (revue 
     'une page qui ne finit pas de charger (KaTeX) : refaite sans formules, PDF dans le délai, avec la réserve',
     async () => {
       // Sans borne, le chargement ne finirait jamais : le test tomberait sur son propre délai.
-      browser.load = (n) => (n === 1 ? NEVER() : Promise.resolve());
+      browser.load = (n) => {
+        if (n > 1) return Promise.resolve();
+        requestSent('katex', KATEX_URL);
+        return NEVER();
+      };
 
       const result = await new RevealJsExportService({ renderTimeoutMs: 300 }).exportToPDF(deck('# Loi\n\n$E = mc^2$\n'));
 
@@ -694,8 +744,144 @@ describe('export PDF et HTML autonome : ce que la page demande au dehors (revue 
   );
 
   it(
-    'une page sans formules qui ne finit pas de charger : échec dit dans le délai, rien d’imprimé',
+    'une image distante qui ne répond plus : échec dans le délai, qui nomme l’image, rien d’imprimé',
     async () => {
+      browser.load = () => {
+        requestSent('img', 'https://example.org/carte.png');
+        return NEVER();
+      };
+
+      const result = await new RevealJsExportService({ renderTimeoutMs: 300 }).exportToPDF(
+        deck('# Carte\n\n![](https://example.org/carte.png)\n')
+      );
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'presentation.resourceNotResponding',
+        errorParams: { resources: 'https://example.org/carte.png', count: 1 },
+      });
+      expect(browser.loads).toHaveLength(1);
+      expect(browser.printed).toBe(0);
+      expect(existsSync(join(dir, 'diapos.pdf'))).toBe(false);
+    },
+    20_000
+  );
+
+  /**
+   * Revue de L09-12, seconde passe : le chargement était borné au total (30 s), et une image
+   * d'archive qui arrivait lentement, mais arrivait, faisait échouer l'export, alors qu'il
+   * réussissait avant. C'est l'inactivité qui est bornée : rien reçu pendant `renderTimeoutMs`.
+   */
+  it(
+    'une image distante lente qui arrive : attendue tant qu’elle progresse, au-delà du délai, et le PDF sort',
+    async () => {
+      browser.load = () =>
+        new Promise<void>((resolve) => {
+          requestSent('img', 'https://example.org/archive.png');
+          let chunks = 0;
+          const timer = setInterval(() => {
+            dataReceived('img');
+            if (++chunks < 25) return;
+            clearInterval(timer);
+            loadingFinished('img');
+            resolve();
+          }, 100);
+        });
+      const started = Date.now();
+
+      const result = await new RevealJsExportService({ renderTimeoutMs: 1000 }).exportToPDF(
+        deck('# Archive\n\n![](https://example.org/archive.png)\n')
+      );
+
+      expect(result, result.error).toMatchObject({ success: true });
+      // Au-delà du délai d'inactivité : seule la progression a pu faire attendre la page.
+      expect(Date.now() - started).toBeGreaterThan(1000);
+      expect(browser.loads).toHaveLength(1);
+      expect(browser.printed).toBe(1);
+      // L'observation s'arrête avec le chargement : rien n'en reste pendant l'impression.
+      expect(browser.detached).toBe(1);
+      expect(browser.listeners).toEqual([]);
+    },
+    20_000
+  );
+
+  it(
+    'une image qui progresse sans fin : l’attente a un plafond, et l’échec nomme l’image',
+    async () => {
+      let timer: ReturnType<typeof setInterval> | undefined;
+      browser.load = () => {
+        requestSent('img', 'https://example.org/archive.tif');
+        timer = setInterval(() => dataReceived('img'), 100);
+        return NEVER();
+      };
+
+      try {
+        const result = await new RevealJsExportService({ renderTimeoutMs: 1000, loadLimitMs: 1500 }).exportToPDF(
+          deck('# Archive\n\n![](https://example.org/archive.tif)\n')
+        );
+
+        expect(result).toMatchObject({
+          success: false,
+          errorCode: 'presentation.pageLoadTooLong',
+          errorParams: { resources: 'https://example.org/archive.tif', count: 1 },
+        });
+        expect(browser.printed).toBe(0);
+      } finally {
+        clearInterval(timer);
+      }
+    },
+    20_000
+  );
+
+  it(
+    'une image redirigée qui ne répond plus : l’échec nomme l’adresse écrite dans les diapositives',
+    async () => {
+      browser.load = () => {
+        requestSent('img', 'https://example.org/carte.png');
+        requestSent('img', 'https://cache.example.net/a1b2c3.png');
+        return NEVER();
+      };
+
+      const result = await new RevealJsExportService({ renderTimeoutMs: 300 }).exportToPDF(
+        deck('# Carte\n\n![](https://example.org/carte.png)\n')
+      );
+
+      expect(result).toMatchObject({
+        errorCode: 'presentation.resourceNotResponding',
+        errorParams: { resources: 'https://example.org/carte.png', count: 1 },
+      });
+    },
+    20_000
+  );
+
+  it(
+    'formules et image distante qui ne répondent plus : KaTeX n’est pas mis en cause, l’image est nommée',
+    async () => {
+      browser.load = () => {
+        requestSent('katex', KATEX_URL);
+        requestSent('img', 'https://example.org/carte.png');
+        return NEVER();
+      };
+
+      const result = await new RevealJsExportService({ renderTimeoutMs: 300 }).exportToPDF(
+        deck('# Loi\n\n$E = mc^2$\n\n![](https://example.org/carte.png)\n')
+      );
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'presentation.resourceNotResponding',
+        errorParams: { resources: 'https://example.org/carte.png', count: 1 },
+      });
+      // Pas de seconde page sans formules : elle attendrait la même image.
+      expect(browser.loads).toHaveLength(1);
+    },
+    20_000
+  );
+
+  it(
+    'réseau de la page inobservable : l’attente reste bornée au total, et l’échec le dit',
+    async () => {
+      browser.debuggerBroken = true;
       browser.load = NEVER;
 
       const result = await new RevealJsExportService({ renderTimeoutMs: 300 }).exportToPDF(
@@ -703,12 +889,71 @@ describe('export PDF et HTML autonome : ce que la page demande au dehors (revue 
       );
 
       expect(result).toMatchObject({ success: false, errorCode: 'presentation.pageNotLoaded' });
-      expect(browser.loads).toHaveLength(1);
       expect(browser.printed).toBe(0);
-      expect(existsSync(join(dir, 'diapos.pdf'))).toBe(false);
     },
     20_000
   );
+
+  it(
+    'réseau de la page inobservable, deck à formules : refaite sans formules, comme avant',
+    async () => {
+      browser.debuggerBroken = true;
+      browser.load = (n) => (n === 1 ? NEVER() : Promise.resolve());
+
+      const result = await new RevealJsExportService({ renderTimeoutMs: 300 }).exportToPDF(deck('# Loi\n\n$E = mc^2$\n'));
+
+      expect(result, result.error).toMatchObject({ success: true, warnings: [{ code: 'presentation.mathNotRendered' }] });
+      expect(browser.loads).toHaveLength(2);
+    },
+    20_000
+  );
+
+  /**
+   * Revue de L09-12, seconde passe : le greffon des formules était un fichier obligatoire. Le HTML
+   * autonome ne le met jamais en cache : hors ligne, tout l'export PDF d'un deck à formules
+   * échouait (`assetsUnavailable`), alors que le PDF sait sortir sans KaTeX.
+   */
+  it('formules hors ligne, greffon jamais mis en cache : le PDF sort sans formules, avec la réserve', async () => {
+    const service = new RevealJsExportService();
+    expect((await service.exportOffline(deck(undefined, 'diapos.html'))).success).toBe(true);
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    }));
+
+    const result = await service.exportToPDF(deck('# Une loi\n\n$E = mc^2$\n'));
+
+    expect(result, result.error).toMatchObject({ success: true, warnings: [{ code: 'presentation.mathNotRendered' }] });
+    expect(browser.loadedHtml).not.toContain('RevealMath');
+    expect(outsideReferences(browser.loadedHtml)).toEqual([]);
+    expect(browser.printed).toBe(1);
+  });
+
+  /**
+   * Revue de L09-12, seconde passe : deux montants en dollars sur une ligne passaient pour une
+   * formule. Règle de pandoc : un `$` ouvrant suivi d'un caractère non blanc, un `$` fermant
+   * précédé d'un caractère non blanc et non suivi d'un chiffre.
+   */
+  it('des montants en dollars ne sont pas des formules : ni réserve, ni greffon', async () => {
+    const budget = '# Budget\n\nLe budget passe de $200 à $300 millions, puis de $ 50 à $ 80.\n';
+    const offline = await new RevealJsExportService().exportOffline(deck(budget, 'budget.html'));
+    const pdf = await new RevealJsExportService().exportToPDF(deck(budget));
+
+    expect(offline).toEqual({ success: true, outputPath: join(dir, 'budget.html') });
+    expect(pdf, pdf.error).toEqual({ success: true, outputPath: join(dir, 'diapos.pdf') });
+    expect(browser.loadedHtml).not.toContain('RevealMath');
+    expect(fetched.filter((url) => url.endsWith('/math.js'))).toEqual([]);
+  });
+
+  it.each([
+    ['$x$'],
+    ['Soit $n$ documents, pour $5 de plus.'],
+    ['$$\n\\int_0^1 f\n$$'],
+    ['\\(a + b\\)'],
+  ])('« %s » est une formule : le HTML autonome le dit', async (formula) => {
+    const result = await new RevealJsExportService().exportOffline(deck(`# F\n\n${formula}\n`, 'f.html'));
+
+    expect(result.warnings).toEqual([{ code: 'presentation.mathNotIncludedOffline' }]);
+  });
 
   it('HTML autonome d’un deck à formules : écrit, avec la réserve qui dit les formules brutes', async () => {
     const output = join(dir, 'diapos.html');

@@ -4,7 +4,7 @@ import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
 import { citationKeysIn, processMarkdownCitations } from './citation-pipeline.js';
-import { bibliographyService } from './bibliography-service.js';
+import { bibliographyService, readBibFile } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
 import { refuseMarkdownOutput } from './export-output-path.js';
@@ -109,6 +109,30 @@ function collectText(stream: NodeJS.EventEmitter): () => string {
   const chunks: Buffer[] = [];
   stream.on('data', (chunk: Buffer) => chunks.push(chunk));
   return () => Buffer.concat(chunks).toString('utf8');
+}
+
+/** Les clés d'un `.bib` (clé BibTeX et alias `key`) ; `null` s'il ne se lit pas. */
+async function bibliographyKeysOf(path: string): Promise<Set<string> | null> {
+  const read = await readBibFile(path).catch(() => null);
+  if (read?.kind !== 'ok') return null;
+  return new Set(read.citations.flatMap((c) => (c.key ? [c.id, c.key] : [c.id])));
+}
+
+/**
+ * Des citations restent brutes dans un chapitre que citeproc n'a pas traité : un groupe `[@clé]`, ou
+ * une `@clé` nue que la bibliographie connaît, que pandoc tient pour une citation narrative (revue
+ * de L09-12). Un pseudonyme (`@nom`) qu'elle ignore reste ce qu'il est. Bibliographie illisible :
+ * toute `@clé` nue compte, une réserve de trop plutôt qu'un silence.
+ */
+async function citationsLeftRaw(
+  content: string,
+  knownKeys: () => Promise<Set<string> | null>
+): Promise<boolean> {
+  if (citationKeysIn(content).length > 0) return true;
+  const narrative = citationKeysIn(content, { narrative: true });
+  if (narrative.length === 0) return false;
+  const known = await knownKeys();
+  return known === null || narrative.some((key) => known.has(key));
 }
 
 // MARK: - Templates
@@ -866,6 +890,11 @@ export class PDFExportService {
         }
 
         const citeprocFailures: OutcomeIssue[] = [];
+        // Lue une fois, et seulement si un chapitre en échec n'a que des `@clé` nues.
+        const bibliographyPath = options.bibliographyPath;
+        let bibliographyKeys: Promise<Set<string> | null> | undefined;
+        const knownKeys = () =>
+          (bibliographyKeys ??= bibliographyPath ? clock.run(bibliographyKeysOf(bibliographyPath)) : Promise.resolve(null));
         const assembled = await assembleManuscript({
           projectPath: options.projectPath,
           chapters: options.manuscript.chapters,
@@ -883,7 +912,7 @@ export class PDFExportService {
                 // La passe globale n'aura pas de bibliographie : ses clés s'imprimeraient telles
                 // quelles, sans que rien le dise. Un chapitre sans clé n'en laisse aucune, même
                 // quand le style fait échouer citeproc : rien à dire.
-                if (!cited.resolved && citationKeysIn(content).length > 0) {
+                if (!cited.resolved && (await citationsLeftRaw(content, knownKeys))) {
                   citeprocFailures.push({
                     code: 'export.chapterCitationsNotResolved',
                     params: { title: chapter.title, file: chapter.filePath },
