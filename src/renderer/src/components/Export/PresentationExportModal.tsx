@@ -132,7 +132,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
         outputPath: outputPath,
         metadata: {
           title,
-          // Champ vide → le frontmatter YAML de slides.md peut fournir
+          // Champ vide → le frontmatter YAML du manuscrit exporté peut fournir
           // l'auteur (résolution côté main, resolveDeckConfig).
           author: author || undefined,
           date: new Date().toLocaleDateString(),
@@ -262,9 +262,13 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
             <small style={{ color: 'var(--text-tertiary)', fontSize: '11px', marginTop: '4px' }}>
               {t(`presentation.modeDesc.${exportMode}`)}
             </small>
-            <small style={{ display: 'block', color: 'var(--text-tertiary)', fontSize: '11px', marginTop: '4px' }}>
-              {t('presentation.frontmatterPrecedence')}
-            </small>
+            {/* Le frontmatter lu est celui du fichier exporté : document.md pour un article (Q43).
+                Un livre ne s'exporte pas en présentation : rien à nommer. */}
+            {currentProject && currentProject.type !== 'book' && (
+              <small style={{ display: 'block', color: 'var(--text-tertiary)', fontSize: '11px', marginTop: '4px' }}>
+                {t('presentation.frontmatterPrecedence', { file: manuscriptFileName(currentProject.type) })}
+              </small>
+            )}
           </div>
 
           {/* Form Fields */}

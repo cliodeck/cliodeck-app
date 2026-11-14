@@ -1222,7 +1222,7 @@
       "pdf": "Exporte directement en PDF via le moteur de rendu de la présentation."
     },
     "addSection": "Ajouter une section (# --- )",
-    "frontmatterPrecedence": "Le frontmatter YAML de slides.md (title, author, theme, transition) prime sur reveal-config.json ; le titre et l'auteur saisis ici gardent la main."
+    "frontmatterPrecedence": "Le frontmatter YAML de {{file}} (title, author, theme, transition) prime sur reveal-config.json ; le titre et l'auteur saisis ici gardent la main."
   },
   "revealjs": {
     "theme": "Thème",
@@ -2693,7 +2693,8 @@
       "imageNeedsRsvgConvert": "L'image SVG {{file}} ne peut pas entrer dans le PDF sans l'outil rsvg-convert, qui n'est pas installé. Installez-le (sous macOS : brew install librsvg), ou enregistrez l'image en PNG, puis relancez l'export.",
       "imageNotConverted": "L'export PDF ne sait pas lire le format de l'image {{file}}. Enregistrez-la en PNG ou en JPEG, puis relancez l'export.",
       "beamerImageNotFound": "Image de la configuration Beamer introuvable ou illisible : {{file}}. La présentation est exportée sans elle. Placez-la dans le dossier du projet, ou corrigez son chemin dans la configuration Beamer.",
-      "imageFolderUnreachable": "Les images du dossier {{dir}} n'ont pas pu être cherchées : son chemin contient « {{char}} », que l'outil d'export lit comme un séparateur. Elles sont remplacées par leur légende. Renommez le dossier du projet sans ce caractère, puis relancez l'export."
+      "imageFolderUnreachable": "Les images du dossier {{dir}} n'ont pas pu être cherchées : son chemin contient « {{char}} », que l'outil d'export lit comme un séparateur. Elles sont remplacées par leur légende. Renommez le dossier du projet sans ce caractère, puis relancez l'export.",
+      "outputIsMarkdown": "« {{file}} » est un fichier Markdown : l'export ne l'écrit pas, pour ne pas remplacer votre texte. Donnez un autre nom au fichier de sortie, puis relancez l'export."
     }
   }
 }

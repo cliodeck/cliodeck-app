@@ -5,6 +5,7 @@ import { app, BrowserWindow, shell } from 'electron';
 import { load as loadYaml } from 'js-yaml';
 import { marked } from 'marked';
 import { parseSlides as parseDeck, type DeckInfo } from '../../editor/slides.js';
+import { refuseMarkdownOutput } from './export-output-path.js';
 import {
   withExportTimeLimit,
   type ExportClock,
@@ -523,6 +524,9 @@ export class RevealJsExportService {
     onProgress?: (progress: RevealJsProgress) => void,
     limits?: ExportLimits
   ): Promise<ExportResult> {
+    // Jamais un fichier Markdown pour sortie : ce serait un texte de l'auteur (`export-output-path.ts`).
+    const refused = refuseMarkdownOutput(options.projectPath, options.outputPath);
+    if (refused) return refused;
     return withExportTimeLimit(limits, (clock) => this.runHtmlExport(options, onProgress, clock));
   }
 
@@ -623,6 +627,9 @@ export class RevealJsExportService {
     onProgress?: (progress: RevealJsProgress) => void,
     limits?: ExportLimits
   ): Promise<ExportResult> {
+    // Jamais un fichier Markdown pour sortie : ce serait un texte de l'auteur (`export-output-path.ts`).
+    const refused = refuseMarkdownOutput(options.projectPath, options.outputPath);
+    if (refused) return refused;
     return withExportTimeLimit(limits, (clock) => this.runOfflineExport(options, onProgress, clock));
   }
 
@@ -677,6 +684,9 @@ export class RevealJsExportService {
     onProgress?: (progress: RevealJsProgress) => void,
     limits?: ExportLimits
   ): Promise<ExportResult> {
+    // Jamais un fichier Markdown pour sortie : ce serait un texte de l'auteur (`export-output-path.ts`).
+    const refused = refuseMarkdownOutput(options.projectPath, options.outputPath);
+    if (refused) return refused;
     return withExportTimeLimit(limits, (clock) => this.runPdfExport(options, onProgress, clock));
   }
 

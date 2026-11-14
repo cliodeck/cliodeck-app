@@ -771,3 +771,42 @@ describe('export Word natif (sans bibliographie) : chemin de sortie relatif', ()
     expect(existsSync(join(project, name))).toBe(true);
   });
 });
+
+/**
+ * Résolu contre le projet, « document.md » saisi dans le champ « Fichier de sortie » désigne le
+ * manuscrit : l'export le remplaçait par le PDF ou le .docx, sans copie, et se disait réussi. Un
+ * chemin absolu le faisait déjà. Refusé avant tout lancement de pandoc.
+ */
+describe('le fichier de sortie n’est jamais un fichier Markdown', () => {
+  const MANUSCRIPT = '# Article\n\nLe texte de l’autrice.\n';
+  const articleTo = (project: string, outputPath: string) => ({
+    projectPath: project,
+    projectType: 'article' as const,
+    content: MANUSCRIPT,
+    outputPath,
+    bibliographyPath: join(project, 'references.bib'),
+    metadata: METADATA,
+  });
+  type ArticleOptions = ReturnType<typeof articleTo>;
+
+  it.each([
+    { name: 'PDF', run: (options: ArticleOptions) => pdfExportService.exportToPDF(options) },
+    { name: 'Word', run: (options: ArticleOptions) => wordExportService.exportToWord(options) },
+  ])('$name : document.md, nom nu ou chemin absolu, reste intact', async ({ run }) => {
+    const project = newProject();
+    writeFileSync(join(project, 'document.md'), MANUSCRIPT);
+    const calls = simulatePandoc((call) => answer(call.child));
+
+    for (const outputPath of ['document.md', join(project, 'document.md')]) {
+      const result: ExportResult = await run(articleTo(project, outputPath));
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'export.outputIsMarkdown',
+        errorParams: { file: 'document.md' },
+      });
+    }
+    expect(calls).toEqual([]);
+    expect(readFileSync(join(project, 'document.md'), 'utf8')).toBe(MANUSCRIPT);
+  });
+});

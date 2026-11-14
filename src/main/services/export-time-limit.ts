@@ -53,12 +53,18 @@ export type ExportErrorCode = 'export_timed_out' | 'export_cancelled';
  */
 export type ExportImageErrorCode = 'export.imageNeedsRsvgConvert' | 'export.imageNotConverted';
 
+/**
+ * Le fichier de sortie est un fichier Markdown, que l'export remplacerait (`export-output-path.ts`) :
+ * code relatif à `messages.*`, avec le nom du fichier en `errorParams.file`.
+ */
+export type ExportOutputErrorCode = 'export.outputIsMarkdown';
+
 /** Le résultat des services d'export, tel que le renderer le reçoit. */
 export interface ExportResult {
   success: boolean;
   outputPath?: string;
   error?: string;
-  errorCode?: ExportErrorCode | ExportImageErrorCode;
+  errorCode?: ExportErrorCode | ExportImageErrorCode | ExportOutputErrorCode;
   /** Les paramètres du message d'un `errorCode` relatif à `messages.*`. */
   errorParams?: Record<string, string | number>;
   /** Avec `export_timed_out` : le message ne doit pas écrire ce nombre en dur. */

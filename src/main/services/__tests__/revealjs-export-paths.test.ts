@@ -10,7 +10,7 @@
  * ne tombe pas dans le dépôt.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -109,6 +109,33 @@ describe.each([
 
       expect(result, result.error).toMatchObject({ success: true, outputPath: target });
       expect(readFileSync(target).length).toBeGreaterThan(0);
+    },
+    15_000
+  );
+
+  // Résolu contre le projet, « slides.md » saisi dans le champ désignait le manuscrit : l'export
+  // le remplaçait par le HTML ou le PDF, sans copie. Un chemin absolu le faisait déjà.
+  it.each([
+    { output: 'slides.md', manuscript: 'slides.md' },
+    { output: 'Slides.MD', manuscript: 'Slides.MD' },
+    { output: 'chapters/01.markdown', manuscript: 'chapters/01.markdown' },
+    { output: '', manuscript: 'document.md', absolute: true },
+  ])(
+    'un fichier Markdown ($manuscript) n’est jamais écrasé : refus, et le texte reste intact',
+    async ({ output, manuscript, absolute }) => {
+      const text = '# Mes diapositives\n\n---\n\n## La deuxième\n';
+      mkdirSync(join(project, 'chapters'));
+      writeFileSync(join(project, manuscript), text);
+
+      const result = await run(slides(absolute ? join(project, manuscript) : output));
+
+      expect(result).toMatchObject({
+        success: false,
+        errorCode: 'export.outputIsMarkdown',
+        errorParams: { file: manuscript.split('/').pop() },
+      });
+      expect(readFileSync(join(project, manuscript), 'utf8')).toBe(text);
+      expect(electron.opened).toEqual([]);
     },
     15_000
   );

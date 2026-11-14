@@ -7,6 +7,7 @@ import { processMarkdownCitations } from './citation-pipeline.js';
 import { bibliographyService } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import { refuseMarkdownOutput } from './export-output-path.js';
 import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import {
   pathExists,
@@ -760,6 +761,9 @@ export class PDFExportService {
     onProgress?: (progress: PandocProgress) => void,
     limits?: ExportLimits
   ): Promise<ExportResult> {
+    // Jamais un fichier Markdown pour sortie : ce serait un texte de l'auteur (`export-output-path.ts`).
+    const refused = refuseMarkdownOutput(options.projectPath, options.outputPath);
+    if (refused) return refused;
     return withExportTimeLimit(limits, (clock) => this.runExport(options, onProgress, clock));
   }
 
