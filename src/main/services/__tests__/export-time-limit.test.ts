@@ -204,6 +204,14 @@ function tool(name: string, body: string): void {
   chmodSync(file, 0o755);
 }
 
+/**
+ * Recopie à la suite de `to` le fichier de métadonnées que pandoc reçoit (`--metadata-file`) : le
+ * résumé y part depuis L10-4, et non plus en `-M abstract=` parmi les arguments.
+ */
+function appendMetadataFile(to: string): string {
+  return `prev=; for a in "$@"; do if [ "$prev" = "--metadata-file" ]; then cat "$a" >> "${to}"; fi; prev="$a"; done`;
+}
+
 /** Le corps d'un outil qui lance un enfant et l'attend, jusqu'à ce qu'on le tue. */
 function hangs(name: string): string {
   return [
@@ -636,12 +644,19 @@ describe.skipIf(process.platform === 'win32' || !pandocAvailable())('export PDF 
   );
 });
 
-/** Le résumé part en métadonnée : ce que pandoc reçoit en arguments dit s'il a été lu. */
+/** Le résumé part en métadonnée : ce que pandoc reçoit (arguments, fichier de métadonnées) dit s'il a été lu. */
 describe.skipIf(process.platform === 'win32' || !symlinkAvailable)('export PDF : abstract.md en lien symbolique', () => {
   const SECRET = 'SECRET-HORS-PROJET';
 
   async function pandocArguments(): Promise<string> {
-    tool('pandoc', [`printf "%s\n" "$@" > "${root}/arguments"`, 'printf "%s" "%PDF-faux" > "$3"'].join('\n'));
+    tool(
+      'pandoc',
+      [
+        `printf "%s\n" "$@" > "${root}/arguments"`,
+        appendMetadataFile(`${root}/arguments`),
+        'printf "%s" "%PDF-faux" > "$3"',
+      ].join('\n')
+    );
     const result = await pdfExportService.exportToPDF(pdfOptions(), undefined, LIMIT);
     expect(result).toMatchObject({ success: true });
     return readFileSync(join(root, 'arguments'), 'utf8');
@@ -854,7 +869,7 @@ describe.skipIf(process.platform === 'win32')('un disque qui ne répond plus', (
   /** `pathExists` non attendu : une promesse est toujours vraie, un fichier absent passerait. */
   describe('un fichier facultatif présent est pris, un absent ne l’est pas', () => {
     const recordArgs = (output: string) =>
-      `echo "$*" >> "${root}/arguments"\nprintf "%s" "${output}" > "$3"`;
+      `echo "$*" >> "${root}/arguments"\n${appendMetadataFile(`${root}/arguments`)}\nprintf "%s" "${output}" > "$3"`;
     const args = () => readFileSync(join(root, 'arguments'), 'utf8');
 
     it(

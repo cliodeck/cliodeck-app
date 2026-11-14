@@ -221,10 +221,11 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
         bibliographyPath: currentProject.bibliography,
         cslPath: currentProject.cslPath,
         templatePath: templatePath || undefined,
+        // Champ Auteur vide : l'auteur du document parle, ou personne (S18-1-3). La date, le main la
+        // propose, et le `date` du front matter l'emporte (Q42).
         metadata: {
           title,
-          author: author || 'ClioDesk',
-          date: new Date().toLocaleDateString('fr-FR'),
+          author: author || undefined,
         },
         citation: {
           useEngine: citation.useEngine,

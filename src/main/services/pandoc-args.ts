@@ -16,7 +16,9 @@
  */
 
 import { delimiter, join } from 'path';
+import { CORE_SCHEMA, load as loadYaml } from 'js-yaml';
 import { CHAPTERS_DIR, type BookSettings } from '../../../backend/types/book.js';
+import { detectFrontmatterLines } from '../../editor/slides.js';
 import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 import { getLanguage } from '../i18n.js';
 import type { ExportImageErrorCode } from './export-time-limit.js';
@@ -55,9 +57,13 @@ export interface PandocArgsInput {
   projectType: 'article' | 'book' | 'presentation';
   bookSettings?: BookSettings;
   beamerConfig?: BeamerConfig;
-  metadata?: { title?: string; author?: string; date?: string };
-  /** Résumé déjà résolu (métadonnée explicite ou `abstract.md` dépouillé). */
-  abstract?: string;
+  /** Titre et auteur saisis dans la fenêtre : ils l'emportent sur le document. */
+  metadata?: { title?: string; author?: string };
+  /**
+   * Fichier de métadonnées déjà écrit par l'appelant (`metadataYaml`) : date, résumé, titre de la
+   * bibliographie. Le front matter du document l'emporte sur lui.
+   */
+  metadataPath?: string;
   /** Bibliographie copiée dans le répertoire de travail, si elle existe. */
   bibPath?: string;
   /** Vrai quand CitationEngine a déjà inséré notes et bibliographie. */
@@ -325,10 +331,15 @@ function documentArgs(input: {
  * Échapper en amont produisait un double échappement — `Dupont & Fils`
  * s'imprimait `Dupont \textbackslash& Fils` sur la page de titre, et le
  * résumé devenait illisible dès la première esperluette.
+ *
+ * En `-M`, seuls le titre et l'auteur saisis dans la fenêtre : un `-M` l'emporte sur le front
+ * matter, et c'est ce que l'auteur a écrit pour cet export. Champ Auteur vide, aucun `-M author` :
+ * l'auteur du document parle (S18-1-3). Le reste part par le fichier de métadonnées, que le
+ * document remplace (`metadataYaml`).
  */
 function metadataArgs(input: {
-  metadata?: { title?: string; author?: string; date?: string };
-  abstract?: string;
+  metadata?: { title?: string; author?: string };
+  metadataPath?: string;
 }): string[] {
   const args: string[] = [];
   if (input.metadata?.title) {
@@ -337,11 +348,8 @@ function metadataArgs(input: {
   if (input.metadata?.author) {
     args.push('-M', `author=${input.metadata.author}`);
   }
-  if (input.metadata?.date) {
-    args.push('-M', `date=${input.metadata.date}`);
-  }
-  if (input.abstract) {
-    args.push('-M', `abstract=${input.abstract}`);
+  if (input.metadataPath) {
+    args.push('--metadata-file', input.metadataPath);
   }
   return args;
 }
@@ -364,11 +372,8 @@ function bibliographyArgs(input: {
   } else {
     args.push('--metadata', 'suppress-bibliography=false');
   }
-  // Titre de section écrit DANS le document exporté : il doit suivre la
-  // langue de l'interface, sinon un germanophone reçoit « Références ». Avec
-  // ou sans style : pandoc n'en écrit aucun sans cette métadonnée, et la
-  // bibliographie suivait le dernier paragraphe sans intitulé (S12-1-11).
-  args.push('--metadata', `reference-section-title=${referenceSectionTitle()}`);
+  // Le titre de la section (S12-1-11) part par le fichier de métadonnées, avec ou sans style :
+  // en `--metadata`, il l'emportait sur un `reference-section-title` écrit par l'auteur (L10-4).
   return args;
 }
 
@@ -410,7 +415,7 @@ export function buildPandocArgs(input: PandocArgsInput): string[] {
     );
   }
 
-  args.push(...metadataArgs({ metadata: input.metadata, abstract: input.abstract }));
+  args.push(...metadataArgs({ metadata: input.metadata, metadataPath: input.metadataPath }));
   args.push(
     ...bibliographyArgs({
       bibPath: input.bibPath,
@@ -437,6 +442,93 @@ export function referenceSectionTitle(): string {
     de: 'Literatur',
   };
   return titles[getLanguage()] ?? titles.fr;
+}
+
+/**
+ * La date que l'export imprime sous le titre d'un document qui n'en porte pas (Q42) : celle du
+ * jour, dans la langue de l'interface, comme le titre de la bibliographie. « 14 novembre 2026 »,
+ * « November 14, 2026 », « 14. November 2026 ». Elle part par le fichier de métadonnées
+ * (`metadataYaml`) : le `date` du front matter l'emporte. `now` vient de l'appelant, ce module ne
+ * lit pas l'horloge.
+ */
+export function documentDate(now: Date): string {
+  const locales: Record<string, string> = { fr: 'fr-FR', en: 'en-US', de: 'de-DE' };
+  return new Intl.DateTimeFormat(locales[getLanguage()] ?? locales.fr, { dateStyle: 'long' }).format(now);
+}
+
+// MARK: - Métadonnées que le document remplace
+
+/**
+ * Le fichier de métadonnées de l'export (`--metadata-file`) : ce que l'export propose et que le
+ * document remplace. Pandoc donne le pas au front matter du document sur ce fichier, alors qu'un
+ * `-M` l'emporte sur le front matter (vérifié avec pandoc 3.13) : la date et le titre de la
+ * bibliographie partaient en `-M` et écrasaient ceux de l'auteur (S18-1-3).
+ *
+ * Pandoc lit chaque valeur comme du markdown : l'italique du résumé est rendu, là où `-M abstract=`
+ * (une MetaString) l'imprimait avec ses astérisques (S12-1-6). Chaque valeur est une chaîne JSON,
+ * que YAML relit telle quelle : ni `: `, ni `#`, ni un retour à la ligne n'y ouvrent une clé. Un
+ * texte de plusieurs lignes finit par un saut de ligne : pandoc ne le lit en paragraphes qu'à
+ * cette condition, et deux paragraphes du résumé sortaient sinon en un seul, coupé d'un saut de
+ * ligne. Un champ vide ou absent n'est pas écrit.
+ */
+export function metadataYaml(fields: Readonly<Record<string, string | undefined>>): string {
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    if (!value) continue;
+    const text = value.includes('\n') && !value.endsWith('\n') ? `${value}\n` : value;
+    lines.push(`${key}: ${JSON.stringify(text)}`);
+  }
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Le front matter YAML en tête du document, tel que l'export le lit sans pandoc (générateur Word
+ * interne, bibliographie du moteur) : ses champs, en chaînes, et le texte qui le suit. Même règle
+ * de détection que l'éditeur et les présentations (`detectFrontmatterLines`). Un champ vide reste
+ * un champ : `date: ""` retire la date, comme chez pandoc. Une date YAML (`2026-11-14`) reste la
+ * chaîne écrite (schéma YAML de base, sans horodatage), plusieurs auteurs sont joints par une
+ * virgule. Un YAML illisible est retiré du texte quand même, sans champ lu.
+ */
+export function documentFrontMatter(content: string): { body: string; fields: Record<string, string> } {
+  const lines = content.split('\n', 102);
+  const fm = detectFrontmatterLines(lines);
+  if (!fm) return { body: content, fields: {} };
+  const yamlEnd = lines.slice(0, fm.closingLine + 1).reduce((n, line) => n + line.length + 1, 0);
+  const body = content.slice(Math.min(yamlEnd, content.length));
+  const fields: Record<string, string> = {};
+  try {
+    const raw = loadYaml(lines.slice(1, fm.closingLine).join('\n'), { schema: CORE_SCHEMA });
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      for (const [key, value] of Object.entries(raw)) {
+        const text = frontMatterText(value);
+        if (text !== undefined) fields[key] = text;
+      }
+    }
+  } catch {
+    // YAML illisible : ce n'est pas du texte pour autant.
+  }
+  return { body, fields };
+}
+
+function frontMatterText(value: unknown): string | undefined {
+  if (value === null) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value) && value.every((v) => typeof v === 'string' || typeof v === 'number')) {
+    return value.join(', ');
+  }
+  return undefined;
+}
+
+/**
+ * Ce que `project-manager` écrit dans l'`abstract.md` d'un article ou d'un livre neuf, sous
+ * « # Résumé » : il invite l'auteur à écrire, ce n'est pas un résumé. Exporté tel quel, il
+ * s'imprimait en résumé de tout article neuf.
+ */
+export const ABSTRACT_PLACEHOLDER = 'Résumé à compléter...';
+
+/** Le résumé tel qu'il s'exporte : rien, tant que l'auteur n'a pas remplacé le texte de remplissage. */
+export function exportableAbstract(text: string): string {
+  return text.trim() === ABSTRACT_PLACEHOLDER ? '' : text;
 }
 
 /**

@@ -6,14 +6,21 @@
  * numérotation et la bibliographie par chapitre. Les combinaisons ci-dessous
  * sont celles qui changent réellement le document produit.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { delimiter, join } from 'path';
+import { load as loadYaml } from 'js-yaml';
 import type { BookSettings } from '../../../../backend/types/book.js';
+import { setLanguage } from '../../i18n.js';
 import {
+  ABSTRACT_PLACEHOLDER,
   buildBeamerCustomizations,
   buildPandocArgs,
   computeSecnumdepth,
   demoteChapterBibliographyHeading,
+  documentDate,
+  documentFrontMatter,
+  exportableAbstract,
+  metadataYaml,
   missingImagesWarnings,
   pandocImageFailure,
   pandocMissingResources,
@@ -51,6 +58,11 @@ function meta(args: string[], key: string): string | undefined {
     if (value.startsWith(`${key}=`)) return value.slice(key.length + 1);
   }
   return undefined;
+}
+
+/** Les valeurs passées en `-M` ou en `--metadata` : elles l'emportent sur le document. */
+function forcedMetadata(args: string[]): string[] {
+  return args.filter((_, i) => args[i - 1] === '-M' || args[i - 1] === '--metadata');
 }
 
 const book = (over: Partial<BookSettings> = {}): BookSettings =>
@@ -341,34 +353,129 @@ describe('buildPandocArgs — les trois styles de notes × les deux numérotatio
 });
 
 describe('buildPandocArgs — métadonnées et résumé', () => {
-  it('passe les métadonnées EN CLAIR — pandoc échappe lui-même', () => {
+  it('passe le titre et l’auteur saisis EN CLAIR — pandoc échappe lui-même', () => {
     const args = buildPandocArgs({
       ...BASE,
-      metadata: { title: 'Danzig & Co #1', author: 'F. Clavert', date: '2026-07-19' },
+      metadata: { title: 'Danzig & Co #1', author: 'F. Clavert' },
     });
     // Échapper ici produisait `Danzig \textbackslash& Co \textbackslash#1`
     // sur la page de titre : pandoc ré-échappe la MetaString au rendu du
     // gabarit LaTeX. Vérifié avec pandoc 3.8.
     expect(meta(args, 'title')).toBe('Danzig & Co #1');
     expect(meta(args, 'author')).toBe('F. Clavert');
-    expect(meta(args, 'date')).toBe('2026-07-19');
   });
 
-  it('laisse le résumé intact, esperluettes comprises', () => {
+  /** S18-1-3 : un `-M author` l'emporte sur le front matter ; sans saisie, le document parle. */
+  it('sans auteur saisi, aucun -M author', () => {
+    expect(meta(buildPandocArgs({ ...BASE, metadata: { title: 'T' } }), 'author')).toBeUndefined();
+  });
+
+  /**
+   * S12-1-6, Q42 : le résumé, la date et le titre de la bibliographie partent par le fichier de
+   * métadonnées, que le front matter du document remplace (un `-M` l'emporterait sur lui).
+   */
+  it('le fichier de métadonnées part en --metadata-file, rien d’autre que le titre en -M', () => {
     const args = buildPandocArgs({
       ...BASE,
-      abstract: 'Sur Dupont & Fils, 100 % des cas.',
+      metadata: { title: 'T' },
+      bibPath: '/tmp/w/bibliography.bib',
+      cslPath: '/styles/chicago.csl',
+      cslAvailable: true,
+      metadataPath: '/tmp/w/metadata.yaml',
     });
-    expect(meta(args, 'abstract')).toBe('Sur Dupont & Fils, 100 % des cas.');
+    expect(args[args.indexOf('--metadata-file') + 1]).toBe('/tmp/w/metadata.yaml');
+    expect(forcedMetadata(args)).toEqual(['title=T']);
   });
 
-  it('passe le résumé quand il existe', () => {
-    const args = buildPandocArgs({ ...BASE, abstract: 'Quatrième de couverture.' });
-    expect(meta(args, 'abstract')).toBe('Quatrième de couverture.');
+  it('sans fichier de métadonnées, pas de --metadata-file', () => {
+    expect(buildPandocArgs(BASE)).not.toContain('--metadata-file');
+  });
+});
+
+describe('metadataYaml', () => {
+  it('chaque valeur se relit telle quelle, `: `, `#`, guillemets et antislash compris', () => {
+    const fields = {
+      abstract: 'Sur Dupont & Fils : 100 % des cas, #1 "cité" et C:\\chemin.',
+      date: '14. November 2026',
+      'reference-section-title': 'Sources : imprimées # 2',
+    };
+    expect(loadYaml(metadataYaml(fields))).toEqual(fields);
   });
 
-  it("n'invente pas de résumé quand il n'y en a pas", () => {
-    expect(meta(buildPandocArgs(BASE), 'abstract')).toBeUndefined();
+  it('un retour à la ligne n’ouvre pas de clé, et un texte de plusieurs lignes finit par un saut de ligne', () => {
+    // Pandoc ne lit en paragraphes qu'un texte qui finit par un saut de ligne : sinon, deux
+    // paragraphes du résumé sortaient en un seul, coupé d'un saut de ligne (mesuré, pandoc 3.13).
+    const yaml = metadataYaml({ abstract: 'Premier.\n\nauthor: pirate' });
+    expect(loadYaml(yaml)).toEqual({ abstract: 'Premier.\n\nauthor: pirate\n' });
+  });
+
+  it('omet les champs vides ou absents', () => {
+    expect(loadYaml(metadataYaml({ abstract: '', date: undefined, 'reference-section-title': 'Références' }))).toEqual({
+      'reference-section-title': 'Références',
+    });
+  });
+});
+
+/** Q42 : la date du jour, dans la langue de l'interface, quand le document n'en porte pas. */
+describe('documentDate', () => {
+  afterEach(() => setLanguage('fr'));
+
+  it.each([
+    ['fr', '14 novembre 2026'],
+    ['en', 'November 14, 2026'],
+    ['de', '14. November 2026'],
+  ] as const)('%s : %s', (language, expected) => {
+    setLanguage(language);
+    expect(documentDate(new Date(2026, 10, 14, 12))).toBe(expected);
+  });
+});
+
+describe('documentFrontMatter', () => {
+  it('sépare le front matter du texte, et lit ses champs en chaînes', () => {
+    const fm = documentFrontMatter(
+      '---\nauthor: Frédéric Clavert\ndate: 2026-11-14\nyear: 2026\nabstract: Un *résumé*.\n---\n\n# Texte\n\nCorps.\n'
+    );
+    expect(fm.body).toBe('\n# Texte\n\nCorps.\n');
+    // Pandoc garde `2026-11-14` tel quel : une date YAML ne doit pas devenir un objet Date.
+    expect(fm.fields).toEqual({
+      author: 'Frédéric Clavert',
+      date: '2026-11-14',
+      year: '2026',
+      abstract: 'Un *résumé*.',
+    });
+  });
+
+  it('un champ vide reste un champ : `date: ""` retire la date, comme pandoc', () => {
+    expect(documentFrontMatter('---\ndate: ""\nauthor:\n---\nTexte.\n').fields).toEqual({ date: '', author: '' });
+  });
+
+  it('plusieurs auteurs : séparés par une virgule', () => {
+    expect(documentFrontMatter('---\nauthor: [Anne, Paul]\n---\nTexte.\n').fields.author).toBe('Anne, Paul');
+  });
+
+  it('sans front matter, tout est texte', () => {
+    const content = '# Titre\n\n---\n\nSuite.\n';
+    expect(documentFrontMatter(content)).toEqual({ body: content, fields: {} });
+    // Un `---` suivi d'une ligne vide est un trait, pas un front matter (règle de l'éditeur).
+    expect(documentFrontMatter('---\n\nauthor: x\n---\n').fields).toEqual({});
+  });
+
+  it('un YAML illisible est retiré du texte, sans champ lu', () => {
+    expect(documentFrontMatter('---\ntitle: [non fermé\n---\nTexte.\n')).toEqual({ body: 'Texte.\n', fields: {} });
+  });
+});
+
+/** Le texte de remplissage de l'`abstract.md` d'un projet neuf n'est pas un résumé. */
+describe('exportableAbstract', () => {
+  it('le texte de remplissage ne s’exporte pas', () => {
+    expect(exportableAbstract(ABSTRACT_PLACEHOLDER)).toBe('');
+    expect(exportableAbstract(`  ${ABSTRACT_PLACEHOLDER}\n`)).toBe('');
+  });
+
+  it('un vrai résumé reste, même s’il commence comme lui', () => {
+    expect(exportableAbstract('Résumé à compléter... par une seconde phrase.')).toBe(
+      'Résumé à compléter... par une seconde phrase.'
+    );
   });
 });
 
@@ -399,22 +506,23 @@ describe('buildPandocArgs — bibliographie', () => {
       cslAvailable: false,
     });
     expect(args).not.toContain('--csl');
-    expect(args).toContain('reference-section-title=Références');
   });
 
   /**
-   * S12-1-11 : le titre n'était passé que sans CSL. Pandoc n'en écrit un que si la métadonnée
-   * existe : avec le style du projet, cas courant, la bibliographie suivait le dernier paragraphe
-   * sans intitulé.
+   * L10-4 : le titre de la bibliographie (S12-1-11) part par le fichier de métadonnées, que le
+   * front matter du document remplace. En `--metadata`, il l'emportait sur un
+   * `reference-section-title` écrit par l'auteur.
    */
-  it('titre la bibliographie avec le style du projet aussi', () => {
-    const args = buildPandocArgs({
-      ...BASE,
-      bibPath: '/tmp/w/bibliography.bib',
-      cslPath: '/styles/chicago.csl',
-      cslAvailable: true,
-    });
-    expect(args).toContain('reference-section-title=Références');
+  it('le titre de la bibliographie ne part plus en --metadata', () => {
+    for (const cslAvailable of [true, false]) {
+      const args = buildPandocArgs({
+        ...BASE,
+        bibPath: '/tmp/w/bibliography.bib',
+        cslPath: '/styles/chicago.csl',
+        cslAvailable,
+      });
+      expect(forcedMetadata(args).filter((v) => v.startsWith('reference-section-title='))).toEqual([]);
+    }
   });
 
   it('se tait quand CitationEngine a déjà tout inséré', () => {

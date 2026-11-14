@@ -254,10 +254,11 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
         outputPath: outputPath,
         bibliographyPath: currentProject.bibliography,
         cslPath: currentProject.cslPath,
+        // Champ Auteur vide : l'auteur du document parle, ou personne (S18-1-3). La date, le main la
+        // propose, et le `date` du front matter l'emporte (Q42).
         metadata: {
           title,
-          author: author || 'ClioDesk',
-          date: new Date().toLocaleDateString('fr-FR'),
+          author: author || undefined,
         },
         beamerConfig,
         citation: {

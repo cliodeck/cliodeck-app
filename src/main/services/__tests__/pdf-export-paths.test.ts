@@ -27,9 +27,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'os';
 import { delimiter, join, resolve } from 'path';
 import PizZip from 'pizzip';
+import { load as loadYaml } from 'js-yaml';
 import { pdfExportService } from '../pdf-export.js';
 import { wordExportService } from '../word-export.js';
 import { ExportClock, type ExportResult } from '../export-time-limit.js';
+import { documentDate } from '../pandoc-args.js';
+import { setLanguage } from '../../i18n.js';
 import { DEFAULT_BOOK_SETTINGS, type BookSettings } from '../../../../backend/types/book.js';
 import {
   pandocAvailable,
@@ -369,6 +372,108 @@ describe('export PDF, pandoc simulé', () => {
     expect(calls[0].cwd).not.toBe(calls[1].cwd);
     expect(calls.map((c) => c.input.trim()).sort()).toEqual(['Deux.', 'Un.']);
   });
+
+  /**
+   * L10-4 (S12-1-6, S18-1-3, Q42) : le résumé partait en `-M abstract=`, une MetaString que
+   * pandoc ne lit pas comme du markdown (`*ABSITAL*` imprimé tel quel), et la date en `-M date=`,
+   * qui l'emporte sur le `date` du front matter. Ils partent par le fichier de métadonnées, que le
+   * front matter remplace, avec le titre de la bibliographie ; la date du jour est dans la langue de
+   * l'interface, et le texte de remplissage d'un `abstract.md` neuf n'est pas un résumé.
+   */
+  describe('les métadonnées que le document remplace (L10-4)', () => {
+    afterEach(() => setLanguage('fr'));
+
+    /** Le fichier de métadonnées et le gabarit, lus pendant que pandoc « tourne ». */
+    function captureMetadata() {
+      const seen: { metadata?: unknown; template?: string } = {};
+      const calls = simulatePandoc((call) => {
+        const at = call.args.indexOf('--metadata-file');
+        if (at >= 0) seen.metadata = loadYaml(readFileSync(resolve(call.cwd, call.args[at + 1]), 'utf8'));
+        if (existsSync(join(call.cwd, 'template.latex'))) {
+          seen.template = readFileSync(join(call.cwd, 'template.latex'), 'utf8');
+        }
+        answer(call.child);
+      });
+      return { calls, seen };
+    }
+
+    /** Les valeurs passées en `-M` ou en `--metadata` : elles l'emportent sur le document. */
+    const forced = (args: string[]) => args.filter((_, i) => args[i - 1] === '-M' || args[i - 1] === '--metadata');
+
+    it('article : résumé, date du jour et titre de la bibliographie par --metadata-file, jamais en -M', async () => {
+      const project = newProject();
+      writeFileSync(join(project, 'abstract.md'), '# Résumé\n\nUn *ABSITAL* chez Dupont & Fils : #1.\n');
+      const { calls, seen } = captureMetadata();
+
+      const before = documentDate(new Date());
+      const result = await pdfExportService.exportToPDF({
+        projectPath: project,
+        projectType: 'article',
+        content: '# Texte\n\nCorps [@dupont2020].\n',
+        outputPath: join(project, 'article.pdf'),
+        bibliographyPath: join(project, 'references.bib'),
+        metadata: { title: 'Article' },
+      });
+      const after = documentDate(new Date());
+
+      expect(result, result.error).toMatchObject({ success: true });
+      const final = calls.find(isFinalPdfCall);
+      expect(forced(final?.args ?? [])).toEqual(['title=Article', 'suppress-bibliography=false']);
+      expect(seen.metadata).toMatchObject({
+        abstract: 'Un *ABSITAL* chez Dupont & Fils : #1.',
+        'reference-section-title': 'Références',
+      });
+      expect([before, after]).toContain((seen.metadata as { date?: string }).date);
+      // Sans résumé, le gabarit n'imprime plus « Résumé à compléter. » (S12-1-10).
+      expect(seen.template).toContain('$if(abstract)$\n\\begin{abstract}');
+      expect(seen.template).not.toContain('compléter');
+    });
+
+    it('article neuf : le texte de remplissage d’abstract.md n’est pas un résumé ; date dans la langue de l’interface', async () => {
+      setLanguage('de');
+      const project = newProject();
+      // Ce qu'écrit `project-manager` à la création d'un article.
+      writeFileSync(join(project, 'abstract.md'), '# Résumé\n\nRésumé à compléter...');
+      const { seen } = captureMetadata();
+
+      const before = documentDate(new Date());
+      const result = await pdfExportService.exportToPDF({
+        projectPath: project,
+        projectType: 'article',
+        content: 'Corps.\n',
+        outputPath: join(project, 'article.pdf'),
+        metadata: { title: 'Article' },
+      });
+      const after = documentDate(new Date());
+
+      expect(result, result.error).toMatchObject({ success: true });
+      expect(seen.metadata).not.toHaveProperty('abstract');
+      expect([before, after]).toContain((seen.metadata as { date?: string }).date);
+      expect(before).toMatch(/^\d{1,2}\. [A-Z][a-zä]+ \d{4}$/);
+    });
+
+    it('livre, bibliographie par chapitre : citeproc reçoit le titre de la bibliographie par --metadata-file', async () => {
+      const project = newProject();
+      const calls = simulatePandoc((call) => {
+        if (call.args.includes('--citeproc') && call.args.includes('markdown')) {
+          answer(call.child, { stdout: [Buffer.from('# Premier\n\nTexte.\n')] });
+        } else {
+          answer(call.child);
+        }
+      });
+
+      const result = await pdfExportService.exportToPDF({
+        ...bookOptions(project, ['# Premier\n\nTexte [@dupont2020].\n'], { bibliography: 'per-chapter' }),
+        bibliographyPath: join(project, 'references.bib'),
+        outputPath: join(project, 'livre.pdf'),
+      });
+
+      expect(result, result.error).toMatchObject({ success: true });
+      const chapter = calls.find((call) => call.args.includes('--citeproc') && call.args.includes('markdown'));
+      expect(chapter?.args).toContain('--metadata-file');
+      expect(forced(chapter?.args ?? [])).toEqual([]);
+    });
+  });
 });
 
 /**
@@ -442,6 +547,43 @@ describe.skipIf(!pandocAvailable())('export Word, pandoc simulé', () => {
     expect(results.map((r) => r.success)).toEqual([true, true]);
     expect(calls).toHaveLength(2);
     expect(calls[0].cwd).not.toBe(calls[1].cwd);
+  });
+
+  /**
+   * L10-4 : même règle que le PDF. L'auteur saisi l'emporte (`--metadata`) ; la date du jour, le
+   * résumé et le titre de la bibliographie partent par le fichier de métadonnées, que le front
+   * matter remplace. Le titre de la bibliographie partait en `--metadata`, qui l'emporte sur lui.
+   */
+  it('auteur saisi en --metadata ; date du jour, résumé et titre de la bibliographie par --metadata-file', async () => {
+    const project = newProject();
+    writeFileSync(join(project, 'abstract.md'), '# Résumé\n\nUn *ABSITAL*.\n\nSecond paragraphe.\n');
+    let metadata: unknown;
+    const calls = simulatePandoc((call) => {
+      const at = call.args.indexOf('--metadata-file');
+      if (at >= 0) metadata = loadYaml(readFileSync(resolve(call.cwd, call.args[at + 1]), 'utf8'));
+      answer(call.child);
+    });
+
+    const before = documentDate(new Date());
+    const result = await wordExportService.exportToWord({
+      ...wordOptions(project, 'Corps [@dupont2020].\n', join(project, 'article.docx')),
+      metadata: { title: 'Article', author: 'Autrice saisie' },
+    });
+    const after = documentDate(new Date());
+
+    expect(result, result.error).toMatchObject({ success: true });
+    const args = calls[0]?.args ?? [];
+    expect(args.filter((_, i) => args[i - 1] === '-M' || args[i - 1] === '--metadata')).toEqual([
+      'author=Autrice saisie',
+    ]);
+    expect(metadata).toMatchObject({
+      abstract: 'Un *ABSITAL*.\n\nSecond paragraphe.\n',
+      'reference-section-title': 'Références',
+    });
+    expect([before, after]).toContain((metadata as { date?: string }).date);
+    // L'en-tête ajouté au texte ne porte plus que le titre : le reste passe par le fichier de
+    // métadonnées, le même que celui du PDF.
+    expect(calls[0]?.input).toMatch(/^---\ntitle: "Article"\n---\n\nCorps/);
   });
 });
 
