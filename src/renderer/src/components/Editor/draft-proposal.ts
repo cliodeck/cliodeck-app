@@ -32,11 +32,12 @@ function followProposal(draftId: string, proposalId: string): void {
 }
 
 /**
- * Propose le brouillon au curseur, ou à cet offset du document. Sans rien pour le recevoir, rien
- * n'entre nulle part, le brouillon reste dans la file et un message le dit. Un brouillon jeté entre-
- * temps, ou qui attend déjà sa décision, n'est pas proposé une seconde fois.
+ * Propose le brouillon au curseur, ou à l'offset du document que rend `at`, le point de dépôt. Ce
+ * point se calcule ici, sous la même garde que la proposition. Sans rien pour le recevoir, ou sans
+ * point de dépôt, rien n'entre nulle part, le brouillon reste dans la file et un message le dit. Un
+ * brouillon jeté entre-temps, ou qui attend déjà sa décision, n'est pas proposé une seconde fois.
  */
-export function proposeQueuedDraft(draftId: string, at: number | 'cursor', t: TFunction): void {
+export function proposeQueuedDraft(draftId: string, at: 'cursor' | (() => number), t: TFunction): void {
   const { drafts, proposedIds } = useDraftsStore.getState();
   const draft = drafts.find((d) => d.id === draftId);
   if (!draft || proposedIds.includes(draftId)) return;
@@ -47,7 +48,7 @@ export function proposeQueuedDraft(draftId: string, at: number | 'cursor', t: TF
       outcome =
         at === 'cursor'
           ? editor.insertDraftAtCursor(draft.content, draft.source)
-          : editor.proposeDraftAt(at, draft.content, draft.source);
+          : editor.proposeDraftAt(at(), draft.content, draft.source);
     }
   } catch (error) {
     logger.error('proposeQueuedDraft', error);

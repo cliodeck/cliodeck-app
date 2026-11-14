@@ -161,9 +161,11 @@ gestionnaire `drop` de l'éditeur reconnaît (`CodeMirrorEditor.tsx`) : il
 empêche le dépôt natif de CM6 avant toute autre chose, si bien qu'une
 proposition qui échoue ne retombe jamais sur une insertion directe. Sans rien
 pour la recevoir (vue en lecture seule pendant un changement de projet, livre
-sans chapitre ouvert), rien n'entre, la carte reste, et le message de
-`notifyDraftKept` le dit. Une carte déjà proposée ne se glisse pas. Les autres
-dépôts (texte d'une autre application, fichier) gardent le dépôt natif. La
+sans chapitre ouvert), ou sans point de dépôt (`posAtCoords` se calcule sous la
+même garde que la proposition, dans `proposeQueuedDraft`), rien n'entre, la
+carte reste, et le message de `notifyDraftKept` le dit. Une carte déjà proposée
+ne se glisse pas. Les autres dépôts (texte d'une autre application, fichier)
+gardent le dépôt natif. La
 carte porte aussi `text/plain` : glissée hors de ClioDeck (un courriel, un
 traitement de texte), elle y est copiée, et reste dans la file.
 

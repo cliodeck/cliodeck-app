@@ -541,4 +541,32 @@ describe('glisser une carte dans le texte (D9)', () => {
     expectDraftKeptAndButtonBack();
     expect(notified()).toContain('editor.proposalUnavailable');
   });
+
+  it('un point de dépôt qui ne se calcule pas : le dépôt natif est déjà empêché, rien n’entre, la carte reste, et l’auteur le sait', () => {
+    const view = currentView();
+    const target = view.contentDOM.querySelector('.cm-line') ?? view.contentDOM;
+    const data = new DragData();
+    act(() => void fireEvent.dragStart(card(), { dataTransfer: data }));
+    const drop = dragEvent('drop', data);
+    // Le premier appel est celui du gestionnaire de la carte. Les suivants seraient ceux du dépôt
+    // natif, s'il prenait la main : ils tombent au milieu du paragraphe, et le texte y entrerait.
+    const preventedAtFirstCall: boolean[] = [];
+    vi.spyOn(view, 'posAtCoords').mockImplementation((() => {
+      if (preventedAtFirstCall.length > 0) return DROP_AT;
+      preventedAtFirstCall.push(drop.defaultPrevented);
+      throw new Error('mise en page indisponible');
+    }) as typeof view.posAtCoords);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    act(() => void target.dispatchEvent(drop));
+
+    // Empêché avant tout calcul : une erreur qui sortirait du gestionnaire n'ouvrirait pas la voie
+    // au dépôt natif, que CM6 lance après un gestionnaire qui lève.
+    expect(preventedAtFirstCall).toEqual([true]);
+    expect(docText()).toBe(TEXT_A);
+    expect(proposalBox()).toBeNull();
+    expect(adjudications).toEqual([]);
+    expectDraftKeptAndButtonBack();
+    expect(notified()).toContain('editor.proposalUnavailable');
+  });
 });

@@ -516,9 +516,12 @@ export const CodeMirrorEditor: React.FC = () => {
           drop: (event, view) => {
             const draftId = event.dataTransfer?.getData(DRAFT_DRAG_TYPE);
             if (!draftId) return false;
-            // D'abord : une erreur plus loin ferait passer CM6 à son dépôt natif, qui insérerait le texte.
+            // D'abord : CM6 avale l'exception d'un gestionnaire et passe au suivant, son dépôt natif,
+            // qui insérerait le texte. Un dépôt déjà empêché l'arrête.
             event.preventDefault();
-            proposeQueuedDraft(draftId, view.posAtCoords({ x: event.clientX, y: event.clientY }, false), t);
+            // Le point de dépôt se calcule sous la garde de la proposition : sans lui, rien n'entre,
+            // la carte reste, et le message le dit.
+            proposeQueuedDraft(draftId, () => view.posAtCoords({ x: event.clientX, y: event.clientY }, false), t);
             return true;
           },
         }),
