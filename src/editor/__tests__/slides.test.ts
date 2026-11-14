@@ -223,12 +223,34 @@ describe('splitSlideParts — parties et notes, hors blocs de code', () => {
     ['un commentaire', '<!--\nNote: dans le commentaire\n-->'],
     ['un commentaire en ligne', 'Avant <!--\nNote: dans le commentaire\n--> après.'],
     ['un bloc HTML', '<div>\nNote: dans le bloc HTML\n</div>'],
+    ['un élément HTML encore ouvert', '<p class="small">\nNote: dans le paragraphe HTML\n</p>'],
+    ['un élément dont un attribut contient `>`', '<div title="a > b">\nNote: dans le bloc HTML\n</div>'],
+    ['un bloc `<pre>`', '<pre>\nNote: dans le pre\n</pre>'],
+    ['un commentaire au milieu d’un bloc HTML', '<img src="a.png">\n<!--\nNote: dans le commentaire\n-->'],
     ['un bloc de code indenté, dès sa première ligne', '    Note: dans le code\n    x <- 1'],
   ])('un `Note:` dans %s n’ouvre pas les notes, et la suite reste projetée', (_, raw) => {
     const segment = `## T\n\nTexte.\n\n${raw}\n\nTexte après, projeté.\n`;
     const [part] = splitSlideParts(segment);
     expect(part.notesLineFrom).toBeNull();
     expect(part.markdown).toBe(segment.trim());
+  });
+
+  /**
+   * Revue de L10-3 (seconde passe). En CommonMark, un bloc HTML ouvert par `<img …>`, `</div>` ou
+   * `<p>…</p>` ne s'arrête qu'à la ligne vide : un `Note:` tapé juste dessous tombait dans le bloc,
+   * et la note s'affichait sur la diapositive projetée, alors que main la cachait. Seul ce qui est
+   * dans un élément encore ouvert est brut.
+   */
+  it.each([
+    ['une image', '<img src="figure.png" width="600">'],
+    ['un élément refermé sur sa ligne', '<p class="small">Petit texte</p>'],
+    ['un cadre', '<iframe src="https://example.org/carte"></iframe>'],
+    ['un saut de ligne', '<br>'],
+    ['la fermeture d’un div ouvert plus haut', '<div class="colonnes">\n\nTexte en colonnes.\n\n</div>'],
+  ])('un `Note:` juste sous %s ouvre les notes', (_, html) => {
+    const [part] = splitSlideParts(`## T\n\n${html}\nNote: Commenter la figure.\n`);
+    expect(part.markdown).toBe(`## T\n\n${html}`);
+    expect(part.notes).toBe('Commenter la figure.');
   });
 
   it('la vraie note qui suit un commentaire', () => {
@@ -343,6 +365,57 @@ describe('speakerNotesToPandoc — chaque note en `::: notes`, le reste intact',
   it('une note qui ouvre un commentaire fermé dans une diapositive suivante reste telle quelle', () => {
     const deck = '## A\n\nTexte A.\n\nNote: n\n<!--\nbrouillon\n\n---\n\n## B\n\nfin -->\n\n---\n\n## C\n\nNote: c\n';
     expect(speakerNotesToPandoc(deck)).toBe(deck.replace('Note: c', '::: notes\nc\n:::'));
+  });
+
+  /**
+   * Revue de L10-3 (seconde passe). La garde du bloc fermé dans du brut comparait la fin de la note
+   * sans ses blancs à la plage brute de Lezer, qui garde les blancs de fin de ligne et le `\r` des
+   * fichiers CRLF (que l'éditeur conserve) : la note restait telle quelle et pandoc l'imprimait sur
+   * la diapositive, sans message.
+   */
+  it.each([
+    ['LF', '\n', '', '<!-- ancienne version -->'],
+    ['CRLF', '\r\n', '', '<!-- ancienne version -->'],
+    ['des blancs après le commentaire', '\n', '  ', '<!-- ancienne version -->'],
+    ['des blancs après un bloc de code', '\n', '  ', '```r\nx <- 1\n```'],
+  ])('une note qui finit par du brut, en %s : balisée', (_, eol, trailing, raw) => {
+    const deck = `## A\n\nTexte\n\nNote: NOTEUN\n\n${raw}${trailing}\n\n---\n\n## B\n\nTexte B\n\nNote: NOTEDEUX\n`.replace(
+      /\n/g,
+      eol
+    );
+    const out = speakerNotesToPandoc(deck);
+    expect(out).not.toMatch(/Note: NOTE/);
+    expect(out).toContain(`::: notes\nNOTEUN${eol}${eol}${raw.replace(/\n/g, eol)}\n:::`);
+    expect(out).toContain('::: notes\nNOTEDEUX\n:::');
+  });
+
+  it('un `Note:` juste sous une image ou sous un `</div>` : balisé, comme dans l’aperçu', () => {
+    const deck =
+      '## F\n\n<img src="f.png" width="600">\nNote: n1\n\n---\n\n## C\n\n<div class="x">\n\nTexte\n\n</div>\nNote: n2\n';
+    expect(speakerNotesToPandoc(deck)).toBe(
+      '## F\n\n<img src="f.png" width="600">\n\n::: notes\nn1\n:::\n\n---\n\n' +
+        '## C\n\n<div class="x">\n\nTexte\n\n</div>\n\n::: notes\nn2\n:::\n'
+    );
+  });
+
+  /**
+   * Pour pandoc, `<div>` est une structure (div natif), et non du brut. Mesuré avec pandoc 3.13 :
+   * un bloc `::: notes` qui referme un `<div>` ouvert avant lui, ou en laisse un ouvert, laisse ce
+   * div ouvert jusqu'à la fin du deck, et la diapositive suivante tombe dans le même cadre, sans
+   * message. Laissée telle quelle, la note s'imprime comme avant L10-3, et le deck garde ses cadres.
+   */
+  it.each([
+    ['referme un `<div>` ouvert avant elle', '## C\n\n<div class="x">\n\nTexte\n\nNote: n\n\n</div>\n'],
+    ['ouvre un `<div>` sans le refermer', '## C\n\nTexte\n\nNote: n\n\n<div class="x">\n\nSuite\n'],
+  ])('une note qui %s reste telle quelle', (_, slide) => {
+    const deck = `${slide}\n---\n\n## Suite\n\nNote: s\n`;
+    expect(speakerNotesToPandoc(deck)).toBe(deck.replace('Note: s', '::: notes\ns\n:::'));
+  });
+
+  it('une note qui contient un `<div>` refermé est balisée', () => {
+    expect(speakerNotesToPandoc('## C\n\nTexte\n\nNote: n\n\n<div class="a">\n\ny\n\n</div>\n')).toBe(
+      '## C\n\nTexte\n\n::: notes\nn\n\n<div class="a">\n\ny\n\n</div>\n:::\n'
+    );
   });
 
   it('un `<!--` dans une valeur du frontmatter, du YAML pour pandoc, n’arrête rien', () => {

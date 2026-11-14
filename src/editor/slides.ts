@@ -129,30 +129,106 @@ function inRanges(
 }
 
 /**
- * Nœuds dont le texte n'est pas du Markdown : le code (blocs clôturés, indentés, en ligne) et le
- * HTML brut (blocs, commentaires, instructions de traitement). marked dans le navigateur comme
- * pandoc les rendent tels quels : rien de ce qui s'y écrit n'est une note du présentateur.
+ * Nœuds dont le texte n'est pas du Markdown : le code (blocs clôturés, indentés, en ligne), les
+ * commentaires et les instructions de traitement. marked dans le navigateur comme pandoc les
+ * rendent tels quels : rien de ce qui s'y écrit n'est une note du présentateur. Les blocs HTML ont
+ * leur propre règle (`scanHtmlBlock`).
  */
 const RAW_NODES = new Set([
   'FencedCode',
   'CodeBlock',
   'InlineCode',
-  'HTMLBlock',
   'CommentBlock',
   'ProcessingInstructionBlock',
   'Comment',
 ]);
 
-function rawRanges(tree: Tree, offset = 0): Array<{ from: number; to: number }> {
-  const out: Array<{ from: number; to: number }> = [];
+/** Éléments HTML sans balise fermante : `<img …>` ne laisse rien d'ouvert. */
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
+
+/**
+ * Blocs HTML dont tout le texte est brut jusqu'à leur fin : `<pre>`, `<script>`, `<style>`,
+ * `<textarea>`, `<!…>` et `<?…>` (types 1 à 5 de CommonMark, qui finissent à leur balise fermante).
+ */
+const RAW_HTML_BLOCK = /^[ \t]*<(?:[!?]|(?:pre|script|style|textarea)(?:[\s>]|$))/i;
+
+/** Un commentaire (refermé ou non), ou une balise ouvrante ou fermante. */
+const HTML_TOKEN = /<!--[\s\S]*?(?:-->|$)|<(\/?)([A-Za-z][A-Za-z0-9-]*)(?:\s(?:"[^"]*"|'[^']*'|[^'">])*)?(\/?)>/g;
+
+type Range = { from: number; to: number };
+
+/** Une balise `<div>` ou `</div>` : pour pandoc, un div natif, donc une structure et non du brut. */
+type DivTag = { at: number; open: boolean };
+
+/**
+ * Le brut d'un bloc HTML, et ses balises `<div>`. Un bloc de type 6 ou 7 (`<img …>`, `<div>`,
+ * `</div>`, `<p>…</p>`) ne s'arrête qu'à la ligne vide : la ligne `Note:` tapée juste dessous en
+ * fait partie pour CommonMark. Elle n'est brute que dans un élément encore ouvert ou dans un
+ * commentaire ; sous un élément refermé, c'est une note (revue de L10-3, seconde passe : la note
+ * s'affichait sinon sur la diapositive projetée, alors que main la cachait).
+ */
+function scanHtmlBlock(text: string, at: number): { raw: Range[]; divs: DivTag[] } {
+  if (RAW_HTML_BLOCK.test(text)) return { raw: [{ from: at, to: at + text.length }], divs: [] };
+  const raw: Range[] = [];
+  const divs: DivTag[] = [];
+  let depth = 0;
+  let openedAt = 0;
+  for (const m of text.matchAll(HTML_TOKEN)) {
+    const from = at + (m.index ?? 0);
+    const to = from + m[0].length;
+    if (m[2] === undefined) {
+      if (depth === 0) raw.push({ from, to });
+      continue;
+    }
+    const name = m[2].toLowerCase();
+    const closing = m[1] === '/';
+    if (name === 'div') divs.push({ at: from, open: !closing });
+    if (VOID_ELEMENTS.has(name) || m[3] === '/') continue;
+    if (!closing) {
+      if (depth++ === 0) openedAt = from;
+    } else if (depth > 0 && --depth === 0) {
+      raw.push({ from: openedAt, to });
+    }
+  }
+  if (depth > 0) raw.push({ from: openedAt, to: at + text.length });
+  return { raw, divs };
+}
+
+/** Le brut d'un texte parsé, et les balises `<div>` de ses blocs HTML. */
+function scanRaw(tree: Tree, text: string, offset = 0): { raw: Range[]; divs: DivTag[] } {
+  const raw: Range[] = [];
+  const divs: DivTag[] = [];
   tree.iterate({
     enter: (node) => {
+      if (node.name === 'HTMLBlock') {
+        const block = scanHtmlBlock(text.slice(node.from, node.to), node.from + offset);
+        raw.push(...block.raw);
+        divs.push(...block.divs);
+        return false;
+      }
       if (!RAW_NODES.has(node.name)) return undefined;
-      out.push({ from: node.from + offset, to: node.to + offset });
+      raw.push({ from: node.from + offset, to: node.to + offset });
       return false;
     },
   });
-  return out;
+  return { raw, divs };
+}
+
+/**
+ * La note `from`–`to` referme-t-elle un `<div>` ouvert avant elle, ou en laisse-t-elle un ouvert ?
+ * Balisée en `::: notes`, elle laisserait alors un div ouvert jusqu'à la fin du deck, et la
+ * diapositive suivante tomberait dans le même cadre, sans message (mesuré avec pandoc 3.13).
+ */
+function unbalancedDivs(divs: readonly DivTag[], from: number, to: number): boolean {
+  let depth = 0;
+  for (const tag of divs) {
+    if (tag.at < from || tag.at >= to) continue;
+    if (tag.open) depth++;
+    else if (--depth < 0) return true;
+  }
+  return depth !== 0;
 }
 
 function containsPoint(ranges: readonly { from: number; to: number }[], at: number): boolean {
@@ -307,7 +383,7 @@ export function startsWithH1(segment: string): boolean {
  * bloc de code n'est jamais un séparateur. Les regex qui faisaient ce travail ignoraient les
  * blocs de code : un commentaire R (`## …`) coupait la diapositive, et un `Note:` cité dans du
  * code en envoyait la suite aux notes (S12-2-3). Les notes courent de la première ligne `Note:`
- * hors code et hors HTML brut (`RAW_NODES`) jusqu'à la fin de la partie : le prochain `---`, ou
+ * hors code et hors HTML brut (`scanRaw`) jusqu'à la fin de la partie : le prochain `---`, ou
  * le prochain `## ` sous un `# ` d'ouverture. Un `# ` venu après la note sans `---` est donc dans
  * la note. Un commentaire posé par Cmd+/ (`<!-- … -->`) garde ses `Note:` : sinon les notes s'y
  * ouvraient, et le `-->` fermait le commentaire au milieu (revue de L10-3). Règle unique de
@@ -316,7 +392,7 @@ export function startsWithH1(segment: string): boolean {
 export function splitSlideParts(segment: string): SlidePart[] {
   if (segment.trim() === '') return [];
   const tree = slidesParser.parse(segment);
-  const raw = rawRanges(tree);
+  const { raw } = scanRaw(tree, segment);
 
   // Une partie par titre `## ` du premier niveau, sous un `# ` d'ouverture : un `## ` de bloc
   // de code n'est pas un nœud de titre.
@@ -356,13 +432,17 @@ export function splitSlideParts(segment: string): SlidePart[] {
  * pandoc lit comme brut reste telle quelle (mesuré avec pandoc 3.13). Ouvert dans le
  * commentaire, le bloc laisserait son `:::` de clôture dehors, imprimé sur la diapositive
  * projetée. Fermé dedans, il resterait ouvert jusqu'à la fin du deck et avalerait les
- * diapositives suivantes. Laissée telle quelle, la note s'imprime comme avant L10-3.
+ * diapositives suivantes. Il n'est fermé dans le brut que si du texte le suit encore : les blancs
+ * de fin de ligne et le `\r` d'un fichier CRLF, que Lezer compte dans le bloc, n'en sont pas. De
+ * même, une note qui referme un `<div>` ouvert avant elle, ou en laisse un ouvert, reste telle
+ * quelle (`unbalancedDivs`). Laissée telle quelle, la note s'imprime comme avant L10-3.
  */
 export function speakerNotesToPandoc(source: string): string {
   const deck = parseSlides(source);
   // Le frontmatter est du YAML pour pandoc : un `<!--` dans une de ses valeurs n'ouvre rien.
   const bodyFrom = deck.frontmatter?.to ?? 0;
-  const pandocRaw = rawRanges(slidesParser.parse(source.slice(bodyFrom)), bodyFrom);
+  const body = source.slice(bodyFrom);
+  const pandoc = scanRaw(slidesParser.parse(body), body, bodyFrom);
   let out = '';
   let last = 0;
   for (const slide of deck.slides) {
@@ -371,9 +451,9 @@ export function speakerNotesToPandoc(source: string): string {
       if (part.notesLineFrom === null) continue;
       const start = slide.from + part.notesLineFrom;
       const end = slide.from + part.from + segment.slice(part.from, part.to).trimEnd().length;
-      const opensInRaw = containsPoint(pandocRaw, start + indentOf(segment.slice(part.notesLineFrom, part.to)));
-      const closesInRaw = pandocRaw.some((r) => r.from < end && end < r.to);
-      if (opensInRaw || closesInRaw) continue;
+      const opensInRaw = containsPoint(pandoc.raw, start + indentOf(segment.slice(part.notesLineFrom, part.to)));
+      const closesInRaw = pandoc.raw.some((r) => r.from < end && end < r.to && source.slice(end, r.to).trim() !== '');
+      if (opensInRaw || closesInRaw || unbalancedDivs(pandoc.divs, start, end)) continue;
       out += source.slice(last, start);
       if (part.notes) {
         // Pandoc ne lit un bloc `:::` qu'après une ligne vide : collé à un paragraphe, il en

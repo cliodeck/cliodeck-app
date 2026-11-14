@@ -290,6 +290,32 @@ describe('découpage hors blocs de code : export HTML, tel que le navigateur le 
     }
   });
 
+  /**
+   * Revue de L10-3 (seconde passe) : en CommonMark, un bloc HTML ouvert par `<img …>` ou `</div>`
+   * ne s'arrête qu'à la ligne vide. Un `Note:` tapé juste dessous y tombait, et la note privée
+   * s'affichait sur la diapositive projetée, alors que main la cachait.
+   */
+  it('un `Note:` juste sous une image ou un `</div>` : la note reste privée, aperçu compris', async () => {
+    const deck = [
+      '## Figure', '', '<img src="figure.png" width="600">', 'Note: NOTEAPRESIMAGE à ne pas projeter.', '',
+      '---', '',
+      '## Colonnes', '', '<div class="colonnes">', '', 'Texte colonne', '', '</div>', 'Note: NOTEAPRESDIV à ne pas projeter.', '',
+    ].join('\n');
+    const slides = browserSlides(await exportHtml(deck));
+    expect(slides.map((s) => s.notes)).toEqual(['NOTEAPRESIMAGE à ne pas projeter.', 'NOTEAPRESDIV à ne pas projeter.']);
+    expect(slides[0].slide).toContain('<img src="figure.png" width="600">');
+    expect(slides[1].slide).toMatch(/Texte colonne\n\n<\/div>/);
+    for (const s of slides) expect(s.slide).not.toMatch(/NOTEAPRES|Note:/);
+
+    for (const [index, note] of [[0, 'NOTEAPRESIMAGE'], [1, 'NOTEAPRESDIV']] as const) {
+      const preview = generatePreviewHtml(deck, OPTS, index);
+      const notesAt = preview.indexOf('<div class="slide-notes">');
+      expect(notesAt).toBeGreaterThan(-1);
+      expect(preview.slice(notesAt)).toContain(`${note} à ne pas projeter.`);
+      expect(preview.slice(0, notesAt)).not.toMatch(/NOTEAPRES|Note:/);
+    }
+  });
+
   it('aperçu et export s’accordent sur le même deck : diapositives et notes', async () => {
     const deck = `${DECK}\n---\n\n${CODE_DECK}\n---\n\n# Partie\n\nOuverture\n\nNote: n-ouverture\n\n## Sous-partie\n\nSuite\n\nNotes:\nn-sous\n`;
     const slides = browserSlides(await exportHtml(deck));

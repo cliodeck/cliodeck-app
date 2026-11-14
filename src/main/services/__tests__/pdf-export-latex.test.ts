@@ -585,6 +585,60 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
       );
 
       /**
+       * Revue de L10-3, seconde passe. Un `Note:` tapé juste sous une image ou un `</div>` tombait,
+       * pour CommonMark, dans le bloc HTML : pandoc l'imprimait sur le cadre projeté. Une note qui
+       * finit par un commentaire suivi de blancs, ou dans un fichier CRLF (l'éditeur garde les fins de
+       * ligne du fichier), restait aussi sur le cadre. Une note dans un `<div>` qu'elle referme reste
+       * telle quelle : balisée, elle laisserait ce div ouvert, et la diapositive suivante tomberait
+       * dans le même cadre (mesuré avec pandoc 3.13). Elle s'imprime alors comme avant L10-3.
+       */
+      const HTML_DECK = [
+        '## Figure', '', '<img src="figure.png" width="600">', 'Note: NOTEIMAGE', '',
+        '---', '',
+        '## Colonnes', '', '<div class="colonnes">', '', 'Texte colonne.', '', '</div>', 'Note: NOTEDIV', '',
+        '---', '',
+        '## Enveloppe', '', '<div class="cadre">', '', 'Texte enveloppe.', '', 'Note: NOTEENVELOPPE', '', '</div>', '',
+        '---', '',
+        '## Brouillon', '', 'Texte brouillon.', '', 'Note: NOTEBROUILLON', '', '<!-- ancienne version -->  ', '',
+        '---', '',
+        '## Fin', '', 'Fin.', '',
+      ];
+
+      it.each([
+        [false, 'LF', '\n'],
+        [false, 'CRLF', '\r\n'],
+        [true, 'CRLF', '\r\n'],
+      ])(
+        'HTML juste au-dessus ou au bout d’une note, case %s, %s : la note quitte le cadre, chaque diapositive le sien',
+        async (showNotes, _, eol) => {
+          const pages = pdfPages(
+            await expectCompiles('presentation', HTML_DECK.join(eol), undefined, { showNotes })
+          );
+          const text = pages.join('\n');
+          expect(text).not.toContain(':::');
+          expect(text).not.toMatch(/Note: NOTE(IMAGE|DIV|BROUILLON)/);
+          // Titre, Figure, Colonnes, Enveloppe, Brouillon, Fin ; case cochée, une page de notes après
+          // chaque diapositive dont la note est balisée.
+          const slides = showNotes ? [pages[0], pages[1], pages[3], pages[5], pages[6], pages[8]] : pages;
+          expect(pages).toHaveLength(showNotes ? 9 : 6);
+          expect(slides[1]).toContain('Figure');
+          expect(slides[2]).toContain('Texte colonne.');
+          expect(slides[3]).toMatch(/Texte enveloppe\.[\s\S]*Note: NOTEENVELOPPE/);
+          expect(slides[4]).toContain('Texte brouillon.');
+          expect(slides[5]).toContain('Fin.');
+          for (const s of slides) expect(s).not.toMatch(/NOTE(IMAGE|DIV|BROUILLON)/);
+          if (showNotes) {
+            expect(pages[2]).toContain('NOTEIMAGE');
+            expect(pages[4]).toContain('NOTEDIV');
+            expect(pages[7]).toContain('NOTEBROUILLON');
+          } else {
+            expect(text).not.toMatch(/NOTE(IMAGE|DIV|BROUILLON)/);
+          }
+        },
+        COMPILE_MS
+      );
+
+      /**
        * Revue de L10-3, comportement retenu : une note court jusqu'à la fin de sa partie au sens de
        * reveal.js (prochain `---`, ou prochain `## ` sous un `# ` d'ouverture), règle de l'aperçu.
        * Un `# ` venu après la note sans `---`, dont `--slide-level=1` ferait un cadre, est dans la
