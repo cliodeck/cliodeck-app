@@ -565,6 +565,78 @@ describe.skipIf(!pandocAvailable())('export Word par pandoc d’un livre : numé
     expect(headings(options.outputPath!)).toEqual(expected);
   });
 
+  /**
+   * Liminaires et pièces finales (`kind: 'front'` et `'back'`, réglés dans `project.json`) : le PDF
+   * ne les numérote pas (`\frontmatter`, `\backmatter`). Dans le Word, `--number-sections` les
+   * numérotait, et le filtre ne retirait le numéro qu'aux niveaux trop profonds : l'avant-propos
+   * devenait « 1 », le premier vrai chapitre « 2 », l'annexe « 4 ».
+   */
+  function bookWithMatterOptions(settings: Partial<BookSettings>): WordExportOptions {
+    const projectPath = makeProject('book');
+    const pieces = [
+      { id: 'f', kind: 'front', text: '# Avant-propos\n\nTexte.\n\n## Remerciements\n\nMerci.\n' },
+      { id: 'c1', kind: 'chapter', text: '# Premier\n\nTexte, selon [@farge1989].\n\n## Section A\n\nTexte.\n' },
+      { id: 'c2', kind: 'chapter', text: '# Second\n\n## Section B\n\nTexte.\n' },
+      { id: 'b', kind: 'back', text: '# Annexe\n\n## Pièce 1\n\nTexte.\n' },
+    ] as const;
+    pieces.forEach((p) => writeFileSync(join(projectPath, `chapters/${p.id}.md`), p.text));
+    return {
+      ...articleOptions(projectPath),
+      projectType: 'book',
+      content: '',
+      bookSettings: { ...DEFAULT_BOOK_SETTINGS, ...settings },
+      manuscript: {
+        chapters: pieces.map((p, order) => ({
+          id: p.id,
+          kind: p.kind,
+          title: p.id,
+          filePath: `chapters/${p.id}.md`,
+          order,
+        })),
+      },
+    };
+  }
+
+  it.each([
+    [
+      'réglages par défaut',
+      {},
+      [
+        'Heading1 - Avant-propos',
+        'Heading2 - Remerciements',
+        'Heading1 1 Premier',
+        'Heading2 - Section A',
+        'Heading1 2 Second',
+        'Heading2 - Section B',
+        'Heading1 - Annexe',
+        'Heading2 - Pièce 1',
+        'Heading1 - Références',
+      ],
+    ],
+    [
+      '« Numéroter les sections »',
+      { numberSections: true },
+      [
+        'Heading1 - Avant-propos',
+        'Heading2 - Remerciements',
+        'Heading1 1 Premier',
+        'Heading2 1.1 Section A',
+        'Heading1 2 Second',
+        'Heading2 2.1 Section B',
+        'Heading1 - Annexe',
+        'Heading2 - Pièce 1',
+        'Heading1 - Références',
+      ],
+    ],
+  ] as const)('liminaires et pièces finales sans numéro, comme dans le PDF : %s', async (_label, settings, expected) => {
+    const options = bookWithMatterOptions(settings);
+
+    const result = await new WordExportService().exportToWord(options);
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(headings(options.outputPath!)).toEqual(expected);
+  });
+
   it('le filtre est écrit dans le dossier de travail de l’export, dont le chemin a une espace, et part avec lui', async () => {
     const spaced = join(dir, 'dossier temporaire');
     mkdirSync(spaced);

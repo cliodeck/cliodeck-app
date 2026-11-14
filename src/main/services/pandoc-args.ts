@@ -158,6 +158,17 @@ export function computeSecnumdepth(settings?: BookSettings): number {
  * le PDF : des sections numérotées numérotent aussi les chapitres, car un niveau 1 sans numéro
  * donnerait « 0.1 » à ses sections (mesuré, pandoc 3.13). Rien de coché : ni option ni filtre. Le
  * titre de la bibliographie, que pandoc marque déjà `unnumbered`, n'a jamais de numéro.
+ *
+ * Liminaires et pièces finales (`kind: 'front'` et `'back'`) : aucun numéro, à aucun niveau. Le
+ * gabarit du PDF s'ouvre sur `\frontmatter`, et l'assembleur pose `\mainmatter` avant le premier
+ * chapitre et `\backmatter` avant la première pièce finale ; pandoc les reçoit en blocs bruts
+ * (`RawBlock`, format `tex`), qu'il ne recopie pas dans le .docx. Le filtre les lit dans l'ordre du
+ * document : seuls les titres qui suivent `\mainmatter` et précèdent `\backmatter` gardent leur
+ * numéro. Avant cette lecture, l'avant-propos devenait le chapitre « 1 » du Word, le premier vrai
+ * chapitre « 2 ». Le filtre suppose donc le flux de l'assembleur (cible `latex`), le seul que
+ * reçoit l'export Word d'un livre par pandoc. Le parcours `topdown` visite ces blocs et ces titres
+ * dans l'ordre du document ; le parcours par type d'élément, celui d'un pandoc antérieur à 2.17
+ * qui ignore `traverse`, aussi (vérifié avec pandoc 3.13, `traverse` retiré).
  */
 export function wordHeadingNumbering(settings?: BookSettings): { numberSections: boolean; luaFilter?: string } {
   const depth = computeSecnumdepth(settings);
@@ -166,11 +177,26 @@ export function wordHeadingNumbering(settings?: BookSettings): { numberSections:
   return {
     numberSections: true,
     luaFilter: [
-      `-- ClioDeck : titres de niveau superieur a ${deepest} sans numero (reglages d'ouvrage).`,
-      'function Header(el)',
-      `  if el.level > ${deepest} then el.classes:insert('unnumbered') end`,
-      '  return el',
+      "-- ClioDeck : numerotation des titres d'un livre (reglages d'ouvrage), comme dans le PDF.",
+      '-- Avant \\mainmatter (liminaires) et apres \\backmatter (pieces finales) : aucun numero.',
+      `-- Dans le corps : titres de niveau superieur a ${deepest} sans numero.`,
+      'local numbered = false',
+      'local function marks(el, command)',
+      "  return (el.format == 'tex' or el.format == 'latex') and el.text:find(command, 1, true) ~= nil",
       'end',
+      'return {',
+      '  {',
+      "    traverse = 'topdown',",
+      '    RawBlock = function(el)',
+      "      if marks(el, '\\\\mainmatter') then numbered = true end",
+      "      if marks(el, '\\\\backmatter') then numbered = false end",
+      '    end,',
+      '    Header = function(el)',
+      `      if not numbered or el.level > ${deepest} then el.classes:insert('unnumbered') end`,
+      '      return el',
+      '    end,',
+      '  },',
+      '}',
       '',
     ].join('\n'),
   };

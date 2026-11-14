@@ -436,11 +436,23 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
      * repartait de 1. « Reprise à 1 à chaque chapitre » garde sa remise à zéro, posée par
      * l'assembleur. Chaque chapitre ouvre ses notes par `[^1]` : l'assembleur les préfixe par
      * chapitre, et deux notes homonymes restent deux notes, chacune avec son texte.
+     *
+     * Le chapitre de « Reprise à 1 à chaque chapitre » est la pièce du manifeste, comme dans la
+     * numérotation du navigateur de chapitres : un second titre `#` dans un fichier imprime un
+     * « Chapitre » de plus, mais ses notes continuent celles de la pièce. Avant S12-1-0, la classe
+     * book les faisait repartir de 1 quand les chapitres étaient numérotés, et non quand ils ne
+     * l'étaient pas ; la règle ne dépend plus de « Numéroter les chapitres », et c'est déjà celle
+     * des notes de fin.
      */
     describe.skipIf(!pdftotextAvailable())('livre à notes de bas de page : numérotation (texte du PDF)', () => {
       /** Deux notes au premier chapitre, une au second. */
       const THREE = [
         '# Premier\n\nTexte APPELUN[^1] et APPELDEUX[^2].\n\n[^1]: NOTEUN.\n[^2]: NOTEDEUX.\n',
+        '# Second\n\nTexte APPELTROIS[^1].\n\n[^1]: NOTETROIS.\n',
+      ];
+      /** Les mêmes notes, mais la seconde sous un second titre `#` du premier fichier. */
+      const TWO_TITLES_IN_ONE_FILE = [
+        '# Premier\n\nTexte APPELUN[^1].\n\n# Interlude\n\nTexte APPELDEUX[^2].\n\n[^1]: NOTEUN.\n[^2]: NOTEDEUX.\n',
         '# Second\n\nTexte APPELTROIS[^1].\n\n[^1]: NOTETROIS.\n',
       ];
       /** Une note `[^1]` par chapitre. */
@@ -456,6 +468,8 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
         ['reprise à 1 à chaque chapitre', THREE, { noteNumbering: 'per-chapter' }, [1, 2, 1]],
         ['continue, deux [^1] homonymes', HOMONYMS, {}, [1, 2]],
         ['reprise à 1, deux [^1] homonymes', HOMONYMS, { noteNumbering: 'per-chapter' }, [1, 1]],
+        ['continue, deux titres # dans un fichier', TWO_TITLES_IN_ONE_FILE, {}, [1, 2, 3]],
+        ['reprise à 1 par pièce du manifeste, pas par titre # imprimé', TWO_TITLES_IN_ONE_FILE, { noteNumbering: 'per-chapter' }, [1, 2, 1]],
       ] as const satisfies readonly (readonly [string, readonly string[], Partial<BookSettings>, readonly number[]])[])(
         '%s',
         async (_label, chapters, book, numbers) => {

@@ -314,9 +314,10 @@ export class WordExportService {
       // `--top-level-division`. Décocher « numéroter les chapitres » puis
       // exporter en .docx pour un éditeur donnait des chapitres numérotés quand
       // même. `--number-sections` numérote tous les niveaux d'un .docx : le
-      // filtre retire leur numéro aux titres que les réglages ne numérotent pas
-      // (S12-1-5). Il est écrit dans le dossier de travail, qui part dans le
-      // `finally`, et pandoc le lit par son chemin absolu.
+      // filtre retire leur numéro aux titres que les réglages ne numérotent pas,
+      // et à ceux des liminaires et des pièces finales, comme le PDF (S12-1-5).
+      // Il est écrit dans le dossier de travail, qui part dans le `finally`, et
+      // pandoc le lit par son chemin absolu.
       if (options.projectType === 'book') {
         const settings = resolveBookSettings(
           options.bookSettings as BookSettings | undefined
