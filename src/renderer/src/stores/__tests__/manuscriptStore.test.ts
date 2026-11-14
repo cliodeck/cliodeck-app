@@ -252,6 +252,19 @@ describe('refreshAll', () => {
     expect(info['chapters/03.md']).toBeUndefined();
   });
 
+  it('un chapitre fermé qui commence par un BOM : son plan garde son premier titre (S14-1-14)', async () => {
+    // `project:read-chapters` passe par `readUserFile`, qui garde le BOM : seul `editor:load-file`
+    // le retire, et il ne sert qu'au chapitre ouvert.
+    installIpc({ 'chapters/02.md': '\uFEFF# Deux\n\n## Section\n\nDeux mots.\n' });
+
+    await useManuscriptStore.getState().refreshAll();
+
+    expect(useManuscriptStore.getState().info['chapters/02.md'].outline.map((h) => h.text)).toEqual([
+      'Deux',
+      'Section',
+    ]);
+  });
+
   it('vide le dérivé sans projet', async () => {
     useProjectStore.setState({ currentProject: null, chapters: [] });
     await useManuscriptStore.getState().refreshAll();

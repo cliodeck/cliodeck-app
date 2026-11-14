@@ -64,6 +64,10 @@ export interface AssembledManuscript {
 /** Ordre de rendu : liminaires, corps, pièces finales (arbitrage 6). */
 const KIND_ORDER: Record<string, number> = { front: 0, chapter: 1, back: 2 };
 
+const BOM = '\uFEFF';
+
+const stripBom = (text: string): string => (text.startsWith(BOM) ? text.slice(BOM.length) : text);
+
 function isInsideProject(projectDir: string, relPath: string): boolean {
   if (path.isAbsolute(relPath)) return false;
   const resolved = path.resolve(projectDir, relPath);
@@ -160,7 +164,9 @@ export async function assembleManuscript(
     let content = liveOverrides[chapter.filePath];
     if (content === undefined) {
       try {
-        content = await readFile(path.resolve(projectPath, chapter.filePath), 'utf-8');
+        // Le BOM d'un chapitre fermé n'est pas du texte : au milieu du livre, il ferait de son
+        // titre un paragraphe, pour pandoc comme pour l'export Word (S14-1-14).
+        content = stripBom(await readFile(path.resolve(projectPath, chapter.filePath), 'utf-8'));
       } catch {
         warnings.push({
           code: 'export.chapterUnreadable',

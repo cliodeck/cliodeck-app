@@ -45,6 +45,38 @@ describe('detectFrontmatterLines — règle de désambiguïsation', () => {
       closingLine: 2,
     });
   });
+
+  it('un BOM en tête de la première ligne : le frontmatter est vu (S14-1-14)', () => {
+    expect(detectFrontmatterLines(['\uFEFF---', 'title: x', '---', ''])).toEqual({
+      closingLine: 2,
+    });
+  });
+});
+
+describe('parseSlides — un deck qui commence par un BOM (S14-1-14)', () => {
+  it('le frontmatter est vu, et il n’est pas une diapositive', () => {
+    const src = '\uFEFF---\ntitle: Deck\n---\n\n# Première\n\n---\n\n# Seconde\n';
+    const deck = parseSlides(src);
+
+    expect(deck.frontmatter?.yaml).toBe('title: Deck\n');
+    expect(deck.slides.map((s) => s.title)).toEqual(['Première', 'Seconde']);
+    expect(src.slice(deck.slides[1].from, deck.slides[1].to)).toBe('\n# Seconde\n');
+    expect(deck.slides.map((s) => s.line)).toEqual([5, 9]);
+  });
+
+  it('sans frontmatter, la première diapositive a son titre', () => {
+    const deck = parseSlides('\uFEFF# Première\n\n---\n\n# Seconde\n');
+
+    expect(deck.frontmatter).toBeNull();
+    expect(deck.slides.map((s) => s.title)).toEqual(['Première', 'Seconde']);
+  });
+
+  it('un deck qui ouvre sur un séparateur : première diapositive vide', () => {
+    const deck = parseSlides('\uFEFF---\n\n# Vraie première\n');
+
+    expect(deck.slides).toHaveLength(2);
+    expect(deck.slides[1].title).toBe('Vraie première');
+  });
 });
 
 describe('parseSlides — découpage', () => {
