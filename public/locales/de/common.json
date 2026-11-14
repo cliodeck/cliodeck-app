@@ -2225,7 +2225,7 @@
   "drafts": {
     "title": "Brainstorm-Entwürfe",
     "empty": "Keine wartenden Entwürfe. Im Chat fügt „Als Entwurf speichern“ eine Antwort hier hinzu.",
-    "dragHint": "Ziehen Sie eine Karte in den Editor, um sie an der Abwurfstelle einzufügen (Cmd+Z zum Rückgängigmachen).",
+    "dragHint": "Ziehen Sie eine Karte in den Editor, um sie an der Abwurfstelle vorzuschlagen: annehmen oder ablehnen, wie am Cursor.",
     "insert": "Am Cursor einfügen",
     "insertTitle": "Diesen Entwurf an der Cursorposition einfügen (adjudizierbarer Vorschlag)",
     "inserted": "Vorgeschlagen",

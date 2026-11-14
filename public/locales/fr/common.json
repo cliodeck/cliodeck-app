@@ -2225,7 +2225,7 @@
   "drafts": {
     "title": "Brouillons Brainstorm",
     "empty": "Aucun brouillon en attente. Depuis le chat, « Mettre en brouillon » ajoute une réponse ici.",
-    "dragHint": "Glissez une carte dans l'éditeur pour l'insérer à l'endroit exact du dépôt (Cmd+Z pour annuler).",
+    "dragHint": "Glissez une carte dans l'éditeur pour la proposer à l'endroit du dépôt : à accepter ou à rejeter, comme au curseur.",
     "insert": "Insérer au curseur",
     "insertTitle": "Insérer ce brouillon à la position du curseur (proposition adjudicable)",
     "inserted": "Proposé",

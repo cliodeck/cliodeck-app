@@ -16,6 +16,7 @@ import { EditorView } from '@codemirror/view';
 import { CodeMirrorEditor } from '../CodeMirrorEditor';
 import { DraftsPanel } from '../DraftsPanel';
 import { resetEditorStates } from '../editor-state-memory';
+import { insertDraftAtOffset } from '../../Brainstorm/messageToDraft';
 import { useDraftsStore } from '../../../stores/draftsStore';
 import { useEditorStore } from '../../../stores/editorStore';
 import { useNotificationStore } from '../../../stores/notificationStore';
@@ -34,6 +35,7 @@ const DRAFT_ID = 'brouillon-1';
 const DRAFT_TEXT = 'TEXTE DU BROUILLON';
 
 let disk: Record<string, string>;
+let adjudications: Array<{ decision: string }>;
 
 const editor = () => useEditorStore.getState();
 const drafts = () => useDraftsStore.getState();
@@ -87,6 +89,7 @@ async function switchMode(mode: WorkspaceMode): Promise<void> {
 beforeEach(async () => {
   vi.useFakeTimers();
   resetEditorStates();
+  adjudications = [];
   disk = {
     [A]: TEXT_A,
     [B]: '# Chapitre B\n\nTexte du chapitre B.\n',
@@ -115,7 +118,12 @@ beforeEach(async () => {
       }),
       onInsertText: () => () => undefined,
     },
-    proposals: { recordAdjudication: () => undefined },
+    // Le canal des deux journaux : ce qui y part est une décision de l'auteur.
+    proposals: {
+      recordAdjudication: (event: { decision: string }) => {
+        adjudications.push(event);
+      },
+    },
     ipcRenderer: { on: () => () => undefined },
   };
   useProjectStore.setState({
@@ -159,6 +167,7 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
   useEditorStore.setState({ editorFacade: null, filePath: null, content: '', isDirty: false, bufferDetached: false });
   useProjectStore.setState({ currentProject: null, loadState: { kind: 'idle' } });
   useDraftsStore.setState({ drafts: [], isPanelOpen: false });
@@ -332,5 +341,204 @@ describe('aucun document pour la recevoir', () => {
     expect(proposalBox()).toBeNull();
     expectDraftKeptAndButtonBack();
     expect(useNotificationStore.getState().notifications.map((n) => n.title)).toContain('editor.proposalUnavailable');
+  });
+});
+
+/**
+ * D9 : glisser une carte dans le texte la propose au point de dépôt, comme son bouton au curseur.
+ *
+ * La carte partait en `text/plain` et le dépôt natif de CM6 l'insérait : seul chemin où du texte
+ * d'IA entrait sans proposition, et sans décision au journal. Au `dragend`, elle quittait la file
+ * avant toute décision. Du navigateur, seul ce que jsdom n'a pas est simulé : le `DataTransfer`, le
+ * lâcher sur une cible qui l'accepte, et l'offset que la mise en page donne au point de dépôt.
+ */
+describe('glisser une carte dans le texte (D9)', () => {
+  /** « Texte| du chapitre A. » : au milieu du paragraphe, loin du curseur, posé au bout du texte. */
+  const DROP_AT = TEXT_A.indexOf(' du chapitre');
+  const DROPPED = '# Chapitre A\n\nTexte\n\nTEXTE DU BROUILLON\n\n du chapitre A.\n';
+  const DROP_POINT = { x: 140, y: 52 };
+
+  const dragType = (type: string) => (type.toLowerCase() === 'text' ? 'text/plain' : type.toLowerCase());
+
+  /** Le `DataTransfer` d'un vrai glisser : types en minuscules, `Text` vaut `text/plain`. */
+  class DragData {
+    private readonly data = new Map<string, string>();
+    dropEffect = 'none';
+    effectAllowed = 'uninitialized';
+    readonly files: File[] = [];
+    get types(): string[] {
+      return [...this.data.keys()];
+    }
+    setData(type: string, value: string): void {
+      this.data.set(dragType(type), value);
+    }
+    getData(type: string): string {
+      return this.data.get(dragType(type)) ?? '';
+    }
+  }
+
+  const card = () => {
+    const found = document.querySelector<HTMLElement>('.drafts-panel__card');
+    if (!found) throw new Error('Pas de carte dans le panneau');
+    return found;
+  };
+  const docText = () => currentView().state.doc.toString();
+  const notified = () => useNotificationStore.getState().notifications.map((n) => n.title);
+
+  /** La mise en page, que jsdom n'a pas : le point de dépôt tombe à cet offset, et nul autre. */
+  function layoutDropPointAt(offset: number): void {
+    const view = currentView();
+    vi.spyOn(view, 'posAtCoords').mockImplementation(((coords: { x: number; y: number }) =>
+      coords.x === DROP_POINT.x && coords.y === DROP_POINT.y ? offset : null) as typeof view.posAtCoords);
+  }
+
+  function dragEvent(type: string, data: DragData): MouseEvent {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: DROP_POINT.x, clientY: DROP_POINT.y });
+    Object.defineProperty(event, 'dataTransfer', { value: data });
+    return event;
+  }
+
+  /**
+   * Ce que fait le navigateur au-dessus du texte : il ne lâche que sur une cible qui accepte
+   * (`dragover` annulé, ou zone éditable), et `dragend` dit l'opération faite, `none` sinon.
+   */
+  function releaseOverText(data: DragData, source?: HTMLElement): void {
+    const view = currentView();
+    const target = view.contentDOM.querySelector('.cm-line') ?? view.contentDOM;
+    const over = dragEvent('dragover', data);
+    act(() => void target.dispatchEvent(over));
+    if (over.defaultPrevented || view.contentDOM.getAttribute('contenteditable') === 'true') {
+      act(() => void target.dispatchEvent(dragEvent('drop', data)));
+      data.dropEffect = 'copy';
+    }
+    if (source) act(() => void fireEvent.dragEnd(source, { dataTransfer: data }));
+  }
+
+  function dragCardTo(offset: number): void {
+    layoutDropPointAt(offset);
+    const data = new DragData();
+    const source = card();
+    act(() => void fireEvent.dragStart(source, { dataTransfer: data }));
+    releaseOverText(data, source);
+  }
+
+  it('le texte ne change pas : une proposition attend au point de dépôt, et aucune décision ne part aux journaux', () => {
+    dragCardTo(DROP_AT);
+
+    expect(docText()).toBe(TEXT_A);
+    expect(proposalBox()).not.toBeNull();
+    expect(editor().editorFacade?.getProposalRanges()).toEqual([{ from: DROP_AT, to: DROP_AT }]);
+    expect(adjudications).toEqual([]);
+    // Le `dragend` qui suit le dépôt ne retire pas la carte : elle attend la décision, comme après
+    // son bouton, et ne se glisse plus.
+    expect(queued()).toEqual([DRAFT_ID]);
+    expect(insertButton().disabled).toBe(true);
+    expect(card().getAttribute('draggable')).toBe('false');
+  });
+
+  it('accepté : le texte entre au point de dépôt, avec le padding de bloc du bouton, et la carte quitte la file', () => {
+    dragCardTo(DROP_AT);
+    act(() => void fireEvent.mouseDown(proposalButton(0)));
+
+    expect(docText()).toBe(DROPPED);
+    expect(DROPPED).toBe(insertDraftAtOffset(TEXT_A, DROP_AT, DRAFT_TEXT));
+    expect(adjudications.map((e) => e.decision)).toEqual(['accepted']);
+    expect(queued()).toEqual([]);
+  });
+
+  it('rejeté : le texte reste tel quel, et la carte reste dans la file, de nouveau glissable', async () => {
+    dragCardTo(DROP_AT);
+    act(() => void fireEvent.mouseDown(proposalButton(1)));
+    await wait(700);
+
+    expect(docText()).toBe(TEXT_A);
+    expect(adjudications.map((e) => e.decision)).toEqual(['rejected']);
+    expectDraftKeptAndButtonBack();
+    expect(card().getAttribute('draggable')).toBe('true');
+  });
+
+  it('même endroit que le bouton : déposée où le bouton aurait proposé, acceptée, le même texte', () => {
+    act(() => {
+      currentView().dispatch({ selection: EditorSelection.cursor(DROP_AT) });
+    });
+    insert();
+    act(() => void fireEvent.mouseDown(proposalButton(0)));
+
+    expect(docText()).toBe(DROPPED);
+  });
+
+  it('une carte déjà proposée par son bouton ne se glisse pas', () => {
+    insert();
+
+    expect(card().getAttribute('draggable')).toBe('false');
+  });
+
+  it('fichier CRLF : la proposition attend au point de dépôt, et acceptée, le fichier reste CRLF uniforme', async () => {
+    const crlf = TEXT_A.replace(/\n/g, '\r\n');
+    await act(async () => {
+      useEditorStore.setState((s) => ({ content: crlf, documentVersion: s.documentVersion + 1 }));
+    });
+    // Offsets du document : une fin de ligne y vaut 1.
+    dragCardTo(DROP_AT);
+
+    expect(editor().getLiveContent()).toBe(crlf);
+    expect(editor().editorFacade?.getProposalRanges()).toEqual([{ from: DROP_AT, to: DROP_AT }]);
+    act(() => void fireEvent.mouseDown(proposalButton(0)));
+
+    expect(editor().getLiveContent()).toBe(DROPPED.replace(/\n/g, '\r\n'));
+  });
+
+  it('témoin : un texte glissé d’une autre application garde le dépôt natif, au point de dépôt', () => {
+    layoutDropPointAt(DROP_AT);
+    const data = new DragData();
+    data.setData('text/plain', 'Texte venu d’ailleurs');
+
+    releaseOverText(data);
+
+    expect(docText()).toBe(`${TEXT_A.slice(0, DROP_AT)}Texte venu d’ailleurs${TEXT_A.slice(DROP_AT)}`);
+    expect(proposalBox()).toBeNull();
+    expect(queued()).toEqual([DRAFT_ID]);
+  });
+
+  it('vue en lecture seule : rien n’entre, la carte reste, et l’auteur le sait', async () => {
+    await act(async () => {
+      await editor().replaceBuffer({ kind: 'detach' }, 'project-switch');
+    });
+    const before = docText();
+
+    dragCardTo(0);
+
+    expect(docText()).toBe(before);
+    expect(proposalBox()).toBeNull();
+    expectDraftKeptAndButtonBack();
+    expect(notified()).toContain('editor.proposalUnavailable');
+  });
+
+  it('livre sans chapitre ouvert : rien n’entre dans le tampon, pas même par le dépôt natif, et l’auteur le sait', async () => {
+    await act(async () => {
+      await editor().replaceBuffer({ kind: 'untitled' }, 'new-document');
+    });
+
+    dragCardTo(0);
+
+    expect(docText()).toBe('');
+    expect(proposalBox()).toBeNull();
+    expectDraftKeptAndButtonBack();
+    expect(notified()).toContain('editor.proposalUnavailable');
+  });
+
+  it('une proposition qui échoue ne retombe jamais sur le dépôt natif : rien n’entre, la carte reste', () => {
+    const facade = editor().editorFacade;
+    if (!facade) throw new Error('Pas de façade');
+    vi.spyOn(facade, 'propose').mockImplementation(() => {
+      throw new Error('panne simulée');
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    dragCardTo(DROP_AT);
+
+    expect(docText()).toBe(TEXT_A);
+    expectDraftKeptAndButtonBack();
+    expect(notified()).toContain('editor.proposalUnavailable');
   });
 });

@@ -2225,7 +2225,7 @@
   "drafts": {
     "title": "Brainstorm drafts",
     "empty": "No pending drafts. In the chat, “Save as draft” adds a reply here.",
-    "dragHint": "Drag a card into the editor to insert it at the exact drop position (Cmd+Z to undo).",
+    "dragHint": "Drag a card into the editor to propose it at the drop position: accept or reject it, as at the cursor.",
     "insert": "Insert at cursor",
     "insertTitle": "Insert this draft at the cursor position (adjudicable proposal)",
     "inserted": "Proposed",

@@ -21,8 +21,9 @@
  * pas `useEditorStore` ; une écriture du fichier ouvert sur le disque par l'IPC
  * (`window.electron.editor.saveFile`), que rien ne distingue ici de celle d'un autre chapitre. Les
  * éditions à la sélection (`editSelection`, `replaceSelection`, `toggleInline`, `propose`) ne
- * remplacent pas le document : elles restent permises, comme le glisser-déposer d'un brouillon, que
- * la vue reçoit sans passer par aucune de ces fonctions.
+ * remplacent pas le document : elles restent permises. Le dépôt natif de CM6 (un texte glissé d'une
+ * autre application) n'en passe par aucune ; une carte de brouillon glissée, elle, ne fait qu'une
+ * proposition (D9).
  */
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
