@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { citationKeysIn, processMarkdownCitations } from '../citation-pipeline';
+import { appendEngineCitations, citationKeysIn, processMarkdownCitations } from '../citation-pipeline';
 
 // Ces tests exercent le VRAI moteur citeproc : chaque appel construit un
 // `CSL.Engine` et parse la feuille de style CSL (CitationEngine.ts:95).
@@ -209,5 +209,64 @@ describe('citationKeysIn — les clés qu’un export laisse brutes', () => {
 
   it('avec `narrative`, aussi les `@clé` nues, hors code et hors adresse', () => {
     expect(citationKeysIn(md, { narrative: true })).toEqual(['alice2020', 'bob2019', 'carol2021']);
+  });
+});
+
+/**
+ * S12-1-7 : l'export PDF recopiait tels quels les notes et la bibliographie du moteur, que citeproc
+ * rend en HTML (`<i>Titre</i>`, `<div class="csl-entry">`). Pandoc lisait des balises brutes, que
+ * l'écrivain LaTeX supprime : aucun titre d'ouvrage en italique, ni en note ni en bibliographie,
+ * sous un titre « Bibliographie » figé en français, en liste à puces.
+ */
+describe('appendEngineCitations — notes et bibliographie du moteur, en markdown', () => {
+  const farge = makeCitation({
+    id: 'Farge_2013',
+    author: 'Farge, Arlette',
+    year: '2013',
+    title: 'The Allure of the Archives',
+    publisher: 'Yale University Press',
+  });
+
+  it('rend les italiques de citeproc en markdown, sans balise ni puce, sous le titre fourni', async () => {
+    const processed = await processMarkdownCitations('Texte [@Farge_2013].\n', {
+      resolve: resolveMap({ Farge_2013: farge }),
+      style: 'chicago-note-bibliography',
+      locale: 'en-US',
+    });
+    // Ce que citeproc rend vraiment : du HTML.
+    expect(processed.footnotes[0].text).toContain('<i>The Allure of the Archives</i>');
+    expect(processed.bibliography[0]).toContain('<div class="csl-entry">');
+
+    const md = appendEngineCitations(processed.md, processed, 'References');
+
+    const [body, references] = md.split(/^# References \{\.unnumbered\}$/m);
+    expect(references, md).toBeDefined();
+    expect(body).toMatch(/^\[\^1\]: Arlette Farge, \*The Allure of the Archives\* \(Yale University Press, 2013\)\.$/m);
+    expect(references.trim()).toBe('Farge, Arlette. *The Allure of the Archives*. Yale University Press, 2013.');
+    expect(md).not.toMatch(/<\/?(?:i|div)\b/);
+    expect(md).not.toMatch(/^- /m);
+    expect(md).not.toContain('Bibliographie');
+  });
+
+  it('une référence par paragraphe, entités décodées', () => {
+    const md = appendEngineCitations(
+      'Texte.',
+      {
+        footnotes: [],
+        bibliography: [
+          '<div class="csl-entry">Dupont, Jean. <i>Archives &#38; pouvoirs</i>. 2020.</div>',
+          '<div class="csl-entry">Martin, Paul. <i>Autre</i>. 2021.</div>',
+        ],
+      },
+      'Literatur'
+    );
+    expect(md).toBe(
+      'Texte.\n\n# Literatur {.unnumbered}\n\n' +
+        'Dupont, Jean. *Archives & pouvoirs*. 2020.\n\nMartin, Paul. *Autre*. 2021.\n'
+    );
+  });
+
+  it('sans citation rendue, le markdown reste tel quel : ni titre ni note', () => {
+    expect(appendEngineCitations('Texte.', { footnotes: [], bibliography: [] }, 'Références')).toBe('Texte.');
   });
 });

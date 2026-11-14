@@ -112,3 +112,33 @@ describe('PDFExportModal citation section', () => {
     });
   });
 });
+
+/**
+ * S12-1-7 : une clé introuvable restait imprimée « [@Dupnt_2020] » dans le PDF, sans un mot. Le
+ * main la rend dans `unresolvedCitations`, comme l'export Word : la fenêtre la nomme par
+ * `ExportWarnings` (A27) et reste ouverte pour que l'auteur la lise.
+ */
+describe('PDFExportModal : clés de citation introuvables', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('les nomme, et reste ouverte', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    installElectron(vi.fn().mockResolvedValue({ success: true, unresolvedCitations: ['Dupnt_2020', 'ghost'] }));
+    const onClose = vi.fn();
+    render(<PDFExportModal isOpen onClose={onClose} />);
+
+    const exportBtn = await screen.findByRole('button', { name: 'export.pdf.export' });
+    await waitFor(() => expect(exportBtn).not.toBeDisabled());
+    fireEvent.click(exportBtn);
+
+    expect(await screen.findByTestId('export-unresolved-citations')).toHaveTextContent(
+      'export.word.unresolvedCitations'
+    );
+    expect(document.querySelector('.export-success')).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

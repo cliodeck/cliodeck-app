@@ -3,7 +3,7 @@ import { copyFile, writeFile, mkdir, mkdtemp, readFile, rm } from 'fs/promises';
 import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
-import { citationKeysIn, processMarkdownCitations } from './citation-pipeline.js';
+import { appendEngineCitations, citationKeysIn, processMarkdownCitations } from './citation-pipeline.js';
 import { bibliographyService, readBibFile } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
@@ -25,10 +25,13 @@ import {
   type BeamerConfig,
   buildBeamerCustomizations,
   buildPandocArgs,
+  demoteChapterBibliographyHeading,
   missingImagesWarnings,
   pandocImageFailure,
   pandocMissingResources,
+  pandocUnresolvedCitations,
   projectResourcePaths,
+  referenceSectionTitle,
   resolveBibliographyMode,
   resolveBookSettings,
   stagedBeamerImageName,
@@ -79,6 +82,17 @@ export interface ExportOptions {
     abstract?: string;
   };
   beamerConfig?: BeamerConfig;
+}
+
+/** Résultat d'un export PDF : même forme que `WordExportResult` pour les citations. */
+export interface PDFExportResult extends ExportResult {
+  /**
+   * Clés de citation restées sans référence (moteur, citeproc, ou aucune bibliographie). Le PDF
+   * est écrit quand même, avec ces clés : la fenêtre les nomme (`ExportWarnings`). Les clés d'un
+   * chapitre où citeproc a échoué n'y sont pas : la réserve `export.chapterCitationsNotResolved`
+   * le nomme déjà, pour une autre cause.
+   */
+  unresolvedCitations?: string[];
 }
 
 interface PandocProgress {
@@ -734,11 +748,16 @@ export class PDFExportService {
    * jamais un PDF aux `[@clef]` non résolues, sans rien dire. Un échec isolé se
    * dit aussi : `resolved` est faux, et l'export en fait une réserve qui nomme
    * le chapitre (S12-1-14).
+   *
+   * La bibliographie du chapitre porte le titre de toutes les autres
+   * (`referenceSectionTitle()`), descendu en section du chapitre
+   * (`demoteChapterBibliographyHeading`) ; `missing` : les clés que citeproc
+   * n'a pas trouvées dans un chapitre qu'il a traité (S12-1-11).
    */
   private async resolveCitationsInChapter(
     content: string,
     opts: { bibliographyPath: string; cslPath?: string; tempDir: string; clock: ExportClock }
-  ): Promise<{ content: string; resolved: boolean }> {
+  ): Promise<{ content: string; resolved: boolean; missing: string[] }> {
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const inPath = join(opts.tempDir, `chapter-${stamp}.md`);
     await writeFile(inPath, content, 'utf-8');
@@ -749,13 +768,14 @@ export class PDFExportService {
       '--wrap=preserve',
       '--citeproc',
       '--bibliography', opts.bibliographyPath,
+      '--metadata', `reference-section-title=${referenceSectionTitle()}`,
     ];
     if (opts.cslPath && (await pathExists(opts.cslPath))) {
       args.push('--csl', opts.cslPath);
     }
 
     const extendedPath = this.getExtendedPath();
-    return new Promise<{ content: string; resolved: boolean }>((resolve) => {
+    return new Promise<{ content: string; resolved: boolean; missing: string[] }>((resolve) => {
       const proc = opts.clock.spawn('pandoc', args, {
         cwd: opts.tempDir,
         env: { ...process.env, PATH: extendedPath },
@@ -767,17 +787,21 @@ export class PDFExportService {
         // Un chapitre vide, ou fait de lignes vides, rend une sortie vide avec le code 0 (mesuré,
         // pandoc 3) : rien n'a échoué.
         if (code === 0 && (resolved.trim() || !content.trim())) {
-          resolve({ content: resolved, resolved: true });
+          resolve({
+            content: demoteChapterBibliographyHeading(resolved),
+            resolved: true,
+            missing: pandocUnresolvedCitations(stderr()),
+          });
         } else {
           // Échec isolé : le chapitre part avec ses `[@clef]` non résolues
           // plutôt que de faire échouer tout l'export.
           console.warn('⚠️ citeproc par chapitre a échoué, chapitre laissé tel quel:', stderr().slice(0, 200));
-          resolve({ content, resolved: false });
+          resolve({ content, resolved: false, missing: [] });
         }
       });
       proc.on('error', (err) => {
         console.warn('⚠️ citeproc par chapitre indisponible:', err.message);
-        resolve({ content, resolved: false });
+        resolve({ content, resolved: false, missing: [] });
       });
     });
   }
@@ -789,7 +813,7 @@ export class PDFExportService {
     options: ExportOptions,
     onProgress?: (progress: PandocProgress) => void,
     limits?: ExportLimits
-  ): Promise<ExportResult> {
+  ): Promise<PDFExportResult> {
     // Jamais un fichier Markdown pour sortie : ce serait un texte de l'auteur (`export-output-path.ts`).
     const refused = refuseMarkdownOutput(options.projectPath, options.outputPath);
     if (refused) return refused;
@@ -800,7 +824,7 @@ export class PDFExportService {
     options: ExportOptions,
     onProgress: ((progress: PandocProgress) => void) | undefined,
     clock: ExportClock
-  ): Promise<ExportResult> {
+  ): Promise<PDFExportResult> {
     // Déclaré hors du `try` pour que le `finally` puisse nettoyer même en
     // cas d'échec : un export raté (LaTeX manquant, caractère exotique)
     // laissait sinon le manuscrit complet en clair dans le répertoire
@@ -866,6 +890,12 @@ export class PDFExportService {
       // Ce que le PDF aura de moins que le manuscrit (un chapitre omis, des citations restées en
       // clés) : le PDF est écrit quand même, la fenêtre le dit et reste ouverte (S12-1-14).
       const manuscriptWarnings: OutcomeIssue[] = [];
+      // Les clés de citation que rien n'a trouvées : elles restent dans le PDF, et la fenêtre les
+      // nomme, comme pour le Word (S12-1-7).
+      const unresolved = new Set<string>();
+      // Citeproc a tourné chapitre par chapitre : ce qui reste en clés vient d'un chapitre en
+      // échec, déjà nommé par sa réserve.
+      let citedByChapter = false;
 
       // Assemblage du manuscrit (projets « livre »). La bibliographie par
       // chapitre passe par le hook `transformChapter` : citeproc tourne
@@ -918,6 +948,7 @@ export class PDFExportService {
                     params: { title: chapter.title, file: chapter.filePath },
                   });
                 }
+                for (const key of cited.missing) unresolved.add(key);
                 return cited.content;
               }
             : undefined,
@@ -935,6 +966,7 @@ export class PDFExportService {
         // ajouterait une bibliographie vide en fin d'ouvrage).
         if (perChapterBib) {
           options = { ...options, bibliographyPath: undefined };
+          citedByChapter = true;
         }
       }
 
@@ -965,20 +997,8 @@ export class PDFExportService {
           if (processed.missingKeys.length > 0) {
             console.warn('⚠️ CitationEngine: unresolved keys:', processed.missingKeys);
           }
-          cleanedContent = processed.md;
-          if (processed.footnotes.length > 0) {
-            const footnoteBlock = processed.footnotes
-              .map((fn) => `[^${fn.n}]: ${fn.text}`)
-              .join('\n\n');
-            cleanedContent += '\n\n' + footnoteBlock + '\n';
-          }
-          if (processed.bibliography.length > 0) {
-            const bibBlock =
-              '\n\n# Bibliographie\n\n' +
-              processed.bibliography.map((b) => `- ${b}`).join('\n') +
-              '\n';
-            cleanedContent += bibBlock;
-          }
+          cleanedContent = appendEngineCitations(processed.md, processed, referenceSectionTitle());
+          for (const key of processed.missingKeys) unresolved.add(key);
           useEnginePipeline = true;
           console.log(
             `📚 CitationEngine: ${processed.footnotes.length} footnote(s), ${processed.bibliography.length} bib entries`
@@ -1043,6 +1063,13 @@ export class PDFExportService {
         tempDir
       );
       resourceLinks = resources.links;
+
+      // Ni moteur ni bibliographie : pandoc imprime les `[@clé]` telles quelles, sans un mot (le
+      // Word les nomme déjà). Les `@clé` nues restent ce qu'elles sont : sans bibliographie, rien
+      // ne les distingue d'un pseudonyme.
+      if (!useEnginePipeline && !bibPath && !citedByChapter) {
+        for (const key of citationKeysIn(cleanedContent)) unresolved.add(key);
+      }
 
       const cslAvailable = !!options.cslPath && (await pathExists(options.cslPath));
       const pandocArgs = buildPandocArgs({
@@ -1121,12 +1148,18 @@ export class PDFExportService {
         ...missingImagesWarnings(pandocMissingResources(pandocStderr)),
       ];
       if (warnings.length > 0) console.warn('⚠️ pdf-export: réserves :', warnings);
+      // Quand citeproc a tourné sur tout le document, il dit sur sa sortie d'erreur les clés qu'il
+      // n'a pas trouvées, et les imprime en gras suivies d'un « ? ».
+      for (const key of pandocUnresolvedCitations(pandocStderr)) unresolved.add(key);
+      const unresolvedCitations = [...unresolved];
+      if (unresolvedCitations.length > 0) console.warn('⚠️ pdf-export: citations introuvables :', unresolvedCitations);
 
       console.log('✅ PDF exported successfully:', outputPath);
       return {
         success: true,
         outputPath,
         ...(missingCsl ? { missingCsl } : {}),
+        ...(unresolvedCitations.length > 0 ? { unresolvedCitations } : {}),
         ...(warnings.length > 0 ? { warnings } : {}),
       };
     } catch (error: unknown) {

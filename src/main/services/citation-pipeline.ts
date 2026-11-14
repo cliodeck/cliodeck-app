@@ -135,6 +135,30 @@ export function cslHtmlToMarkdown(html: string): string {
     .trim();
 }
 
+/**
+ * Les notes et la bibliographie du moteur, ajoutées en fin de markdown pour pandoc. citeproc les
+ * rend en HTML (`<i>Titre</i>`, `<div class="csl-entry">`) : recopiées telles quelles, pandoc les
+ * lisait comme des balises brutes, que l'écrivain LaTeX supprime, et aucun titre d'ouvrage ne
+ * sortait en italique (S12-1-7). La bibliographie prend le titre donné, sans numéro comme celle
+ * que pandoc titre lui-même, une référence par paragraphe.
+ */
+export function appendEngineCitations(
+  md: string,
+  processed: Pick<ProcessedCitations, 'footnotes' | 'bibliography'>,
+  sectionTitle: string
+): string {
+  let out = md;
+  if (processed.footnotes.length > 0) {
+    out +=
+      '\n\n' + processed.footnotes.map((fn) => `[^${fn.n}]: ${cslHtmlToMarkdown(fn.text)}`).join('\n\n') + '\n';
+  }
+  if (processed.bibliography.length > 0) {
+    out +=
+      `\n\n# ${sectionTitle} {.unnumbered}\n\n` + processed.bibliography.map(cslHtmlToMarkdown).join('\n\n') + '\n';
+  }
+  return out;
+}
+
 /** Nom d'auteur pour une citation narrative (« Farge[^1] »). */
 function narrativeName(item: CSLItem, locale: string): string {
   const names = (item.author?.length ? item.author : item.editor ?? [])

@@ -13,9 +13,11 @@ import {
   buildBeamerCustomizations,
   buildPandocArgs,
   computeSecnumdepth,
+  demoteChapterBibliographyHeading,
   missingImagesWarnings,
   pandocImageFailure,
   pandocMissingResources,
+  pandocUnresolvedCitations,
   projectResourcePaths,
   resolveBibliographyMode,
   resolveBookSettings,
@@ -400,6 +402,21 @@ describe('buildPandocArgs — bibliographie', () => {
     expect(args).toContain('reference-section-title=Références');
   });
 
+  /**
+   * S12-1-11 : le titre n'était passé que sans CSL. Pandoc n'en écrit un que si la métadonnée
+   * existe : avec le style du projet, cas courant, la bibliographie suivait le dernier paragraphe
+   * sans intitulé.
+   */
+  it('titre la bibliographie avec le style du projet aussi', () => {
+    const args = buildPandocArgs({
+      ...BASE,
+      bibPath: '/tmp/w/bibliography.bib',
+      cslPath: '/styles/chicago.csl',
+      cslAvailable: true,
+    });
+    expect(args).toContain('reference-section-title=Références');
+  });
+
   it('se tait quand CitationEngine a déjà tout inséré', () => {
     // Les notes et la bibliographie sont déjà du markdown : une seconde
     // passe citeproc n'ajouterait qu'une bibliographie vide.
@@ -469,5 +486,52 @@ describe('buildBeamerCustomizations — notes du présentateur', () => {
     expect(variable(avec, 'classoption')).toBe('handout');
     const sans = buildPandocArgs({ ...BASE, projectType: 'presentation', beamerConfig: { showNotes: false } });
     expect(variable(sans, 'classoption')).toBeUndefined();
+  });
+});
+
+/**
+ * Bibliographie par chapitre (S12-1-11) : citeproc tourne sur chaque chapitre, et pandoc écrit le
+ * titre de sa bibliographie en titre de niveau 1 (`# Références {#bibliography .unnumbered}`,
+ * pandoc 3.13). Dans le livre assemblé, ce `#` ouvrait un chapitre de plus après chaque chapitre :
+ * il descend d'un niveau, sous le chapitre qu'il clôt.
+ */
+describe('demoteChapterBibliographyHeading', () => {
+  const chapter = [
+    '# Ouverture',
+    '',
+    'Texte (Farge 2013).',
+    '',
+    '# Références {#bibliography .unnumbered}',
+    '',
+    ':::: {#refs .references .csl-bib-body .hanging-indent}',
+    '::: {#ref-Farge_2013 .csl-entry}',
+    'Farge, Arlette. 2013. *The Allure of the Archives*. Yale University Press.',
+    ':::',
+    '::::',
+    '',
+  ].join('\n');
+
+  it('le titre de la bibliographie devient une section du chapitre, sans numéro', () => {
+    const out = demoteChapterBibliographyHeading(chapter);
+    expect(out.match(/^# /gm)).toEqual(['# ']);
+    expect(out).toContain('\n## Références {.unnumbered}\n');
+    expect(out.replace('\n## Références {.unnumbered}\n', '\n# Références {#bibliography .unnumbered}\n')).toBe(chapter);
+  });
+
+  it('les titres de l’auteur restent ce qu’ils sont', () => {
+    const md = '# Chapitre {#bibliography}\n\n## Sources {.unnumbered}\n\nTexte.\n';
+    expect(demoteChapterBibliographyHeading(md)).toBe(md);
+  });
+});
+
+describe('pandocUnresolvedCitations', () => {
+  it('relève chaque clé que citeproc dit introuvable, une fois', () => {
+    const stderr = [
+      '[WARNING] Citeproc: citation Dupnt_2020 not found',
+      '[WARNING] Could not fetch resource images/plan.png: replacing image with description',
+      '[WARNING] Citeproc: citation Dupnt_2020 not found',
+      '[WARNING] Citeproc: citation inconnu:2019 not found',
+    ].join('\n');
+    expect(pandocUnresolvedCitations(stderr)).toEqual(['Dupnt_2020', 'inconnu:2019']);
   });
 });

@@ -43,6 +43,7 @@ import {
 import {
   missingImagesWarnings,
   pandocMissingResources,
+  pandocUnresolvedCitations,
   projectResourcePaths,
   resolveBookSettings,
   referenceSectionTitle,
@@ -176,12 +177,8 @@ export function splitAbstract(content: string): { heading?: string; body: string
   return { heading: m[1].trim() || undefined, body: content.slice(m[0].length).trim() };
 }
 
-/** Clés que citeproc (pandoc) signale introuvables sur sa sortie d'erreur. */
-export function pandocUnresolvedCitations(stderr: string): string[] {
-  const keys = new Set<string>();
-  for (const m of stderr.matchAll(/citation (\S+) not found/g)) keys.add(m[1]);
-  return [...keys];
-}
+/** Vit avec les autres lectures de la sortie de pandoc, que l'export PDF partage. */
+export { pandocUnresolvedCitations };
 
 const CONTENT_TYPES_PART = '[Content_Types].xml';
 const TEMPLATE_MAIN_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml';
