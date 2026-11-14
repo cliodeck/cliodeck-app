@@ -24,8 +24,13 @@
  * pour CommonMark, il est dans le bloc HTML, et la note s'imprimait sur la diapositive (seconde
  * revue de L10-3). Elle reste privée.
  *
- * reveal.js est chargé depuis son CDN : sans réseau, le test est sauté. C'est le seul test qui
- * passe par le vrai plugin : à relancer si `REVEAL_VERSION` change.
+ * reveal.js est inclus dans la page (L09-12), du cache de l'app ou, la première fois, de son CDN :
+ * le premier export d'un userData neuf demande le réseau, et le test est sauté si l'export le dit
+ * (`presentation.assetsUnavailable`). Il ne sonde plus le CDN à part : une sonde de 5 s l'a fait
+ * sauter deux fois alors que le CDN répondait. Le second export se fait sans réseau, côté main
+ * (`fetch` qui échoue) comme côté Chromium (fenêtre hors ligne) : le cache suffit, et la page
+ * d'impression ne charge plus rien du dehors. C'est le seul test qui passe par le vrai plugin, et
+ * par la vraie attente de la mise en pages (`pdf-ready`) : à relancer si `REVEAL_VERSION` change.
  */
 
 import { test, expect } from '@playwright/test';
@@ -48,30 +53,22 @@ const DECK = [
   '## Colonnes\n\n<div class="colonnes">\n\nTexte en colonnes.\n\n</div>\nNote: NOTEAPRESDIV à ne pas projeter.',
 ].join('\n\n---\n\n');
 
+type ExportResponse = {
+  success: boolean;
+  outputPath?: string;
+  error?: string;
+  errorCode?: string;
+  warnings?: unknown[];
+};
+
 type ExportBridge = {
   electron: {
-    revealJsExport: {
-      exportPDF: (options: object) => Promise<{ success: boolean; outputPath?: string; error?: string }>;
-    };
+    revealJsExport: { exportPDF: (options: object) => Promise<ExportResponse> };
     pdf: { extractMetadata: (filePath: string) => Promise<unknown> };
   };
 };
 
-async function cdnReachable(): Promise<boolean> {
-  try {
-    const response = await fetch('https://cdn.jsdelivr.net/', {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(5_000),
-    });
-    return response.status < 500;
-  } catch {
-    return false;
-  }
-}
-
-test('l’export PDF d’une présentation rend une page par diapositive', async () => {
-  test.skip(!(await cdnReachable()), 'CDN de reveal.js injoignable : export PDF non vérifiable hors ligne.');
-
+test('l’export PDF d’une présentation rend une page par diapositive, hors ligne compris', async () => {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {
     test.skip(true, outcome.reason);
@@ -81,8 +78,8 @@ test('l’export PDF d’une présentation rend une page par diapositive', async
   const outDir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-diapos-'));
   const outputPath = join(outDir, "Séminaire d'histoire", 'S&P présentation.pdf');
 
-  try {
-    const result = await window.evaluate(
+  const exportPdf = () =>
+    window.evaluate(
       (options) => (window as unknown as ExportBridge).electron.revealJsExport.exportPDF(options),
       {
         projectPath: join(outDir, 'project.json'),
@@ -91,9 +88,9 @@ test('l’export PDF d’une présentation rend une page par diapositive', async
         metadata: { title: 'Présentation E2E' },
       },
     );
-    expect(result.error).toBeUndefined();
-    expect(result.success).toBe(true);
 
+  /** Le PDF relu : une diapositive par page, code entier, notes absentes. */
+  const expectSlides = async () => {
     // Le PDF est relu par le worker d'extraction de l'application : une
     // diapositive par page, ni plus (pages vides) ni moins (diapositives perdues).
     const response = await window.evaluate(
@@ -104,6 +101,9 @@ test('l’export PDF d’une présentation rend une page par diapositive', async
     const metadata = payload.metadata ?? (payload as { pageCount?: number });
     if (pdftotextAvailable()) {
       const text = execFileSync('pdftotext', [outputPath, '-'], { encoding: 'utf8', env: toolEnv() });
+      // reveal.js a mis la page en forme : le titre est un titre, pas une ligne `# …` brute.
+      expect(text).toMatch(/Les archives et la\s+machine/);
+      expect(text).not.toContain('# Les archives');
       expect(text).not.toContain('VRAIENOTE');
       expect(text).toContain('Note: CODENOTE dans le code');
       expect(text).toContain('Suite du texte visible.');
@@ -116,6 +116,37 @@ test('l’export PDF d’une présentation rend une page par diapositive', async
       expect(text).not.toMatch(/NOTEAPRES|Note: NOTE/);
     }
     expect(metadata.pageCount).toBe(7);
+  };
+
+  try {
+    const first = await exportPdf();
+    test.skip(
+      first.errorCode === 'presentation.assetsUnavailable',
+      'reveal.js ni en cache ni téléchargeable : premier export PDF non vérifiable hors ligne.',
+    );
+    expect(first.error).toBeUndefined();
+    expect(first).toMatchObject({ success: true });
+    expect(first.warnings).toBeUndefined();
+    await expectSlides();
+
+    // Plus de réseau : le main ne télécharge plus rien, la fenêtre d'impression non plus. Toute
+    // requête http(s) de la session est annulée : `enableNetworkEmulation({ offline: true })` ne
+    // vaut que pour les pages déjà ouvertes, et la fenêtre d'impression, créée après, atteignait
+    // encore le CDN (mesuré).
+    rmSync(outputPath);
+    await app.evaluate(async ({ session }) => {
+      (globalThis as { fetch: typeof fetch }).fetch = async () => {
+        throw new TypeError('fetch failed (e2e : hors ligne)');
+      };
+      session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) =>
+        callback({ cancel: true }),
+      );
+    });
+
+    const offline = await exportPdf();
+    expect(offline.error).toBeUndefined();
+    expect(offline).toMatchObject({ success: true });
+    await expectSlides();
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });

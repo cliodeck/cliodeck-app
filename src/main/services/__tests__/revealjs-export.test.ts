@@ -5,21 +5,54 @@
  * avec ancres de synchro data-aslide.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+/**
+ * La fenêtre cachée de l'export PDF, simulée : Chromium n'imprime pas sous Vitest. Elle garde le
+ * HTML qu'on lui fait charger, et répond à la sonde de mise en page ce que le test lui dicte
+ * (`probe`). Le vrai reveal.js dans le vrai Chromium : `e2e/journey-presentation-pdf.spec.ts`.
+ */
+const browser = vi.hoisted(() => ({
+  userData: '/tmp',
+  loadedHtml: '',
+  probe: (): unknown => 'ready',
+  printed: 0,
+  windows: 0,
+}));
+
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp') },
+  app: { getPath: vi.fn(() => browser.userData) },
   // L'export HTML ouvre le fichier écrit dans le navigateur : rien à ouvrir sous Vitest.
   shell: { openPath: async () => '' },
-  BrowserWindow: class {},
+  BrowserWindow: class {
+    constructor() {
+      browser.windows++;
+    }
+    webContents = {
+      executeJavaScript: async () => browser.probe(),
+      printToPDF: async () => {
+        browser.printed++;
+        return Buffer.from('%PDF-1.4\n');
+      },
+    };
+    async loadFile(file: string) {
+      browser.loadedHtml = readFileSync(file, 'utf-8');
+    }
+    isDestroyed() {
+      return false;
+    }
+    destroy() {}
+    close() {}
+  },
 }));
 
 import {
   extractDeck,
   generatePreviewHtml,
   resolveDeckConfig,
+  RevealJsExportService,
   revealJsExportService,
   type RevealJsExportOptions,
 } from '../revealjs-export.js';
@@ -343,5 +376,138 @@ describe('découpage hors blocs de code : export HTML, tel que le navigateur le 
       'n-sous',
     ]);
     for (const s of slides) expect(s.slide).not.toMatch(/VRAIENOTE|n-ouverture|n-sous|Rappeler/);
+  });
+});
+
+/**
+ * S12-1-18 : l'export PDF chargeait reveal.js depuis le CDN, attendait 2,5 s à l'aveugle, puis
+ * imprimait ce qui était affiché. Hors ligne, la page n'était qu'un empilement de `<textarea>` de
+ * markdown brut, imprimé, et l'export annoncé réussi ; sur un réseau qui ne répond pas, la fenêtre
+ * restait bloquée sur les scripts jusqu'à la limite de l'export.
+ */
+describe('export PDF : reveal.js depuis le cache, mise en page attendue (S12-1-18)', () => {
+  let dir = '';
+  const SCRIPT = (url: string) => `/* ${url.split('/').pop()} */`;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cliodeck-reveal-pdf-'));
+    browser.userData = join(dir, 'userData');
+    browser.loadedHtml = '';
+    browser.probe = () => 'ready';
+    browser.printed = 0;
+    browser.windows = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(SCRIPT(url), { headers: { 'content-type': 'application/javascript' } })));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const deck = (content = '# Une\n\n---\n\n## Deux\n') => ({
+    projectPath: join(dir, 'project.json'),
+    content,
+    outputPath: join(dir, 'diapos.pdf'),
+  });
+
+  it('le HTML chargé ne dépend pas du CDN : reveal.js et ses greffons y sont inclus', async () => {
+    const result = await new RevealJsExportService().exportToPDF(deck());
+
+    expect(result, result.error).toMatchObject({ success: true, outputPath: join(dir, 'diapos.pdf') });
+    expect(browser.loadedHtml).not.toContain('cdn.jsdelivr.net');
+    expect(browser.loadedHtml).toContain('/* reveal.js */');
+    expect(browser.loadedHtml).toContain('/* markdown.js */');
+    expect(browser.printed).toBe(1);
+  });
+
+  it('sans réseau, après un premier export : le cache suffit', async () => {
+    const service = new RevealJsExportService();
+    expect((await service.exportToPDF(deck())).success).toBe(true);
+
+    const offline = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    vi.stubGlobal('fetch', offline);
+    const result = await service.exportToPDF(deck());
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(offline).not.toHaveBeenCalled();
+    expect(browser.loadedHtml).toContain('/* reveal.js */');
+  });
+
+  it('sans réseau ni cache : l’échec le dit, et aucun PDF n’est écrit', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    }));
+
+    const result = await new RevealJsExportService().exportToPDF(deck());
+
+    expect(result).toMatchObject({ success: false, errorCode: 'presentation.assetsUnavailable' });
+    expect(browser.windows).toBe(0);
+    expect(existsSync(join(dir, 'diapos.pdf'))).toBe(false);
+  });
+
+  it('une page de portail Wi-Fi au lieu du script : refusée, jamais mise en cache', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>Connectez-vous</html>', { headers: { 'content-type': 'text/html' } })));
+    const service = new RevealJsExportService();
+
+    const result = await service.exportToPDF(deck());
+
+    expect(result).toMatchObject({ success: false, errorCode: 'presentation.assetsUnavailable' });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(SCRIPT(url), { headers: { 'content-type': 'text/css' } })));
+    expect((await service.exportToPDF(deck())).success).toBe(true);
+    expect(browser.loadedHtml).not.toContain('Connectez-vous');
+  });
+
+  it('un réseau qui ne répond jamais : l’attente est bornée, puis l’échec le dit', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      })
+    ));
+
+    const result = await new RevealJsExportService({ assetTimeoutMs: 200 }).exportToPDF(deck());
+
+    expect(result).toMatchObject({ success: false, errorCode: 'presentation.assetsUnavailable' });
+    expect(browser.windows).toBe(0);
+  });
+
+  it('reveal.js jamais prêt : échec dit au bout du délai, rien d’imprimé', async () => {
+    browser.probe = () => 'pending';
+
+    const result = await new RevealJsExportService({ renderTimeoutMs: 300 }).exportToPDF(deck());
+
+    expect(result).toMatchObject({ success: false, errorCode: 'presentation.notRendered' });
+    expect(browser.printed).toBe(0);
+    expect(existsSync(join(dir, 'diapos.pdf'))).toBe(false);
+  });
+
+  it(
+    'reveal.js absent de la page : échec sans attendre le délai',
+    async () => {
+      browser.probe = () => 'no-reveal';
+
+      const result = await new RevealJsExportService({ renderTimeoutMs: 600_000 }).exportToPDF(deck());
+
+      expect(result).toMatchObject({ success: false, errorCode: 'presentation.notRendered' });
+      expect(browser.printed).toBe(0);
+    },
+    20_000
+  );
+
+  it('des formules que KaTeX, chargé du réseau, n’a pas rendues : le PDF sort, avec la réserve', async () => {
+    browser.probe = () => 'math-failed';
+
+    const result = await new RevealJsExportService().exportToPDF(deck('# Loi\n\n$E = mc^2$\n'));
+
+    expect(result).toMatchObject({ success: true, warnings: [{ code: 'presentation.mathNotRendered' }] });
+    expect(browser.loadedHtml).toContain('/* math.js */');
+    expect(browser.printed).toBe(1);
+  });
+
+  it('sans formule, aucune réserve ni greffon de formules', async () => {
+    const result = await new RevealJsExportService().exportToPDF(deck());
+
+    expect(result.warnings).toBeUndefined();
+    expect(browser.loadedHtml).not.toContain('/* math.js */');
   });
 });

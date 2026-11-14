@@ -2707,6 +2707,11 @@
         "imagesNotEmbedded_one": "Image non insérée, remplacée par sa légende : {{files}}. Le générateur Word de ClioDeck, employé quand le projet n'a pas de bibliographie ou que Pandoc manque, ne sait pas insérer d'image.",
         "imagesNotEmbedded_other": "Images non insérées, remplacées par leur légende : {{files}}. Le générateur Word de ClioDeck, employé quand le projet n'a pas de bibliographie ou que Pandoc manque, ne sait pas insérer d'image."
       }
+    },
+    "presentation": {
+      "assetsUnavailable": "Les fichiers de reveal.js n'ont pas pu être téléchargés, et l'export de la présentation en a besoin. Ils se téléchargent une fois, au premier export PDF ou HTML autonome, puis restent sur cet ordinateur. Vérifiez la connexion à Internet, puis relancez l'export.",
+      "notRendered": "La présentation n'a pas pu être mise en pages pour l'impression : aucun PDF n'a été écrit. Relancez l'export ; si l'échec revient, exportez-la en HTML autonome.",
+      "mathNotRendered": "Les formules de la présentation ne sont pas mises en forme dans le PDF : leur rendu (KaTeX) se télécharge depuis Internet, qui n'a pas répondu. Elles apparaissent telles qu'écrites. Reconnectez-vous, puis relancez l'export pour les mettre en forme."
     }
   }
 }

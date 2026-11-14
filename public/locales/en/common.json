@@ -2707,6 +2707,11 @@
         "imagesNotEmbedded_one": "Image not inserted, replaced by its caption: {{files}}. ClioDeck's own Word generator, used when the project has no bibliography or Pandoc is missing, cannot insert images.",
         "imagesNotEmbedded_other": "Images not inserted, replaced by their captions: {{files}}. ClioDeck's own Word generator, used when the project has no bibliography or Pandoc is missing, cannot insert images."
       }
+    },
+    "presentation": {
+      "assetsUnavailable": "The reveal.js files could not be downloaded, and the presentation export needs them. They are downloaded once, at the first PDF or self-contained HTML export, then kept on this computer. Check the Internet connection, then run the export again.",
+      "notRendered": "The presentation could not be laid out for printing: no PDF was written. Run the export again; if it fails again, export it as self-contained HTML.",
+      "mathNotRendered": "The formulas of the presentation are not formatted in the PDF: their renderer (KaTeX) is downloaded from the Internet, which did not respond. They appear as written. Reconnect, then run the export again to format them."
     }
   }
 }

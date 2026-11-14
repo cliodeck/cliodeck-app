@@ -131,6 +131,8 @@ vi.mock('electron', () => ({
     destroyed = false;
     closed = false;
     webContents = {
+      // La sonde de mise en page (L09-12) : reveal.js a posé ses pages.
+      executeJavaScript: () => Promise.resolve('ready'),
       printToPDF: () => {
         presentation.printing = true;
         return presentation.printToPDF();
@@ -1135,6 +1137,11 @@ describe('export de présentation', () => {
     projectPath: project,
     content: '# Une diapositive\n\nTexte.\n',
     outputPath: join(project, 'diapos.pdf'),
+  });
+
+  // L'export PDF inclut reveal.js dans la page depuis L09-12 : jamais le vrai réseau ici.
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('/* asset */')));
   });
 
   it(

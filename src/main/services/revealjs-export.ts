@@ -1,4 +1,4 @@
-import { writeFile, readFile, mkdir, access, rm } from 'fs/promises';
+import { writeFile, readFile, mkdir, rm } from 'fs/promises';
 import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { app, BrowserWindow, shell } from 'electron';
@@ -12,11 +12,14 @@ import {
 } from '../../editor/slides.js';
 import { refuseMarkdownOutput } from './export-output-path.js';
 import {
+  pathExists,
   withExportTimeLimit,
   type ExportClock,
   type ExportLimits,
   type ExportResult,
 } from './export-time-limit.js';
+import { atomicWriteFile } from '../../../backend/core/fs/user-files.js';
+import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 
 // Rendu markdown des slides de la preview : même famille de grammaire que le
 // plugin markdown de reveal.js (qui embarque marked) — la preview et l'export
@@ -64,6 +67,14 @@ const getAllCdnAssets = (theme: string, options?: { includeMath?: boolean }): Cd
   ...getCssAssets(theme),
   ...getJsAssets(options),
 ];
+
+/**
+ * Le deck a-t-il des formules (`$…$`, `$$…$$`, `\(…\)`, `\[…\]`) ? Lu sur le corps : le
+ * frontmatter n'est pas du contenu.
+ */
+function deckUsesMath(body: string): boolean {
+  return /(\$\$.+?\$\$|\$[^$\n]+\$|\\\(.+?\\\)|\\\[.+?\\\])/s.test(body);
+}
 
 // MARK: - Types
 
@@ -380,7 +391,25 @@ export function resolveDeckConfig(
   };
 }
 
-const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inlinedAssets?: Map<string, string>): string => {
+/**
+ * Les marques que pose la page d'impression (export PDF), et que lit la sonde du main
+ * (`printLayoutProbe`) : reveal.js a fini de poser les pages (`pdf-ready`), KaTeX n'a pas pu se
+ * charger.
+ */
+const PDF_READY_ATTR = 'data-cliodeck-pdf-ready';
+const MATH_FAILED_ATTR = 'data-cliodeck-math-failed';
+
+/**
+ * Le HTML d'une présentation. `inlinedAssets` : les fichiers de reveal.js, inclus dans la page au
+ * lieu d'être chargés du CDN (export hors ligne et PDF). `print` : la page que l'export PDF imprime,
+ * en mode impression de reveal.js, avec les marques que lit la sonde.
+ */
+const getRevealJsHTML = (
+  content: string,
+  options: RevealJsExportOptions,
+  inlinedAssets?: Map<string, string>,
+  print = false
+): string => {
   const config = options.config || {};
 
   const { body, deck } = extractDeck(content);
@@ -433,9 +462,9 @@ const getRevealJsHTML = (content: string, options: RevealJsExportOptions, inline
     viewDistance: config.viewDistance || 3,
   };
 
-  // Detect whether content uses math ($ delimiters or \( \[ ) — sur le corps,
-  // le frontmatter n'est pas du contenu.
-  const usesMath = !inlinedAssets && /(\$\$.+?\$\$|\$[^$\n]+\$|\\\(.+?\\\)|\\\[.+?\\\])/s.test(body);
+  // Formules : le greffon math, qui charge KaTeX du réseau au rendu. Exclu de l'export hors ligne,
+  // où KaTeX manquerait ; gardé pour le PDF, qui attend KaTeX un temps borné et dit s'il manque.
+  const usesMath = (print || !inlinedAssets) && deckUsesMath(body);
 
   // Build CSS tags (for <head>)
   const theme = resolved.theme;
@@ -490,7 +519,7 @@ ${cssTags}
     .reveal .author-info { margin-top: 2rem; font-size: 0.8em; opacity: 0.8; }
   </style>
 </head>
-<body>
+<body${print ? ' class="reveal-viewport"' : ''}>
   <div class="reveal">
     <div class="slides">
 ${slidesHTML}
@@ -511,11 +540,91 @@ ${jsTags}
       plugins: plugins
     });
   </script>
+${print ? printMarksScript() : ''}
 </body>
 </html>`;
 };
 
+/**
+ * Le script de la page d'impression : il note la fin de la mise en page de reveal.js (`pdf-ready`,
+ * que reveal.js émet une fois les pages posées, après `isReady()`) et l'échec du chargement de
+ * KaTeX. Une ressource qui ne se charge pas émet `error` sur son élément, sans remonter : seule une
+ * écoute en capture, sur la fenêtre, la voit.
+ */
+function printMarksScript(): string {
+  return `  <script>
+    (function () {
+      var root = document.documentElement;
+      window.addEventListener('error', function (event) {
+        var target = event.target;
+        var source = target && (target.src || target.href);
+        if (typeof source === 'string' && source.indexOf('katex') !== -1) root.setAttribute('${MATH_FAILED_ATTR}', '');
+      }, true);
+      if (typeof Reveal !== 'undefined') {
+        Reveal.on('pdf-ready', function () { root.setAttribute('${PDF_READY_ATTR}', ''); });
+      }
+    })();
+  </script>`;
+}
+
+/**
+ * La sonde de la mise en page d'impression, évaluée dans la fenêtre cachée. `no-reveal` : le
+ * script de reveal.js n'a pas tourné (rien à attendre) ; `pending` : pas encore mise en pages ;
+ * `math-pending` / `math-failed` : pages posées, formules pas encore rendues, ou KaTeX introuvable.
+ * KaTeX rend les formules dès qu'il est chargé (`renderMathInElement`, qu'il définit alors).
+ */
+function printLayoutProbe(math: boolean): string {
+  return `(() => {
+    if (typeof Reveal === 'undefined') return 'no-reveal';
+    const root = document.documentElement;
+    if (!Reveal.isReady() || !root.hasAttribute('${PDF_READY_ATTR}')) return 'pending';
+    if (${math} && typeof window.renderMathInElement !== 'function') {
+      return root.hasAttribute('${MATH_FAILED_ATTR}') ? 'math-failed' : 'math-pending';
+    }
+    return 'ready';
+  })()`;
+}
+
+/** Les fichiers de reveal.js n'ont pu venir ni du cache ni du réseau. */
+class AssetsUnavailableError extends Error {
+  readonly code = 'presentation.assetsUnavailable';
+
+  constructor(cause: unknown) {
+    super(`Fichiers de reveal.js indisponibles : ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = 'AssetsUnavailableError';
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** `work`, ou `fallback` s'il n'a pas répondu dans `ms` (ou s'il a échoué). */
+function settleWithin<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    );
+  });
+}
+
 // MARK: - Service
+
+/** Un échec d'export de présentation : les fichiers de reveal.js manquants se disent par leur code. */
+function failureOf(error: unknown): ExportResult {
+  const message = error instanceof Error ? error.message : String(error);
+  return error instanceof AssetsUnavailableError
+    ? { success: false, error: message, errorCode: error.code }
+    : { success: false, error: message };
+}
 
 /**
  * Chemin où écrire l'export : celui de la fenêtre, résolu contre le projet (un chemin
@@ -527,7 +636,31 @@ function outputPathIn(options: RevealJsExportOptions, suffix: string): string {
     : join(dirname(options.projectPath), `${options.metadata?.title || 'presentation'}${suffix}`);
 }
 
+/**
+ * Les deux attentes bornées des exports PDF et hors ligne (L09-12). Mesurées sur un Mac M-series
+ * (voir la PR) ; la marge couvre un réseau lent et un Mac ancien. Un dépassement est un échec dit,
+ * jamais une attente sans sortie, et reste sous la limite de l'export (`export-time-limit.ts`).
+ */
+export interface RevealJsWaits {
+  /** Le téléchargement d'un fichier de reveal.js, quand il n'est pas en cache. */
+  assetTimeoutMs?: number;
+  /** La mise en pages d'impression, une fois la page chargée. */
+  renderTimeoutMs?: number;
+}
+
+const ASSET_TIMEOUT_MS = 30_000;
+const RENDER_TIMEOUT_MS = 30_000;
+const PROBE_INTERVAL_MS = 100;
+
 export class RevealJsExportService {
+  private readonly assetTimeoutMs: number;
+  private readonly renderTimeoutMs: number;
+
+  constructor(waits: RevealJsWaits = {}) {
+    this.assetTimeoutMs = waits.assetTimeoutMs ?? ASSET_TIMEOUT_MS;
+    this.renderTimeoutMs = waits.renderTimeoutMs ?? RENDER_TIMEOUT_MS;
+  }
+
   /**
    * Export markdown to reveal.js HTML presentation
    */
@@ -609,25 +742,73 @@ export class RevealJsExportService {
   // ─── Offline Export ───────────────────────────────────────────────────────
 
   /**
-   * Fetches a CDN asset, caching it in userData for subsequent uses.
+   * Un fichier de reveal.js : du cache (userData), sinon du CDN, puis mis en cache. Le premier
+   * export PDF ou hors ligne demande le réseau ; les suivants s'en passent.
    */
   private async fetchAsset(url: string, cacheDir: string): Promise<string> {
     // Derive a safe filename from the URL path
     const key = url.replace(/https?:\/\/[^/]+\//, '').replace(/\//g, '__');
     const cachePath = join(cacheDir, key);
 
-    try {
-      await access(cachePath);
-      return readFile(cachePath, 'utf-8');
-    } catch {
-      // Not cached yet — fetch
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
-      const text = await response.text();
-      await mkdir(cacheDir, { recursive: true });
-      await writeFile(cachePath, text, 'utf-8');
-      return text;
+    if (await pathExists(cachePath)) return readFile(cachePath, 'utf-8');
+
+    // Borné : un réseau qui ne répond pas (pare-feu, connexion qui tombe) faisait attendre
+    // l'export jusqu'à sa limite.
+    const response = await fetch(url, { signal: AbortSignal.timeout(this.assetTimeoutMs) });
+    if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+    // Un portail Wi-Fi répond 200 avec sa page de connexion : en cache, elle remplacerait
+    // reveal.js pour tous les exports suivants.
+    if (/text\/html/i.test(response.headers.get('content-type') ?? '')) {
+      throw new Error(`Failed to fetch ${url}: page HTML reçue au lieu du fichier`);
     }
+    const text = await response.text();
+    await mkdir(cacheDir, { recursive: true });
+    await atomicWriteFile(cachePath, text);
+    return text;
+  }
+
+  /** Les fichiers de reveal.js, à inclure dans la page ; `AssetsUnavailableError` s'il en manque un. */
+  private async inlineAssets(assets: CdnAsset[], clock: ExportClock): Promise<Map<string, string>> {
+    const cacheDir = join(app.getPath('userData'), 'reveal-assets-cache');
+    const fetched = Promise.all(assets.map((a) => this.fetchAsset(a.url, cacheDir))).catch(
+      (error: unknown) => {
+        throw new AssetsUnavailableError(error);
+      }
+    );
+    const contents = await clock.run(fetched);
+    return new Map(assets.map((a, i) => [a.url, contents[i]]));
+  }
+
+  /**
+   * Attend que reveal.js ait mis la présentation en pages d'impression, au plus `renderTimeoutMs`
+   * après le chargement de la page. `Reveal.isReady()` ne suffit pas : il précède la mise en pages,
+   * que reveal.js annonce par `pdf-ready`. Imprimer plus tôt, c'était imprimer des `<textarea>` de
+   * markdown brut quand reveal.js ne s'était pas chargé, ou une page à moitié posée (S12-1-18).
+   *
+   * Rend `ready`, `math-missing` (pages posées, formules non rendues : KaTeX vient du réseau),
+   * `no-reveal` (le script de reveal.js n'a pas tourné : inutile d'attendre) ou `timed-out`.
+   */
+  private async waitForPrintLayout(
+    win: BrowserWindow,
+    math: boolean,
+    clock: ExportClock
+  ): Promise<'ready' | 'math-missing' | 'no-reveal' | 'timed-out'> {
+    const started = Date.now();
+    const deadline = started + this.renderTimeoutMs;
+    const probe = printLayoutProbe(math);
+    let state: unknown = 'pending';
+    for (let left = this.renderTimeoutMs; left > 0; left = deadline - Date.now()) {
+      // Une page bloquée ne répond pas à la sonde : chaque appel est borné lui aussi.
+      state = await clock.run(settleWithin<unknown>(win.webContents.executeJavaScript(probe), left, 'pending'));
+      if (state === 'ready') {
+        console.log(`⏱ reveal.js : présentation mise en pages en ${Date.now() - started} ms`);
+        return 'ready';
+      }
+      if (state === 'math-failed') return 'math-missing';
+      if (state === 'no-reveal') return 'no-reveal';
+      await clock.run(delay(Math.min(PROBE_INTERVAL_MS, Math.max(0, deadline - Date.now()))));
+    }
+    return state === 'math-pending' ? 'math-missing' : 'timed-out';
   }
 
   /**
@@ -653,20 +834,11 @@ export class RevealJsExportService {
     try {
       onProgress?.({ stage: 'preparing', message: 'Téléchargement des assets reveal.js...', progress: 10 });
 
-      const cacheDir = join(app.getPath('userData'), 'reveal-assets-cache');
       // Thème effectif (frontmatter > reveal-config) — les assets inlinés
       // doivent correspondre au thème réellement rendu.
       const theme = resolveDeckConfig(options.content, options).theme;
       // Exclude math plugin from offline — KaTeX loads external CDN resources at runtime
-      const assets = getAllCdnAssets(theme, { includeMath: false });
-
-      // Fetch all assets (parallelized)
-      const contents = await clock.run(Promise.all(
-        assets.map((a) => this.fetchAsset(a.url, cacheDir))
-      ));
-
-      const inlinedAssets = new Map<string, string>();
-      assets.forEach((a, i) => inlinedAssets.set(a.url, contents[i]));
+      const inlinedAssets = await this.inlineAssets(getAllCdnAssets(theme, { includeMath: false }), clock);
 
       onProgress?.({ stage: 'converting', message: 'Génération HTML offline...', progress: 70 });
 
@@ -682,7 +854,7 @@ export class RevealJsExportService {
       return { success: true, outputPath };
     } catch (error: unknown) {
       console.error('❌ Offline export failed:', error);
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+      return failureOf(error);
     }
   }
 
@@ -717,8 +889,13 @@ export class RevealJsExportService {
     try {
       onProgress?.({ stage: 'preparing', message: 'Préparation HTML pour impression...', progress: 15 });
 
-      const html = getRevealJsHTML(options.content, options)
-        .replace('<body>', '<body class="reveal-viewport">');
+      // reveal.js inclus dans la page, du cache ou du réseau, comme l'export hors ligne : chargé du
+      // CDN par la fenêtre, il manquait hors ligne, et la page imprimée n'était que du markdown
+      // brut ; sur un réseau qui ne répond pas, la fenêtre attendait ses scripts sans fin.
+      const theme = resolveDeckConfig(options.content, options).theme;
+      const math = deckUsesMath(extractDeck(options.content).body);
+      const inlinedAssets = await this.inlineAssets(getAllCdnAssets(theme, { includeMath: math }), clock);
+      const html = getRevealJsHTML(options.content, options, inlinedAssets, true);
 
       await writeFile(tmpHtml, html, 'utf-8');
 
@@ -736,8 +913,17 @@ export class RevealJsExportService {
       // courante est rendue et le PDF n'en contient qu'une.
       await clock.run(win.loadFile(tmpHtml, { search: 'print-pdf' }));
 
-      // Wait for reveal.js to finish rendering
-      await clock.run(new Promise<void>((resolve) => setTimeout(resolve, 2500)));
+      const layout = await this.waitForPrintLayout(win, math, clock);
+      if (layout === 'no-reveal' || layout === 'timed-out') {
+        const error =
+          layout === 'no-reveal'
+            ? "reveal.js absent de la page d'impression"
+            : `reveal.js n'a pas mis la présentation en pages en ${this.renderTimeoutMs} ms`;
+        console.error('❌ PDF export failed:', error);
+        return { success: false, error, errorCode: 'presentation.notRendered' };
+      }
+      const warnings: OutcomeIssue[] =
+        layout === 'math-missing' ? [{ code: 'presentation.mathNotRendered' }] : [];
 
       onProgress?.({ stage: 'converting', message: 'Génération du PDF...', progress: 70 });
 
@@ -758,10 +944,10 @@ export class RevealJsExportService {
       clock.throwIfExpired();
 
       onProgress?.({ stage: 'complete', message: 'PDF créé!', progress: 100 });
-      return { success: true, outputPath };
+      return { success: true, outputPath, ...(warnings.length > 0 ? { warnings } : {}) };
     } catch (error: unknown) {
       console.error('❌ PDF export failed:', error);
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
+      return failureOf(error);
     } finally {
       if (win && !win.isDestroyed()) win.close();
       // Le HTML intermédiaire contient toute la présentation : on le

@@ -12,6 +12,13 @@ import {
 import './PresentationExportModal.css';
 
 import { exportErrorMessage, exportThrownMessage } from './export-error';
+import {
+  ExportWarnings,
+  hasExportWarnings,
+  NO_EXPORT_WARNINGS,
+  readExportWarnings,
+  type ExportWarningsValue,
+} from './ExportWarnings';
 import { readOptionalConfig, startExportReadLimit } from './export-read-limit';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { useMountedTimeout } from '../../hooks/useMountedTimeout';
@@ -37,6 +44,9 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
   // La minuterie de succès appelle le `onClose` du parent : démontée, la
   // modale ne doit plus fermer ce qui serait ouvert entre-temps.
   const afterSuccess = useMountedTimeout();
+  // La présentation est écrite, avec des réserves (des formules que KaTeX n'a pas rendues) :
+  // `ExportWarnings` les dit, et la fenêtre reste ouverte.
+  const [warnings, setWarnings] = useState<ExportWarningsValue>(NO_EXPORT_WARNINGS);
 
   // Initialize with project data
   useEffect(() => {
@@ -99,6 +109,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
     setIsExporting(true);
     setError(null);
     setSuccess(false);
+    setWarnings(NO_EXPORT_WARNINGS);
 
     try {
       // Le manuscrit, pas le fichier ouvert : une note de lecture ouverte depuis la
@@ -155,7 +166,12 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
       // Le main résout un chemin relatif contre le projet : le champ, et le message
       // de succès qui le reprend, disent où le fichier est écrit.
       if (result.success && typeof result.outputPath === 'string') setOutputPath(result.outputPath);
-      if (result.success) {
+      const reserves = readExportWarnings(result);
+      if (result.success && hasExportWarnings(reserves)) {
+        setSuccess(true);
+        setWarnings(reserves);
+        setIsExporting(false);
+      } else if (result.success) {
         setSuccess(true);
         afterSuccess(() => {
           onClose();
@@ -187,6 +203,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
       // Reset state
       setError(null);
       setSuccess(false);
+      setWarnings(NO_EXPORT_WARNINGS);
       setProgress({ stage: '', message: '', progress: 0 });
     }
   };
@@ -335,6 +352,8 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
               <span>{t('presentation.exportSuccess')} {outputPath}</span>
             </div>
           )}
+
+          <ExportWarnings warnings={warnings} />
         </div>
 
         <div className="presentation-export-footer">
