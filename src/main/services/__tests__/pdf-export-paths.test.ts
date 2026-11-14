@@ -320,6 +320,30 @@ describe('export PDF, pandoc simulé', () => {
     );
   });
 
+  /**
+   * S12-1-0 : la classe book remet le compteur des notes à zéro à chaque chapitre numéroté.
+   * Seules les notes de fin l'en empêchaient : « Continue sur tout l'ouvrage » (le défaut)
+   * repartait de 1 à chaque chapitre. Le banc réel (`pdf-export-latex.test.ts`) compte les notes
+   * du PDF ; celui-ci, qui lit le gabarit que pandoc reçoit, tourne aussi en CI.
+   */
+  it('livre : hors des notes de fin aussi, le gabarit détache les notes de bas de page des chapitres', async () => {
+    const project = newProject();
+    let template = '';
+    simulatePandoc((call) => {
+      if (isFinalPdfCall(call)) template = readFileSync(join(call.cwd, 'template.latex'), 'utf8');
+      answer(call.child);
+    });
+
+    const result = await pdfExportService.exportToPDF({
+      ...bookOptions(project, ['# Premier\n\nTexte[^1].\n\n[^1]: Note.\n']),
+      outputPath: join(project, 'livre.pdf'),
+    });
+
+    expect(result, result.error).toMatchObject({ success: true });
+    const outsideEndnotes = template.replace(/\$if\(endnotes\)\$[\s\S]*?\$endif\$/g, '');
+    expect(outsideEndnotes).toContain('\\counterwithout{footnote}{chapter}');
+  });
+
   it.each(['article', 'book'] as const)(
     '%s : un projet dont le nom contient le séparateur de --resource-path, pandoc lit bien ses dossiers, et le nettoyage n’y touche pas',
     async (projectType) => {

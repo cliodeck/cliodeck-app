@@ -2201,7 +2201,7 @@
       "bibliographyPerChapter": "Je Kapitel",
       "numberChapters": "Kapitel nummerieren",
       "numberSections": "Abschnitte nummerieren",
-      "exportHint": "Diese Einstellungen steuern die Manuskript-Zusammenstellung und die Exporte (PDF, Word)."
+      "exportHint": "Diese Einstellungen steuern die Manuskript-Zusammenstellung und den PDF-Export. In Word sind die Anmerkungen immer Fußnoten und die Bibliographie eine einzige am Buchende: „Anmerkungsstil“, „Nummerierung der Anmerkungen“ und „Bibliographie“ ändern dort nichts. „Kapitel nummerieren“ und „Abschnitte nummerieren“ gelten dort, wenn der Export über Pandoc läuft; der eigene Word-Generator von ClioDeck, der verwendet wird, wenn das Projekt keine Bibliographie hat oder Pandoc fehlt, nummeriert keine Überschriften."
     },
     "exportInProgress": "Ein Export läuft gerade. Warten Sie, bis er abgeschlossen ist, bevor Sie die Fußnoten neu nummerieren."
   },

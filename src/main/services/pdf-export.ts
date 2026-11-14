@@ -390,6 +390,13 @@ $body$
 % arbitrage 2). En classe book : -1 = rien, 0 = chapitres, 1 = sections.
 \\setcounter{secnumdepth}{$if(secnumdepth)$$secnumdepth$$else$0$endif$}
 
+% Notes de bas de page en continu sur tout l'ouvrage (S12-1-0) : la classe book
+% remet le compteur footnote a zero a chaque \\chapter numerote (\\@addtoreset
+% dans book.cls), et la note du chapitre 2 repartait de 1. La reprise a 1 a
+% chaque chapitre (noteNumbering per-chapter) reste celle de l'assembleur, qui
+% ecrit \\setcounter{footnote}{0} en tete de chaque chapitre.
+\\ifdefined\\counterwithout\\counterwithout{footnote}{chapter}\\fi
+
 % La classe book ne definit PAS d'environnement abstract (contrairement a
 % article) : sans cette definition, un livre pourvu d'un abstract.md echoue
 % a la compilation. Le resume tient lieu de quatrieme de couverture

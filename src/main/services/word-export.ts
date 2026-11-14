@@ -51,6 +51,7 @@ import {
   projectResourcePaths,
   resolveBookSettings,
   referenceSectionTitle,
+  wordHeadingNumbering,
 } from './pandoc-args.js';
 import {
   removeResourceLinks,
@@ -307,19 +308,29 @@ export class WordExportService {
         pandocArgs.push(`--resource-path=${resources.paths.join(delimiter)}`);
       }
 
-      // Réglages d'ouvrage. La modale annonce qu'ils « pilotent l'assemblage
-      // du manuscrit ET les exports (PDF, Word) » — c'était vrai du seul
-      // PDF : word-export construisait ses propres arguments, sans
-      // `--number-sections` ni `--top-level-division`. Décocher « numéroter
-      // les chapitres » puis exporter en .docx pour un éditeur donnait des
-      // chapitres numérotés quand même.
+      // Réglages d'ouvrage : la numérotation des chapitres et des sections vaut
+      // aussi pour le Word. C'était vrai du seul PDF : word-export construisait
+      // ses propres arguments, sans `--number-sections` ni
+      // `--top-level-division`. Décocher « numéroter les chapitres » puis
+      // exporter en .docx pour un éditeur donnait des chapitres numérotés quand
+      // même. `--number-sections` numérote tous les niveaux d'un .docx : le
+      // filtre retire leur numéro aux titres que les réglages ne numérotent pas,
+      // et à ceux des liminaires et des pièces finales, comme le PDF (S12-1-5).
+      // Il est écrit dans le dossier de travail, qui part dans le `finally`, et
+      // pandoc le lit par son chemin absolu.
       if (options.projectType === 'book') {
         const settings = resolveBookSettings(
           options.bookSettings as BookSettings | undefined
         );
         pandocArgs.push('--top-level-division=chapter');
-        if (settings.numberChapters !== false || settings.numberSections) {
+        const numbering = wordHeadingNumbering(settings);
+        if (numbering.numberSections) {
           pandocArgs.push('--number-sections');
+        }
+        if (numbering.luaFilter) {
+          const filterPath = join(tempDir, 'heading-numbering.lua');
+          await writeFile(filterPath, numbering.luaFilter);
+          pandocArgs.push('--lua-filter', filterPath);
         }
       }
 

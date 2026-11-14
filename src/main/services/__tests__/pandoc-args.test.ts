@@ -7,9 +7,13 @@
  * sont celles qui changent réellement le document produit.
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import { execFileSync } from 'child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import { delimiter, join } from 'path';
 import { load as loadYaml } from 'js-yaml';
 import type { BookSettings } from '../../../../backend/types/book.js';
+import { pandocAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 import { setLanguage } from '../../i18n.js';
 import {
   ABSTRACT_PLACEHOLDER,
@@ -29,6 +33,7 @@ import {
   resolveBibliographyMode,
   resolveBookSettings,
   stagedBeamerImageName,
+  wordHeadingNumbering,
   type PandocArgsInput,
 } from '../pandoc-args.js';
 
@@ -85,6 +90,70 @@ describe('computeSecnumdepth', () => {
     expect(
       computeSecnumdepth(book({ numberChapters: false, numberSections: true }))
     ).toBe(1);
+  });
+});
+
+/**
+ * Numérotation des titres d'un livre exporté en Word par pandoc (S12-1-5). Dans un .docx,
+ * `--number-sections` numérote tous les niveaux, et `secnumdepth` n'y fait rien : avec les réglages
+ * par défaut, les sections sortaient « 1.1 », « 1.1.1 ». Le filtre Lua marque `unnumbered` les
+ * niveaux que les réglages ne numérotent pas, dans le même sens que `computeSecnumdepth` pour le
+ * PDF : des sections numérotées numérotent aussi les chapitres. Comme dans le PDF, les liminaires
+ * (avant `\mainmatter`, le gabarit s'ouvrant sur `\frontmatter`) et les pièces finales (après
+ * `\backmatter`) n'ont aucun numéro : sans cela, l'avant-propos devenait le chapitre « 1 » du Word.
+ */
+describe('wordHeadingNumbering (S12-1-5)', () => {
+  const COMBINATIONS = [
+    ['défaut (chapitres seuls)', {}, true, ['un']],
+    ['chapitres et sections', { numberSections: true }, true, ['un', 'deux']],
+    ['sections sans chapitres : les chapitres aussi, comme le PDF', { numberChapters: false, numberSections: true }, true, ['un', 'deux']],
+    ['rien de numéroté', { numberChapters: false }, false, []],
+  ] as const satisfies readonly (readonly [string, Partial<BookSettings>, boolean, readonly string[]])[];
+
+  /**
+   * Le flux tel que l'assembleur le donne à pandoc (cible `latex`) : un liminaire, `\mainmatter`
+   * (précédé de la remise à zéro des notes, sur la même ligne de blocs), un chapitre avec un titre
+   * que l'auteur a voulu sans numéro, `\backmatter` puis une pièce finale.
+   */
+  const ASSEMBLED = [
+    '# Avant-propos\n\n## Remerciements\n',
+    '\\setcounter{footnote}{0}\n\\mainmatter\n',
+    '# Un\n\n## Deux\n\n### Trois\n\n#### Quatre\n\n# Sans numéro {#sans-numero .unnumbered}\n',
+    '\\backmatter\n',
+    '# Postface\n\n## Sources\n',
+  ].join('\n');
+
+  it.each(COMBINATIONS)('%s : --number-sections et filtre', (_label, over, numberSections, numbered) => {
+    const numbering = wordHeadingNumbering(book(over));
+    expect(numbering.numberSections).toBe(numberSections);
+    // Un filtre dès qu'un niveau numéroté en laisse d'autres sans numéro.
+    expect(numbering.luaFilter !== undefined).toBe(numbered.length > 0);
+  });
+
+  /** Les titres que pandoc numérote, filtre appliqué : ceux qui n'ont pas la classe `unnumbered`. */
+  describe.skipIf(!pandocAvailable())('le filtre passé à pandoc', () => {
+    it.each(COMBINATIONS)('%s', (_label, over, _numberSections, numbered) => {
+      const { luaFilter } = wordHeadingNumbering(book(over));
+      const dir = mkdtempSync(join(tmpdir(), 'cliodeck-filtre-'));
+      try {
+        const args = ['--from=markdown', '--to=json'];
+        if (luaFilter) {
+          writeFileSync(join(dir, 'titres.lua'), luaFilter);
+          args.push('--lua-filter', join(dir, 'titres.lua'));
+        }
+        const ast = JSON.parse(
+          execFileSync('pandoc', args, { input: ASSEMBLED, encoding: 'utf8' })
+        ) as { blocks: { t: string; c: [number, [string, string[], unknown], unknown] }[] };
+        const ids = ast.blocks
+          .filter((b) => b.t === 'Header' && !b.c[1][1].includes('unnumbered'))
+          .map((b) => b.c[1][0]);
+        // Sans filtre ni `--number-sections`, rien n'est numéroté : la liste ne dit que ce que
+        // `--number-sections` numéroterait.
+        expect(luaFilter ? ids : []).toEqual(numbered);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 });
 

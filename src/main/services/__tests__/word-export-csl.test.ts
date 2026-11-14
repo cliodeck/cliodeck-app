@@ -16,13 +16,14 @@
  */
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import PizZip from 'pizzip';
 import { WordExportService, type WordExportOptions } from '../word-export';
 import { bibliographyService } from '../bibliography-service';
 import { documentDate } from '../pandoc-args';
+import { DEFAULT_BOOK_SETTINGS, type BookSettings } from '../../../../backend/types/book';
 import { setLanguage } from '../../i18n';
 import { pandocAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 
@@ -472,5 +473,180 @@ describe.skipIf(!pandocAvailable())('export Word par pandoc : le document fait f
 
     expect(result, result.error).toMatchObject({ success: true });
     expect(readDocx(options.outputPath!).text).not.toContain('compléter');
+  });
+});
+
+/**
+ * S12-1-5 : l'export Word d'un livre par pandoc passait `--number-sections` dès que les chapitres
+ * se numérotaient. Dans un .docx, cette option numérote tous les niveaux (`secnumdepth` n'y fait
+ * rien) : avec les réglages par défaut, « 1 Premier », puis « 1.1 Section A », « 1.1.1 ». Vrai
+ * pandoc : le numéro d'un titre est le texte de son segment `SectionNumber`, dans
+ * `word/document.xml`. Le titre de la bibliographie, que pandoc marque `unnumbered`, n'en reçoit
+ * jamais.
+ */
+describe.skipIf(!pandocAvailable())('export Word par pandoc d’un livre : numérotation des titres (S12-1-5)', () => {
+  const savedTmpdir = process.env.TMPDIR;
+  afterEach(() => {
+    if (savedTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = savedTmpdir;
+  });
+
+  /** Les titres du document, dans l'ordre : style, numéro (`SectionNumber`), texte. */
+  function headings(outputPath: string): string[] {
+    const document = new PizZip(readFileSync(outputPath)).file('word/document.xml')?.asText() ?? '';
+    const numberRun = /<w:r><w:rPr><w:rStyle w:val="SectionNumber" ?\/><\/w:rPr><w:t[^>]*>([^<]*)<\/w:t><\/w:r>/;
+    return [...document.matchAll(/<w:p[ >](?:(?!<\/w:p>)[\s\S])*<\/w:p>/g)].flatMap(([p]) => {
+      const style = p.match(/<w:pStyle w:val="(Heading\d)" ?\/>/)?.[1];
+      if (!style) return [];
+      const number = p.match(numberRun)?.[1];
+      const text = p.replace(numberRun, '').replace(/<[^>]+>/g, '').trim();
+      return [`${style} ${number ?? '-'} ${text}`];
+    });
+  }
+
+  /** Un livre de trois chapitres, avec sections et sous-sections, qui cite une référence. */
+  function bookOptions(settings: Partial<BookSettings>): WordExportOptions {
+    const projectPath = makeProject('book');
+    const texts = [
+      '# Premier\n\nTexte, selon [@farge1989].\n\n## Section A\n\nTexte.\n\n### Sous-section A\n\nTexte.\n',
+      '# Second\n\n## Section B\n\nTexte.\n',
+      '# Troisième\n\nTexte.\n',
+    ];
+    texts.forEach((text, i) => writeFileSync(join(projectPath, `chapters/0${i + 1}-chapitre.md`), text));
+    const manifest = JSON.parse(readFileSync(join(projectPath, 'project.json'), 'utf8'));
+    return {
+      ...articleOptions(projectPath),
+      projectType: 'book',
+      content: '',
+      bookSettings: { ...DEFAULT_BOOK_SETTINGS, ...settings },
+      manuscript: { chapters: manifest.chapters },
+    };
+  }
+
+  /** Les titres attendus, `-` pour un titre sans numéro. */
+  const chaptersOnly = [
+    'Heading1 1 Premier',
+    'Heading2 - Section A',
+    'Heading3 - Sous-section A',
+    'Heading1 2 Second',
+    'Heading2 - Section B',
+    'Heading1 3 Troisième',
+    'Heading1 - Références',
+  ];
+  const chaptersAndSections = [
+    'Heading1 1 Premier',
+    'Heading2 1.1 Section A',
+    'Heading3 - Sous-section A',
+    'Heading1 2 Second',
+    'Heading2 2.1 Section B',
+    'Heading1 3 Troisième',
+    'Heading1 - Références',
+  ];
+
+  it.each([
+    ['réglages par défaut : chapitres numérotés, sections sans numéro', {}, chaptersOnly],
+    ['« Numéroter les sections » : chapitres et sections', { numberSections: true }, chaptersAndSections],
+    [
+      'sections sans chapitres : les chapitres aussi, comme dans le PDF',
+      { numberChapters: false, numberSections: true },
+      chaptersAndSections,
+    ],
+    [
+      'rien de coché : aucun numéro',
+      { numberChapters: false },
+      chaptersOnly.map((h) => h.replace(/^(Heading\d) \S+/, '$1 -')),
+    ],
+  ] as const)('%s', async (_label, settings, expected) => {
+    const options = bookOptions(settings);
+
+    const result = await new WordExportService().exportToWord(options);
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(headings(options.outputPath!)).toEqual(expected);
+  });
+
+  /**
+   * Liminaires et pièces finales (`kind: 'front'` et `'back'`, réglés dans `project.json`) : le PDF
+   * ne les numérote pas (`\frontmatter`, `\backmatter`). Dans le Word, `--number-sections` les
+   * numérotait, et le filtre ne retirait le numéro qu'aux niveaux trop profonds : l'avant-propos
+   * devenait « 1 », le premier vrai chapitre « 2 », l'annexe « 4 ».
+   */
+  function bookWithMatterOptions(settings: Partial<BookSettings>): WordExportOptions {
+    const projectPath = makeProject('book');
+    const pieces = [
+      { id: 'f', kind: 'front', text: '# Avant-propos\n\nTexte.\n\n## Remerciements\n\nMerci.\n' },
+      { id: 'c1', kind: 'chapter', text: '# Premier\n\nTexte, selon [@farge1989].\n\n## Section A\n\nTexte.\n' },
+      { id: 'c2', kind: 'chapter', text: '# Second\n\n## Section B\n\nTexte.\n' },
+      { id: 'b', kind: 'back', text: '# Annexe\n\n## Pièce 1\n\nTexte.\n' },
+    ] as const;
+    pieces.forEach((p) => writeFileSync(join(projectPath, `chapters/${p.id}.md`), p.text));
+    return {
+      ...articleOptions(projectPath),
+      projectType: 'book',
+      content: '',
+      bookSettings: { ...DEFAULT_BOOK_SETTINGS, ...settings },
+      manuscript: {
+        chapters: pieces.map((p, order) => ({
+          id: p.id,
+          kind: p.kind,
+          title: p.id,
+          filePath: `chapters/${p.id}.md`,
+          order,
+        })),
+      },
+    };
+  }
+
+  it.each([
+    [
+      'réglages par défaut',
+      {},
+      [
+        'Heading1 - Avant-propos',
+        'Heading2 - Remerciements',
+        'Heading1 1 Premier',
+        'Heading2 - Section A',
+        'Heading1 2 Second',
+        'Heading2 - Section B',
+        'Heading1 - Annexe',
+        'Heading2 - Pièce 1',
+        'Heading1 - Références',
+      ],
+    ],
+    [
+      '« Numéroter les sections »',
+      { numberSections: true },
+      [
+        'Heading1 - Avant-propos',
+        'Heading2 - Remerciements',
+        'Heading1 1 Premier',
+        'Heading2 1.1 Section A',
+        'Heading1 2 Second',
+        'Heading2 2.1 Section B',
+        'Heading1 - Annexe',
+        'Heading2 - Pièce 1',
+        'Heading1 - Références',
+      ],
+    ],
+  ] as const)('liminaires et pièces finales sans numéro, comme dans le PDF : %s', async (_label, settings, expected) => {
+    const options = bookWithMatterOptions(settings);
+
+    const result = await new WordExportService().exportToWord(options);
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(headings(options.outputPath!)).toEqual(expected);
+  });
+
+  it('le filtre est écrit dans le dossier de travail de l’export, dont le chemin a une espace, et part avec lui', async () => {
+    const spaced = join(dir, 'dossier temporaire');
+    mkdirSync(spaced);
+    process.env.TMPDIR = spaced;
+    const options = bookOptions({});
+
+    const result = await new WordExportService().exportToWord(options);
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(headings(options.outputPath!)).toEqual(chaptersOnly);
+    expect(readdirSync(spaced)).toEqual([]);
   });
 });

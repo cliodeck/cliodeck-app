@@ -148,7 +148,8 @@ Réglages consommés :
 |---|---|
 | `noteStyle: footnote` | notes de bas de page (natif pandoc) |
 | `noteStyle: endnote-chapter` \| `endnote-book` | paquet `endnotes`, `\theendnotes` après chaque chapitre ou avant `\backmatter` |
-| `noteNumbering: per-chapter` | compteur remis à zéro à chaque chapitre |
+| `noteNumbering: continuous` | `\counterwithout{footnote}{chapter}` dans le gabarit : la classe book remettait les notes à zéro à chaque chapitre numéroté, et la note du chapitre 2 repartait de 1 (S12-1-0) |
+| `noteNumbering: per-chapter` | compteur remis à zéro à chaque chapitre, par l'assembleur (`\setcounter{footnote}{0}` en tête de chapitre). Le chapitre est la pièce du manifeste (`kind: chapter`), comme dans la numérotation du navigateur de chapitres : un second titre `#` dans un même fichier imprime un « Chapitre » de plus, mais ses notes continuent celles de la pièce. Avant S12-1-0, la classe book les faisait repartir de 1 si les chapitres étaient numérotés, et non sinon ; la règle est désormais la même avec ou sans numéros, et c'était déjà celle des notes de fin |
 | `bibliography: single` | une bibliographie de fin (natif citeproc) |
 | `bibliography: per-chapter` | citeproc exécuté **par pièce** (~0,85 s/chapitre) ; repli documenté sur `single` si inapplicable. Chaque bibliographie a le titre de la bibliographie unique (`referenceSectionTitle()`), descendu en section de son chapitre (`demoteChapterBibliographyHeading`) : citeproc l'écrit en `#`, qui ouvrait un faux chapitre « Références » après chaque chapitre (L10-5) |
 
@@ -159,7 +160,20 @@ disjoint de celui du moteur de citations. Sans pandoc, la bibliographie
 du moteur est la dernière section, titrée au niveau 1 pour la table des
 matières (L10-6). Par pandoc comme sans lui, le Word n'a qu'une
 bibliographie, en fin d'ouvrage : `bibliography: per-chapter` ne vaut
-que pour le PDF.
+que pour le PDF. Par pandoc, les titres suivent
+`numberChapters`/`numberSections` : `--number-sections` numérote tous les
+niveaux d'un .docx (`secnumdepth` n'y fait rien), et un filtre Lua écrit
+dans le dossier de travail marque `unnumbered` ce que les réglages ne
+numérotent pas (`wordHeadingNumbering`, S12-1-5). Ce sont les niveaux
+trop profonds, et tous les titres des liminaires et des pièces finales :
+le filtre lit les `\mainmatter` et `\backmatter` que l'assembleur pose
+en blocs bruts, que pandoc ne recopie pas dans le .docx. Avec les
+réglages par défaut, le Word numérote donc ses titres comme le PDF
+(mesuré, pandoc 3.13). Un écart reste, du côté du PDF : avec
+`numberSections`, la classe book y numérote les sections des liminaires
+(« 0.1 ») et des pièces finales (« 2.2 », à la suite du dernier
+chapitre), que le Word laisse sans numéro. Le générateur interne ne
+numérote aucun titre.
 
 **Recettes** : le step `export` assemble le livre entier à défaut de
 `document_id`, et transmet le vrai type de projet.
@@ -181,7 +195,11 @@ que pour le PDF.
   technique que les notes et citations — une extension Lezer plus une
   résolution à l'assemblage. C'est le prochain point d'extension naturel.
 - **Word et les réglages de notes** : `noteStyle`/`noteNumbering` ne pilotent
-  aujourd'hui que la voie LaTeX.
+  aujourd'hui que la voie LaTeX. Mesuré avec pandoc 3.13 (L12-5) : par pandoc,
+  `--top-level-division=chapter` fait une section docx par chapitre, et le
+  document de référence de pandoc porte `numRestart eachSect` : les notes
+  repartent à 1 à chaque chapitre, quel que soit `noteNumbering`. Le
+  générateur interne les numérote en continu.
 - **Propositions IA et bascule de chapitre** : les propositions en attente
   expirent au changement de chapitre (arbitrage 5 du plan CM6) ; les rendre
   survivantes suppose de distinguer une bascule d'une fermeture.
