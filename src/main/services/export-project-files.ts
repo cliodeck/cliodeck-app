@@ -12,6 +12,7 @@
 import { lstat, readFile, symlink, unlink } from 'fs/promises';
 import { delimiter, isAbsolute, join, resolve } from 'path';
 import { parseUserJson } from '../../../backend/core/fs/user-files.js';
+import { fromStoredPath } from '../../../backend/core/bibliography/stored-path.js';
 import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 import { pathExists } from './export-time-limit.js';
 
@@ -20,24 +21,34 @@ import { pathExists } from './export-time-limit.js';
  * (comme le fait `bibliography:import`). Celle du renderer n'est plus qu'un
  * repli : `project.json` illisible, ou ancien champ `bibliography` sans
  * `bibliographySource`.
+ *
+ * Un `.bib` déclaré mais absent (déplacé, renommé, évincé par iCloud) n'est
+ * pas remplacé par celui du renderer, qui peut être l'ancien qu'un import a
+ * remplacé : l'export se fait sans bibliographie, et `missing` le nomme pour
+ * qu'il le dise (L04-8, H3).
+ *
+ * Le chemin rangé se lit par `fromStoredPath` (relatif au projet, `/` ou `\`),
+ * sans son repli dans `PDFs/` : il vaut pour un PDF téléchargé, et ferait d'un
+ * `.bib` absolu disparu un homonyme sans rapport. `() => false` l'écarte, et
+ * avec lui toute lecture synchrone du disque : l'existence se vérifie ensuite
+ * par `pathExists`.
  */
 export async function resolveProjectBibliography(
   projectPath: string,
   fromRenderer?: string
-): Promise<string | undefined> {
+): Promise<{ path?: string; missing?: string }> {
+  let declared: unknown;
   try {
-    const manifest = parseUserJson<{ bibliographySource?: { filePath?: string } } | null>(
+    const manifest = parseUserJson<{ bibliographySource?: { filePath?: unknown } } | null>(
       await readFile(join(projectPath, 'project.json'), 'utf-8')
     );
-    const declared = manifest?.bibliographySource?.filePath;
-    if (declared) {
-      const bibPath = resolve(projectPath, declared);
-      if (await pathExists(bibPath)) return bibPath;
-    }
+    declared = manifest?.bibliographySource?.filePath;
   } catch {
     // Pas de project.json lisible : ce que transmet le renderer.
   }
-  return fromRenderer;
+  if (typeof declared !== 'string' || !declared) return fromRenderer ? { path: fromRenderer } : {};
+  const bibPath = fromStoredPath(declared, projectPath, () => false);
+  return (await pathExists(bibPath)) ? { path: bibPath } : { missing: bibPath };
 }
 
 /**

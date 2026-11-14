@@ -75,6 +75,13 @@ export interface WordExportOptions {
   content: string;
   outputPath?: string;
   bibliographyPath?: string;
+  /**
+   * La bibliographie est celle que déclare `project.json`, relu au début de l'export, sous son
+   * horloge : `bibliographyPath` n'est qu'un repli quand il n'en déclare aucune
+   * (`resolveProjectBibliography`). Le handler de la fenêtre le pose, car elle envoie
+   * `currentProject.bibliography`, figé à l'ouverture du projet (S18-2-2).
+   */
+  bibliographyFromProject?: boolean;
   cslPath?: string; // Path to CSL file for citation styling
   templatePath?: string; // Path to .dotx template
   /** Réglages d'ouvrage (notes, bibliographie, numérotation). */
@@ -473,11 +480,15 @@ export class WordExportService {
       // renderer, figé à l'ouverture : un `.bib` importé pendant la séance
       // envoyait l'export au générateur interne, qui ignorait le style.
       const projectCsl = await resolveProjectCsl(options.projectPath, options.cslPath);
+      const bibliography = options.bibliographyFromProject
+        ? await resolveProjectBibliography(options.projectPath, options.bibliographyPath)
+        : { path: options.bibliographyPath };
       options = {
         ...options,
-        bibliographyPath: await resolveProjectBibliography(options.projectPath, options.bibliographyPath),
+        bibliographyPath: bibliography.path,
         cslPath: projectCsl.path,
       };
+      if (bibliography.missing) console.warn('⚠️ word-export: bibliographie du projet introuvable:', bibliography.missing);
       // Case « style intégré » cochée, le style du projet n'est pas demandé :
       // son absence n'a rien à dire.
       const missingCsl = options.citation?.useEngine ? undefined : projectCsl.missing;
@@ -534,8 +545,11 @@ export class WordExportService {
 
       // Ce que le document aura de moins que le texte de l'auteur : un chapitre omis à l'assemblage,
       // un modèle laissé de côté, une citation ou une image que le générateur interne ne rend pas.
-      // Le document est écrit quand même ; la fenêtre le dit et reste ouverte (S12-1-14).
-      const warnings: OutcomeIssue[] = [];
+      // Le document est écrit quand même ; la fenêtre le dit et reste ouverte (S12-1-14). Le `.bib`
+      // que nomme le projet, introuvable, d'abord : il explique les clés restées telles quelles.
+      const warnings: OutcomeIssue[] = bibliography.missing
+        ? [{ code: 'export.bibliographyMissing', params: { file: bibliography.missing } }]
+        : [];
 
       if (options.manuscript?.chapters?.length) {
         const assembled = await assembleManuscript({

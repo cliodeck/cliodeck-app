@@ -2700,6 +2700,7 @@
       "chapterNotInManifest": "The chapter to export is no longer part of the manuscript: the exported document is empty. Open a chapter of the manuscript, then run the export again.",
       "chapterCitationsNotResolved": "The citations of the chapter “{{title}}” ({{file}}) could not be formatted: Pandoc failed on this chapter, and they remain as keys in the PDF. Check the project's citation style and bibliography, then run the export again.",
       "perChapterBibliographyIgnored": "The per-chapter bibliography set in the book settings is not followed: with a built-in citation style, the references are gathered in a single bibliography at the end of the book. Untick “Use a built-in citation style” for a per-chapter bibliography.",
+      "bibliographyMissing": "The project's bibliography file, {{file}}, cannot be found: it was moved, renamed or deleted outside ClioDeck, and the export was made without it. Put it back in its place, then run the export again.",
       "word": {
         "templateIgnored": "The Word template {{file}} was not applied: it has no {content} field to hold the text, or ClioDeck could not read it. The document is exported without it.",
         "templateRawMarkdown": "The Word template {{file}} was filled in: its {content} field receives the text as written, in Markdown, without formatting (headings, notes, italics). Remove this template from the project folder to get a formatted document.",

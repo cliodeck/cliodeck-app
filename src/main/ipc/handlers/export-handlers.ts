@@ -22,6 +22,18 @@ function exportResponse(result: ExportResult) {
   return outcomeResponse(partial(value, warnings));
 }
 
+/**
+ * Les fenêtres d'export envoient `currentProject.bibliography`, figé à l'ouverture du projet : un
+ * `.bib` importé ou synchronisé pendant la séance leur restait inconnu (S18-2-2). Le service relit
+ * donc `project.json` du projet de la demande (`projectPath`), au début de l'export et sous son
+ * horloge, et ne garde ce chemin qu'en repli. Ici, et non dans le service : une recette appelle
+ * l'export PDF avec la bibliographie qu'elle a choisie.
+ */
+const fromProject = <T extends object>(options: T): T & { bibliographyFromProject: true } => ({
+  ...options,
+  bibliographyFromProject: true,
+});
+
 export function setupExportHandlers() {
   watchSystemSleep(powerMonitor);
 
@@ -46,7 +58,7 @@ export function setupExportHandlers() {
 
       const window = BrowserWindow.fromWebContents(event.sender);
 
-      const result = await pdfExportService.exportToPDF(validatedData, (progress) => {
+      const result = await pdfExportService.exportToPDF(fromProject(validatedData), (progress) => {
         if (window) {
           window.webContents.send('pdf-export:progress', progress);
         }
@@ -74,7 +86,7 @@ export function setupExportHandlers() {
     try {
       const window = BrowserWindow.fromWebContents(event.sender);
 
-      const result = await wordExportService.exportToWord(options as any, (progress) => {
+      const result = await wordExportService.exportToWord(fromProject(options as any), (progress) => {
         if (window) {
           window.webContents.send('word-export:progress', progress);
         }

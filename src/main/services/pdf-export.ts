@@ -19,7 +19,12 @@ import {
 } from './export-time-limit.js';
 import { stripLeadingHeading } from '../../editor/outline.js';
 import { speakerNotesToPandoc } from '../../editor/slides.js';
-import { removeResourceLinks, resolveProjectCsl, stageResourcePaths } from './export-project-files.js';
+import {
+  removeResourceLinks,
+  resolveProjectBibliography,
+  resolveProjectCsl,
+  stageResourcePaths,
+} from './export-project-files.js';
 import {
   BEAMER_STAGING_DIR,
   type BeamerConfig,
@@ -68,6 +73,14 @@ export interface ExportOptions {
   };
   outputPath?: string;
   bibliographyPath?: string;
+  /**
+   * La bibliographie est celle que déclare `project.json`, relu au début de l'export, sous son
+   * horloge : `bibliographyPath` n'est qu'un repli quand il n'en déclare aucune
+   * (`resolveProjectBibliography`). Le handler de la fenêtre le pose, car elle envoie
+   * `currentProject.bibliography`, figé à l'ouverture du projet (S18-2-2). Une recette ne le pose
+   * pas : elle garde la bibliographie qu'elle passe.
+   */
+  bibliographyFromProject?: boolean;
   cslPath?: string; // Path to CSL file for citation styling
   /**
    * Citation rendering options. When provided, the in-process
@@ -870,9 +883,16 @@ export class PDFExportService {
       // d'écarter `--csl` en silence. Case « style intégré » cochée, il n'est
       // pas demandé.
       const projectCsl = await resolveProjectCsl(options.projectPath, options.cslPath);
-      options = { ...options, cslPath: projectCsl.path };
+      // La bibliographie du projet aussi : celle du renderer, figée à l'ouverture du projet,
+      // ignorait un `.bib` importé ou synchronisé pendant la séance, et pandoc partait sans
+      // `--citeproc` (S18-2-2). Avant l'assemblage : la bibliographie par chapitre en dépend.
+      const bibliography = options.bibliographyFromProject
+        ? await resolveProjectBibliography(options.projectPath, options.bibliographyPath)
+        : { path: options.bibliographyPath };
+      options = { ...options, bibliographyPath: bibliography.path, cslPath: projectCsl.path };
       const missingCsl = options.citation?.useEngine ? undefined : projectCsl.missing;
       if (missingCsl) console.warn('⚠️ pdf-export: style CSL du projet introuvable:', missingCsl);
+      if (bibliography.missing) console.warn('⚠️ pdf-export: bibliographie du projet introuvable:', bibliography.missing);
 
       // Try to load abstract from abstract.md if no abstract in metadata
       let abstract = options.metadata?.abstract;
@@ -902,8 +922,11 @@ export class PDFExportService {
       const mdPath = join(tempDir, 'input.md');
       let cleanedContent = options.content;
       // Ce que le PDF aura de moins que le manuscrit (un chapitre omis, des citations restées en
-      // clés) : le PDF est écrit quand même, la fenêtre le dit et reste ouverte (S12-1-14).
-      const manuscriptWarnings: OutcomeIssue[] = [];
+      // clés) : le PDF est écrit quand même, la fenêtre le dit et reste ouverte (S12-1-14). Le
+      // `.bib` que nomme le projet, introuvable, d'abord : il explique les clés restées telles quelles.
+      const manuscriptWarnings: OutcomeIssue[] = bibliography.missing
+        ? [{ code: 'export.bibliographyMissing', params: { file: bibliography.missing } }]
+        : [];
       // Les clés de citation que rien n'a trouvées : elles restent dans le PDF, et la fenêtre les
       // nomme, comme pour le Word (S12-1-7).
       const unresolved = new Set<string>();

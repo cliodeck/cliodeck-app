@@ -106,6 +106,16 @@ describe.each(['fr', 'en', 'de'] as const)('échec d’une image, en %s', (lng) 
     expect(message).toMatch(/[«“„]\s?:\s?[»”“]/);
     expect(message).not.toBe('messages.export.imageFolderUnreachable');
   });
+
+  it('un .bib que nomme le projet et qui manque : nommé, et dit exporté sans lui (L04-8)', async () => {
+    const t = await translator(lng);
+    const issue = { code: 'export.bibliographyMissing', params: { file: '/Users/h/Essai/refs.bib' } };
+
+    const message = translateMessage(t, issue);
+
+    expect(message).toContain('/Users/h/Essai/refs.bib');
+    expect(message).not.toBe('export.bibliographyMissing');
+  });
 });
 
 describe.each(['fr', 'en', 'de'])('locale %s', (language) => {
