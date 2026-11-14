@@ -332,7 +332,9 @@ describe('générateur docx interne : le front matter du document fait foi', () 
     const { document } = await exportNative('---\nabstract: Un *RÉSUMÉFM* soigné.\n---\nCORPSTEXTE.\n', {
       metadata: { title: 'Titre' },
     });
-    expect(plain(document)).toContain('Un RÉSUMÉFM soigné.');
+    // Sous le titre « Résumé » de la page de titre, et non recopié en tête du corps.
+    expect(plain(document)).toContain('RésuméUn RÉSUMÉFM soigné.CORPSTEXTE.');
+    expect(plain(document)).not.toContain('abstract:');
     expect(document).toMatch(/<w:i\/>.*RÉSUMÉFM/s);
   });
 
