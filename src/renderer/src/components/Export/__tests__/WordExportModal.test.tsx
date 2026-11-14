@@ -27,6 +27,7 @@ import { WordExportModal } from '../WordExportModal';
 
 interface ExportOpts {
   citation?: { useEngine: boolean; style: string; locale: string };
+  metadata?: Record<string, unknown>;
 }
 
 function installElectron(exportSpy: ReturnType<typeof vi.fn>): void {
@@ -102,5 +103,41 @@ describe('WordExportModal citation section', () => {
     expect(payload.citation?.useEngine).toBe(true);
     expect(payload.citation?.style).toBeTruthy();
     expect(payload.citation?.locale).toBeTruthy();
+  });
+});
+
+/**
+ * S18-1-3 : le champ Auteur laissé vide envoyait « ClioDesk », et la fenêtre imposait la date du
+ * jour au format français. En `-M`, l'un et l'autre écrasaient le front matter du document. La
+ * fenêtre n'envoie plus que ce que l'auteur a saisi : le main propose la date du jour, que le
+ * `date` du front matter remplace (Q42).
+ */
+describe('WordExportModal : métadonnées', () => {
+  afterEach(() => cleanup());
+
+  async function exportPayload(author?: string): Promise<ExportOpts> {
+    const exportSpy = vi.fn().mockResolvedValue({ success: true });
+    installElectron(exportSpy);
+    render(<WordExportModal isOpen onClose={() => undefined} />);
+    if (author !== undefined) {
+      fireEvent.change(screen.getByLabelText('export.word.author'), { target: { value: author } });
+    }
+    const exportBtn = await screen.findByRole('button', { name: 'export.word.export' });
+    await waitFor(() => expect(exportBtn).not.toBeDisabled());
+    fireEvent.click(exportBtn);
+    await waitFor(() => expect(exportSpy).toHaveBeenCalledTimes(1));
+    return exportSpy.mock.calls[0][0] as ExportOpts;
+  }
+
+  it('champ Auteur vide : ni auteur ni date, jamais « ClioDesk »', async () => {
+    const payload = await exportPayload();
+    expect(payload.metadata).toEqual({ title: 'demo', author: undefined });
+    expect(payload.metadata).not.toHaveProperty('date');
+    expect(JSON.stringify(payload)).not.toMatch(/ClioDes[kc]/);
+  });
+
+  it('auteur saisi : il part tel quel', async () => {
+    const payload = await exportPayload('Frédéric Clavert');
+    expect(payload.metadata?.author).toBe('Frédéric Clavert');
   });
 });
