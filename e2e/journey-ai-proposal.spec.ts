@@ -718,60 +718,82 @@ function query<T>(dbPath: string, sql: string): T[] {
 /**
  * L01-6 : insérer une note réécrivait le document du curseur à la fin. Une proposition en attente
  * plus loin disparaissait, et son retrait partait aux deux journaux comme une décision
- * (`invalidated`) que l'auteur n'avait pas prise.
+ * (`invalidated`) que l'auteur n'avait pas prise. Au bout du document, là où attend un brouillon
+ * envoyé sans curseur posé, c'était la définition de la note qui la touchait (revue L01-6).
  */
-test('une note insérée avant une proposition en attente la laisse, et seul « Accepter » va aux journaux', async () => {
-  const session = await start();
-  if (!session) return;
-  const { app, window } = session;
-  const { projectJson, document } = makeArticle();
-  const projectDir = dirname(document);
-  const onDisk = () => readFileSync(document, 'utf8');
-  const lastEnd = TEXT.indexOf('Dernier paragraphe.') + 'Dernier paragraphe.'.length;
+const NOTED = TEXT.replace('sans histoire.', 'sans histoire.[^1]');
+const NOTE_CASES = [
+  {
+    where: 'plus loin dans le texte',
+    anchor: TEXT.indexOf('Dernier paragraphe.') + 'Dernier paragraphe.'.length,
+    proposed: ' PROPOSÉ.',
+    noted: `${NOTED}\n[^1]: Texte de la note.`,
+    accepted: `${NOTED.replace('Dernier paragraphe.', 'Dernier paragraphe. PROPOSÉ.')}\n[^1]: Texte de la note.`,
+  },
+  {
+    // Après la fin de ligne finale, avec le padding de bloc d'un brouillon : elle reste devant la
+    // définition, qui vient après une ligne vide.
+    where: 'au bout du document',
+    anchor: TEXT.length,
+    proposed: '\nPROPOSÉ.',
+    noted: `${NOTED}\n\n[^1]: Texte de la note.`,
+    accepted: `${NOTED}\nPROPOSÉ.\n\n[^1]: Texte de la note.`,
+  },
+];
 
-  try {
-    await openProject(app, window, projectJson);
-    await expect(line(window, 'Dernier paragraphe')).toBeVisible({ timeout: 20_000 });
-    await window.evaluate((at) => {
-      (window as unknown as { __cliodeckProposals: { inject(p: object): void } }).__cliodeckProposals.inject({
-        range: { from: at, to: at },
-        original: '',
-        proposed: ' PROPOSÉ.',
-        category: 'ai-insert',
-        source: { model: 'modele-e2e', task: 'e2e' },
-      });
-    }, lastEnd);
-    await expect(proposal(window)).toHaveCount(1);
+for (const { where, anchor, proposed, noted, accepted } of NOTE_CASES) {
+  test(`une note insérée avant une proposition en attente ${where} la laisse, et seul « Accepter » va aux journaux`, async () => {
+    const session = await start();
+    if (!session) return;
+    const { app, window } = session;
+    const { projectJson, document } = makeArticle();
+    const projectDir = dirname(document);
+    const onDisk = () => readFileSync(document, 'utf8');
 
-    // La note au bout du premier paragraphe, par le bouton : le curseur passe dans la définition.
-    await line(window, 'Premier paragraphe').click();
-    await window.keyboard.press('End');
-    await window.locator('button[title^="Note de bas de page"]').first().click();
-    await window.keyboard.type('Texte de la note.');
-    const noted = TEXT.replace('sans histoire.', 'sans histoire.[^1]') + '\n[^1]: Texte de la note.';
-    await expect.poll(onDisk, { timeout: 10_000 }).toBe(noted);
-    await expect(proposal(window)).toHaveCount(1);
+    try {
+      await openProject(app, window, projectJson);
+      await expect(line(window, 'Dernier paragraphe')).toBeVisible({ timeout: 20_000 });
+      await window.evaluate(
+        ({ at, text }) => {
+          (window as unknown as { __cliodeckProposals: { inject(p: object): void } }).__cliodeckProposals.inject({
+            range: { from: at, to: at },
+            original: '',
+            proposed: text,
+            category: 'ai-insert',
+            source: { model: 'modele-e2e', task: 'e2e' },
+          });
+        },
+        { at: anchor, text: proposed },
+      );
+      await expect(proposal(window)).toHaveCount(1);
 
-    await acceptProposal(window);
-    await expect
-      .poll(onDisk, { timeout: 10_000 })
-      .toBe(noted.replace('Dernier paragraphe.', 'Dernier paragraphe. PROPOSÉ.'));
-  } finally {
-    await stop(session);
-  }
+      // La note au bout du premier paragraphe, par le bouton : le curseur passe dans la définition.
+      await line(window, 'Premier paragraphe').click();
+      await window.keyboard.press('End');
+      await window.locator('button[title^="Note de bas de page"]').first().click();
+      await window.keyboard.type('Texte de la note.');
+      await expect.poll(onDisk, { timeout: 10_000 }).toBe(noted);
+      await expect(proposal(window)).toHaveCount(1);
 
-  // Sur le disque, l'app fermée : la seule décision est celle de l'auteur.
-  const research = query<{ decision: string }>(
-    join(projectDir, '.cliodeck', 'brain.db'),
-    'SELECT decision FROM history_proposal_events ORDER BY rowid',
-  );
-  expect(research.map((r) => r.decision)).toEqual(['accepted']);
-  const usage = query<{ decision: string }>(
-    join(projectDir, '.cliodeck', 'journal.db'),
-    'SELECT decision FROM proposal_adjudications ORDER BY rowid',
-  );
-  expect(usage.map((r) => r.decision)).toEqual(['accepted']);
-});
+      await acceptProposal(window);
+      await expect.poll(onDisk, { timeout: 10_000 }).toBe(accepted);
+    } finally {
+      await stop(session);
+    }
+
+    // Sur le disque, l'app fermée : la seule décision est celle de l'auteur.
+    const research = query<{ decision: string }>(
+      join(projectDir, '.cliodeck', 'brain.db'),
+      'SELECT decision FROM history_proposal_events ORDER BY rowid',
+    );
+    expect(research.map((r) => r.decision)).toEqual(['accepted']);
+    const usage = query<{ decision: string }>(
+      join(projectDir, '.cliodeck', 'journal.db'),
+      'SELECT decision FROM proposal_adjudications ORDER BY rowid',
+    );
+    expect(usage.map((r) => r.decision)).toEqual(['accepted']);
+  });
+}
 
 test('« Ouvrir la source » vers un chapitre déjà visité : le passage est à l’écran, pas l’ancienne position', async () => {
   const session = await start();

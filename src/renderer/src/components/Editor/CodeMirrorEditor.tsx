@@ -35,11 +35,13 @@ import { changeOrigin, changeOriginGuard, type ChangeOrigin } from '@/editor/cm/
 import { minimalChanges } from '@/editor/cm/minimal-changes';
 import { editSelection, toggleInlineMark } from '@/editor/cm/inline-formatting';
 import {
+  afterProposalsEffect,
+  appendsAfterProposals,
   proposals,
   type Proposal,
   type ProposalsInstance,
 } from '@/editor/proposals';
-import type { EditorFacade } from '@/editor/facade';
+import type { DocChange, EditorFacade } from '@/editor/facade';
 import { editorStateKey, editorStates } from './editor-state-memory';
 import { recordAdjudication } from './proposals-ipc';
 import { normalizeInsertPayload } from './insert-payload';
@@ -246,11 +248,13 @@ function focusIsFree(): boolean {
  * sans `userEvent` se fondrait dans la frappe voisine, et Cmd+Z emporterait les deux. Chaque texte
  * inséré est coupé sur `\n` : dans un fichier CRLF, une chaîne passée telle quelle ne l'est que sur
  * le séparateur déclaré. Le curseur demandé est borné par la longueur d'arrivée, en offsets du
- * document : celle du texte reçu compte deux unités par fin de ligne CRLF.
+ * document : celle du texte reçu compte deux unités par fin de ligne CRLF. Un ajout au bout du
+ * document marqué `afterProposals` (la définition d'une note) ne touche pas la proposition qui
+ * finit là.
  */
 function applyChanges(
   view: EditorView,
-  changes: ReadonlyArray<{ from: number; to: number; insert: string }>,
+  changes: ReadonlyArray<DocChange>,
   cursorOffset: number | undefined,
   origin: ChangeOrigin | undefined
 ): boolean {
@@ -258,11 +262,13 @@ function applyChanges(
   const set = view.state.changes(
     changes.map(({ from, to, insert }) => ({ from, to, insert: Text.of(insert.split('\n')) }))
   );
+  const end = view.state.doc.length;
   view.dispatch({
     changes: set,
     ...(cursorOffset !== undefined
       ? { selection: EditorSelection.cursor(Math.max(0, Math.min(cursorOffset, set.newLength))) }
       : {}),
+    ...(appendsAfterProposals(changes, end) ? { effects: afterProposalsEffect.of({ from: end, to: end }) } : {}),
     annotations: [changeOrigin.of(origin ?? 'programmatic'), isolateHistory.of('full')],
   });
   return true;
@@ -315,6 +321,7 @@ function createFacade(
         annotations: changeOrigin.of(origin ?? 'programmatic'),
       });
     },
+    getProposalRanges: () => view.state.field(proposalsInstance.field).map((p) => p.range),
     propose: (partial) => {
       // L'effet passerait, pas le texte : accepter journaliserait une décision sans rien écrire.
       if (view.state.readOnly) return false;

@@ -171,11 +171,22 @@ export function nextFootnoteNumber(content: string): number {
  * (L01-6). Le texte obtenu est celui du calcul d'avant, qui posait déjà la définition en fin de
  * document, derrière celles qui s'y trouvaient. Positions, longueurs et texte sont ceux du
  * document (`EditorFacade.getDocText`) : une fin de ligne y vaut 1, quel que soit le fichier.
+ *
+ * `pending` : les plages des propositions en attente. Une proposition qui finit au bout du texte ou
+ * dans les blancs de fin (un brouillon envoyé sans curseur posé y attend) garde ces blancs, et la
+ * définition s'ajoute après eux, marquée `afterProposals` : elle ne la touche pas, et un brouillon
+ * accepté reste séparé d'elle par une ligne vide. Seul cas où le texte diffère de celui d'avant :
+ * des blancs de fin en plus.
  */
 export function planFootnoteInsertion(
   doc: string,
-  position: number
-): { changes: Array<{ from: number; to: number; insert: string }>; cursor: number; footnoteNumber: number } {
+  position: number,
+  pending: ReadonlyArray<{ from: number; to: number }> = []
+): {
+  changes: Array<{ from: number; to: number; insert: string; afterProposals?: boolean }>;
+  cursor: number;
+  footnoteNumber: number;
+} {
   const footnoteNumber = nextFootnoteNumber(doc);
   const at = Math.max(0, Math.min(position, doc.length));
   const call = `[^${footnoteNumber}]`;
@@ -184,6 +195,7 @@ export function planFootnoteInsertion(
   const end = doc.trimEnd().length;
   if (at >= end) {
     // Le curseur est dans ces blancs : l'appel et la définition les remplacent d'un seul tenant.
+    // Une proposition qui y attend au curseur ou après est touchée, comme par une frappe.
     return {
       changes: [{ from: at, to: doc.length, insert: call + definition }],
       cursor: at + call.length + definition.length,
@@ -193,6 +205,20 @@ export function planFootnoteInsertion(
   // Ce que les blancs de fin ont déjà de la définition (sa ligne vide) reste en place.
   let kept = 0;
   while (end + kept < doc.length && doc[end + kept] === definition[kept]) kept++;
+  // La définition commencerait à `end + kept`. Une proposition qui finit là ou plus loin serait
+  // touchée, donc retirée ; une qui finit dans les blancs de fin verrait changer ce qui la suit, que
+  // son texte compte (accepté, un brouillon se collerait à la définition, que pandoc imprimerait en
+  // clair). Les blancs restent alors, et la définition vient après eux.
+  if (pending.some((r) => r.to >= end + kept || r.to > end)) {
+    return {
+      changes: [
+        { from: at, to: at, insert: call },
+        { from: doc.length, to: doc.length, insert: definition, afterProposals: true },
+      ],
+      cursor: doc.length + call.length + definition.length,
+      footnoteNumber,
+    };
+  }
   return {
     changes: [
       { from: at, to: at, insert: call },

@@ -1,4 +1,5 @@
-import { EditorState } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
+import { history, isolateHistory, redo, undo } from '@codemirror/commands';
 import { describe, expect, it } from 'vitest';
 
 import { changeOrigin, resolveOrigin } from '../cm/change-origin';
@@ -10,6 +11,7 @@ import {
 } from '../proposals';
 import {
   addProposalEffect,
+  afterProposalsEffect,
   resolveProposalEffect,
 } from '../proposals/state';
 
@@ -156,6 +158,93 @@ describe('propositions : remapping et invalidation', () => {
     }).state;
     expect(pending(next, h.instance)).toHaveLength(0);
     expect(h.events.map((e) => e.decision)).toEqual(['invalidated']);
+  });
+});
+
+/**
+ * La définition d'une note s'ajoute au bout du document, après les propositions en attente : elle
+ * ne touche pas celle qui finit là, qui reste devant elle (revue L01-6), et Cmd+Z, qui la retire, non
+ * plus. Sans l'effet, ou pour toute autre édition, le contact retire la proposition, comme avant.
+ */
+describe('propositions : ajout au bout du document après elles (afterProposalsEffect)', () => {
+  const DOC = 'Texte.';
+  const APPEND = { from: DOC.length, insert: '\n\n[^1]: ' };
+  const AFTER = afterProposalsEffect.of({ from: DOC.length, to: DOC.length });
+
+  function withProposal(range: { from: number; to: number }, extensions: Extension[] = []) {
+    const events: ProposalAdjudicationEvent[] = [];
+    const instance = proposals({ onEvent: (e) => events.push(e), labels: LABELS });
+    const state = EditorState.create({ doc: DOC, extensions: [instance.extension, ...extensions] }).update({
+      effects: addProposalEffect.of(makeProposal({ id: 'fin', range, proposed: '\n\nBrouillon.' })),
+    }).state;
+    return { events, instance, state };
+  }
+
+  it('l’ajout au bout du document : la proposition reste, devant le texte ajouté', () => {
+    const { events, instance, state } = withProposal({ from: DOC.length, to: DOC.length });
+    const next = state.update({ changes: APPEND, effects: AFTER, annotations: changeOrigin.of('programmatic') }).state;
+    expect(events).toHaveLength(0);
+    expect(pending(next, instance).map((p) => p.range)).toEqual([{ from: DOC.length, to: DOC.length }]);
+  });
+
+  it('une proposition qui remplace la fin du texte reste aussi, sa plage intacte', () => {
+    const { events, instance, state } = withProposal({ from: 0, to: DOC.length });
+    const next = state.update({ changes: APPEND, effects: AFTER, annotations: changeOrigin.of('programmatic') }).state;
+    expect(events).toHaveLength(0);
+    expect(pending(next, instance).map((p) => p.range)).toEqual([{ from: 0, to: DOC.length }]);
+  });
+
+  it('Cmd+Z retire l’ajout sans toucher la proposition, Cmd+Maj+Z le remet de même', () => {
+    const { events, instance, state } = withProposal({ from: DOC.length, to: DOC.length }, [history()]);
+    let current = state.update({
+      changes: [{ from: 1, insert: '[^1]' }, APPEND],
+      effects: AFTER,
+      annotations: [changeOrigin.of('programmatic'), isolateHistory.of('full')],
+    }).state;
+    const run = (command: typeof undo) => {
+      expect(command({ state: current, dispatch: (tr) => (current = tr.state) })).toBe(true);
+    };
+
+    run(undo);
+    expect(current.doc.toString()).toBe(DOC);
+    expect(pending(current, instance).map((p) => p.range)).toEqual([{ from: DOC.length, to: DOC.length }]);
+
+    run(redo);
+    expect(current.doc.toString()).toBe('T[^1]exte.\n\n[^1]: ');
+    expect(pending(current, instance).map((p) => p.range)).toEqual([{ from: DOC.length + 4, to: DOC.length + 4 }]);
+
+    run(undo);
+    expect(events).toHaveLength(0);
+    expect(pending(current, instance)).toHaveLength(1);
+  });
+
+  it('témoin : sans l’effet, le contact retire la proposition', () => {
+    const { events, instance, state } = withProposal({ from: DOC.length, to: DOC.length });
+    const next = state.update({ changes: APPEND, annotations: changeOrigin.of('programmatic') }).state;
+    expect(pending(next, instance)).toHaveLength(0);
+    expect(events.map((e) => e.decision)).toEqual(['invalidated']);
+  });
+
+  it('témoin : l’effet ne couvre que sa plage au bout du document', () => {
+    const { events, instance, state } = withProposal({ from: 2, to: 2 });
+    const next = state.update({
+      changes: [{ from: 2, insert: '[^1]' }, APPEND],
+      effects: AFTER,
+      annotations: changeOrigin.of('programmatic'),
+    }).state;
+    expect(pending(next, instance)).toHaveLength(0);
+    expect(events.map((e) => e.decision)).toEqual(['invalidated']);
+  });
+
+  it('témoin : un remplacement qui finit au bout du document la retire, effet ou non', () => {
+    const { events, instance, state } = withProposal({ from: DOC.length, to: DOC.length });
+    const next = state.update({
+      changes: { from: DOC.length - 1, to: DOC.length, insert: '!\n\n[^1]: ' },
+      effects: AFTER,
+      annotations: changeOrigin.of('programmatic'),
+    }).state;
+    expect(pending(next, instance)).toHaveLength(0);
+    expect(events.map((e) => e.decision)).toEqual(['invalidated']);
   });
 });
 

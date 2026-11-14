@@ -741,10 +741,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     // Deux insertions localisées, l'appel au curseur et la définition en fin de document : réécrire
     // du curseur à la fin retirait les propositions IA en attente plus loin, et chaque retrait partait
-    // aux journaux comme une décision (L01-6). L'éditeur reçoit l'édition directement, curseur dans
-    // la définition. Le miroir suit par la vue, et une vue en lecture seule refuse. Le texte et la
-    // position sont en offsets du document : une fin de ligne y vaut 1, même dans un fichier CRLF.
-    const plan = planFootnoteInsertion(editorFacade.getDocText(), markdownPosition);
+    // aux journaux comme une décision (L01-6). Une proposition qui attend au bout du document reste
+    // devant la définition. L'éditeur reçoit l'édition directement, curseur dans la définition. Le
+    // miroir suit par la vue, et une vue en lecture seule refuse. Le texte et la position sont en
+    // offsets du document : une fin de ligne y vaut 1, même dans un fichier CRLF.
+    const plan = planFootnoteInsertion(
+      editorFacade.getDocText(),
+      markdownPosition,
+      editorFacade.getProposalRanges()
+    );
     if (!editorFacade.applyChanges(plan.changes, plan.cursor)) return null;
     editorFacade.focus();
     logger.store('Editor', 'Footnote inserted at position', {

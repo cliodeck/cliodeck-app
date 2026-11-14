@@ -14,6 +14,19 @@ import type { ChangeOrigin } from './cm/change-origin';
 import type { SelectionEdit } from './cm/inline-formatting';
 import type { Proposal } from './proposals';
 
+/** Un changement en offsets de `EditorFacade.getDocText`. */
+export interface DocChange {
+  from: number;
+  to: number;
+  insert: string;
+  /**
+   * Une insertion pure au bout du document qui vient après les propositions en attente (la
+   * définition d'une note) : elle ne touche pas celle qui finit là, qui reste devant elle. Sans
+   * effet sur un autre changement, ou si un autre changement atteint aussi le bout du document.
+   */
+  afterProposals?: boolean;
+}
+
 export interface EditorFacade {
   /** Le moteur qui implémente cette façade. */
   readonly engine: 'cm6';
@@ -87,11 +100,7 @@ export interface EditorFacade {
    * `cursorOffset` si fourni, en offsets du document d'arrivée ; sinon CM6 le reporte à travers
    * les changements. Rend faux si rien n'a changé : vue en lecture seule, ou aucun changement.
    */
-  applyChanges(
-    changes: ReadonlyArray<{ from: number; to: number; insert: string }>,
-    cursorOffset?: number,
-    origin?: ChangeOrigin
-  ): boolean;
+  applyChanges(changes: ReadonlyArray<DocChange>, cursorOffset?: number, origin?: ChangeOrigin): boolean;
 
   /** Ajoute du texte en fin de document. */
   appendText(text: string, origin?: ChangeOrigin): void;
@@ -104,6 +113,9 @@ export interface EditorFacade {
    * texte, sans jamais retomber sur une insertion directe.
    */
   propose(proposal: Partial<Proposal>): boolean;
+
+  /** Les plages des propositions en attente, en offsets du document. */
+  getProposalRanges(): ReadonlyArray<{ from: number; to: number }>;
 
   /**
    * Fait défiler jusqu'à la ligne (1-indexée), y place le curseur, focus. Sans le focus si

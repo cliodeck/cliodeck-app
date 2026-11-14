@@ -37,6 +37,7 @@ function fakeFacade(proposals: Array<Partial<Proposal>>, accepts = true): Editor
       proposals.push(p);
       return accepts;
     },
+    getProposalRanges: () => [],
     revealLine: () => undefined,
     focus: () => undefined,
     onContentChange: () => () => undefined,

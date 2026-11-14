@@ -58,6 +58,7 @@ function fakeFacade(
       calls.proposals.push(p);
       return accepts;
     },
+    getProposalRanges: () => [],
     revealLine: () => undefined,
     focus: () => undefined,
     onContentChange: () => () => undefined,

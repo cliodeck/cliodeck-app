@@ -279,6 +279,124 @@ describe('insérer une note : seules les propositions qu’elle touche sont reti
   });
 });
 
+/**
+ * La définition d'une note va au bout du document : là même où attend un brouillon envoyé sans
+ * curseur posé (`insertDraftAtCursor`), ou celui d'un auteur qui écrit la fin d'un texte sans fin
+ * de ligne finale. Elle le touchait, et il était retiré et journalisé `invalidated` (revue L01-6).
+ */
+describe('insérer une note : une proposition au bout du document reste devant la définition', () => {
+  const endOfP1 = TEXT.indexOf(P1) + P1.length;
+  const noted = (text: string) => text.replace(P1, `${P1}[^1]`);
+
+  it('brouillon envoyé sans curseur posé : il attend au bout du document, la note ne le retire pas', async () => {
+    await mountArticle();
+    // Aucun curseur posé par l'auteur : le brouillon va au bout du document, après la fin de ligne finale.
+    let insertion = { mode: 'unavailable' } as DraftInsertion;
+    act(() => {
+      insertion = editor().insertDraftAtCursor(DRAFT, { model: 'modele', task: 'brainstorm' });
+    });
+    if (insertion.mode !== 'cursor') throw new Error('La proposition n’a pas été posée');
+    const decided = vi.fn();
+    onceProposalDecided(insertion.proposalId, decided);
+    expect(proposalBoxes()).toHaveLength(1);
+
+    placeCursor(endOfP1);
+    pressFootnote();
+
+    // Les blancs de fin restent devant le brouillon, la définition vient après lui.
+    expect(docText()).toBe(`${noted(TEXT)}\n\n[^1]: `);
+    expect(adjudications).toEqual([]);
+    expect(proposalBoxes()).toHaveLength(1);
+
+    // Le texte de la note se tape après le brouillon, sans le toucher.
+    type('Source.');
+    expect(adjudications).toEqual([]);
+
+    // Accepté, le brouillon tombe à la fin du texte, en bloc à part, et la définition reste séparée
+    // de lui par une ligne vide : collée, pandoc l'imprimerait en clair.
+    acceptProposal();
+    expect(docText()).toBe(`${noted(TEXT)}\n${DRAFT}\n\n[^1]: Source.`);
+    expect(adjudications.map((e) => e.decision)).toEqual(['accepted']);
+    expect(decided).toHaveBeenCalledWith('accepted');
+  });
+
+  it('Cmd+Z retire la note et son texte sans toucher le brouillon, qui reste au bout', async () => {
+    await mountArticle();
+    act(() => {
+      editor().insertDraftAtCursor(DRAFT, { model: 'modele', task: 'brainstorm' });
+    });
+    placeCursor(endOfP1);
+    pressFootnote();
+    type('Source.');
+
+    undoOnce();
+    undoOnce();
+    expect(docText()).toBe(TEXT);
+    expect(adjudications).toEqual([]);
+    expect(proposalBoxes()).toHaveLength(1);
+
+    acceptProposal();
+    expect(docText()).toBe(`${TEXT}\n${DRAFT}`);
+    expect(adjudications.map((e) => e.decision)).toEqual(['accepted']);
+  });
+
+  it('texte sans fin de ligne finale, curseur et proposition au bout : la note plus haut ne la retire pas', async () => {
+    const text = TEXT.trimEnd();
+    await mountArticle(text);
+    proposeDraftAt(text.length);
+
+    placeCursor(endOfP1);
+    pressFootnote();
+
+    // Rien à garder au bout : le même texte que sans proposition.
+    expect(docText()).toBe(`${noted(text)}\n\n[^1]: `);
+    expect(adjudications).toEqual([]);
+    expect(proposalBoxes()).toHaveLength(1);
+
+    acceptProposal();
+    expect(docText()).toBe(`${noted(text)}\n\n${DRAFT}\n\n[^1]: `);
+    expect(adjudications.map((e) => e.decision)).toEqual(['accepted']);
+  });
+
+  it('proposition dans les blancs de fin : acceptée, elle ne colle pas la définition', async () => {
+    const text = `${TEXT}\n\n`;
+    await mountArticle(text);
+    // Entre deux des trois fins de ligne finales.
+    proposeDraftAt(TEXT.length);
+
+    placeCursor(endOfP1);
+    pressFootnote();
+    expect(adjudications).toEqual([]);
+
+    acceptProposal();
+    expect(docText()).toMatch(new RegExp(`${DRAFT}\\n\\n+\\[\\^1\\]: $`));
+    expect(adjudications.map((e) => e.decision)).toEqual(['accepted']);
+  });
+
+  it('témoin : au bout du dernier paragraphe, avant la fin de ligne finale, le texte est celui d’avant', async () => {
+    await mountArticle();
+    proposeDraftAt(TEXT.length - 1);
+
+    placeCursor(endOfP1);
+    pressFootnote();
+
+    expect(docText()).toBe(`${noted(TEXT)}\n[^1]: `);
+    expect(adjudications).toEqual([]);
+    expect(proposalBoxes()).toHaveLength(1);
+  });
+
+  it('témoin : un curseur dans les blancs de fin pose la note sur la proposition qui y attend, qui est retirée', async () => {
+    await mountArticle();
+    proposeDraftAt(TEXT.length);
+
+    placeCursor(TEXT.length);
+    pressFootnote();
+
+    expect(adjudications.map((e) => e.decision)).toEqual(['invalidated']);
+    expect(proposalBoxes()).toHaveLength(0);
+  });
+});
+
 describe('renuméroter les notes : le curseur reste là où était l’auteur', () => {
   const NOTES =
     '# Titre\n\nPremier appel[^3] dans le texte, puis la suite de la phrase.\n\nSecond appel[^1].\n\n[^1]: un.\n[^3]: trois.\n';
