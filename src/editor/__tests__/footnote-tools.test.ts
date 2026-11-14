@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { pandocAvailable } from '../../../backend/__tests__/helpers/native-guards';
 import {
+  collectFootnoteDefinitions,
   collectFootnotes,
   prefixFootnoteLabels,
   nextFootnoteNumber,
@@ -310,6 +311,46 @@ describe('collectFootnotes', () => {
     const occ = collectFootnotes(doc);
 
     expect(occ).toEqual([]);
+  });
+});
+
+/**
+ * L10-6 : l'export Word interne retirait les définitions ligne à ligne, jusque dans un bloc de
+ * code, et ne gardait d'une note à plusieurs paragraphes qu'un seul. Il les prend désormais à
+ * leurs positions dans l'arbre Lezer, comme le préfixage par chapitre.
+ */
+describe('collectFootnoteDefinitions', () => {
+  it('rend chaque définition, du `[^` à la fin de son dernier paragraphe', () => {
+    const doc = 'Texte[^1].\n\n[^1]: Premier.\n\n    Second.\n\nCorps.\n';
+    const [def] = collectFootnoteDefinitions(doc);
+
+    expect(collectFootnoteDefinitions(doc)).toHaveLength(1);
+    expect(def.label).toBe('1');
+    expect(doc.slice(def.from, def.to)).toBe('[^1]: Premier.\n\n    Second.');
+    expect(doc.slice(def.bodyFrom, def.to)).toBe('Premier.\n\n    Second.');
+  });
+
+  it('ignore une ligne de définition dans un bloc de code', () => {
+    const doc = 'Note[^a].\n\n```\n[^a]: exemple\n```\n\n[^a]: Vraie.\n';
+    const defs = collectFootnoteDefinitions(doc);
+
+    expect(defs.map((d) => doc.slice(d.bodyFrom, d.to))).toEqual(['Vraie.']);
+  });
+
+  it('sépare deux définitions consécutives, et garde leur ordre', () => {
+    const doc = '[^a]: A.\n[^lester-danzig]: B.\n';
+
+    expect(collectFootnoteDefinitions(doc).map((d) => [d.label, doc.slice(d.from, d.to)])).toEqual([
+      ['a', '[^a]: A.'],
+      ['lester-danzig', '[^lester-danzig]: B.'],
+    ]);
+  });
+
+  it('une définition vide : son corps l’est aussi', () => {
+    const doc = 'X[^1].\n\n[^1]:\n';
+    const [def] = collectFootnoteDefinitions(doc);
+
+    expect(doc.slice(def.bodyFrom, def.to)).toBe('');
   });
 });
 

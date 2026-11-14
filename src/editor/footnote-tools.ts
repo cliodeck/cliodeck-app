@@ -118,6 +118,36 @@ export function collectFootnotes(content: string): FootnoteOccurrence[] {
 }
 
 /**
+ * Les définitions de notes, ordre du document : de `[^` à la fin de leur dernier paragraphe
+ * (`to`), et le début de leur texte après `]:` et ses espaces (`bodyFrom`).
+ *
+ * La définition est un bloc composite de l'arbre Lezer, comme chez pandoc : ses paragraphes
+ * indentés en font partie, et une ligne collée sous elle sans retrait aussi (continuation
+ * paresseuse). Une ligne `[^1]: …` dans un bloc de code n'en est pas une. Une définition écrite
+ * dans une autre reste dans le texte de celle-ci.
+ */
+export function collectFootnoteDefinitions(
+  content: string
+): Array<{ label: string; from: number; to: number; bodyFrom: number }> {
+  const out: Array<{ label: string; from: number; to: number; bodyFrom: number }> = [];
+  parse(content).iterate({
+    enter: (node) => {
+      if (node.name !== 'FootnoteDefinition') return;
+      const label = node.node.getChild('FootnoteLabel');
+      // La seconde marque est le `]:`.
+      const close = node.node.getChildren('FootnoteMark')[1];
+      if (label && close) {
+        let bodyFrom = close.to;
+        while (bodyFrom < node.to && (content[bodyFrom] === ' ' || content[bodyFrom] === '\t')) bodyFrom++;
+        out.push({ label: content.slice(label.from, label.to), from: node.from, to: node.to, bodyFrom });
+      }
+      return false;
+    },
+  });
+  return out;
+}
+
+/**
  * Prochain numéro de note disponible : max des labels numériques réels + 1.
  * Ignore le contenu des blocs de code par construction (parse Lezer).
  */
