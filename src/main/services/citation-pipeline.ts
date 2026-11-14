@@ -116,22 +116,54 @@ export function citationKeysIn(markdown: string, options: { narrative?: boolean 
   return [...keys];
 }
 
+/** Entités nommées que citeproc écrit ; les autres sont numériques (`&#60;`, `&#38;`). */
+const NAMED_ENTITIES = new Map([
+  ['lt', '<'],
+  ['gt', '>'],
+  ['quot', '"'],
+  ['amp', '&'],
+  ['apos', "'"],
+]);
+
+/**
+ * Un caractère rendu par une entité, tel qu'il doit s'écrire en markdown. `<` et `&` sont
+ * échappés : un `<persName>` nu est une balise HTML brute pour pandoc, que l'écrivain LaTeX
+ * supprime avec son contenu apparent, et un `&lt;` nu serait décodé une seconde fois. `\<` et
+ * `\&` sont des échappements de pandoc comme de `marked` (Word interne) : le caractère reste du
+ * texte.
+ */
+function entityToMarkdown(char: string): string {
+  return char === '<' || char === '&' ? `\\${char}` : char;
+}
+
 /**
  * citeproc rend du HTML (`<i>Titre</i>`, entités). Quand la citation est
  * recopiée DANS le markdown (note de l'auteur, style auteur-date), elle doit
  * redevenir du markdown, sinon l'italique des titres est perdu en route.
+ * Les entités sont décodées en une seule passe, et un chevron ou une esperluette du titre
+ * reste du texte (`entityToMarkdown`). Seuls les blancs ASCII se réduisent : les espaces
+ * insécables que citeproc pose autour des guillemets et devant `:` ou `?` en français (U+00A0,
+ * U+202F) restent, et pandoc les rend en `~` et `\,`.
  */
 export function cslHtmlToMarkdown(html: string): string {
   return html
     .replace(/<\/?(?:i|em)>/g, '*')
     .replace(/<\/?(?:b|strong)>/g, '**')
     .replace(/<[^>]+>/g, '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(parseInt(code, 10)))
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
+    .replace(
+      /&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi,
+      (entity: string, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+        const code = dec !== undefined ? parseInt(dec, 10) : hex !== undefined ? parseInt(hex, 16) : undefined;
+        const char =
+          code === undefined
+            ? NAMED_ENTITIES.get((name ?? '').toLowerCase())
+            : code <= 0x10ffff
+              ? String.fromCodePoint(code)
+              : undefined;
+        return char === undefined ? entity : entityToMarkdown(char);
+      }
+    )
+    .replace(/[ \t\r\n\f\v]+/g, ' ')
     .trim();
 }
 

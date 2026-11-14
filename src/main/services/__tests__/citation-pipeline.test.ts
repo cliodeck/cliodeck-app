@@ -262,11 +262,86 @@ describe('appendEngineCitations — notes et bibliographie du moteur, en markdow
     );
     expect(md).toBe(
       'Texte.\n\n# Literatur {.unnumbered}\n\n' +
-        'Dupont, Jean. *Archives & pouvoirs*. 2020.\n\nMartin, Paul. *Autre*. 2021.\n'
+        'Dupont, Jean. *Archives \\& pouvoirs*. 2020.\n\nMartin, Paul. *Autre*. 2021.\n'
     );
   });
 
   it('sans citation rendue, le markdown reste tel quel : ni titre ni note', () => {
     expect(appendEngineCitations('Texte.', { footnotes: [], bibliography: [] }, 'Références')).toBe('Texte.');
+  });
+
+  /**
+   * Revue de L10-5 : citeproc écrit un chevron du titre en entité (`&#60;`). Décodé en `<` nu, il
+   * rendait au markdown un `<persName>` que pandoc lit comme une balise HTML brute, et que
+   * l'écrivain LaTeX supprime : « Encoder les personnes avec <persName> dans la TEI » sortait
+   * « Encoder les personnes avec dans la TEI ». Échappé (`\<`), il reste du texte, pour pandoc
+   * comme pour `marked` (Word interne). Même chose pour `&` : `&#38;lt;` décodé en `&lt;`, pandoc
+   * l'aurait décodé une seconde fois.
+   */
+  const tei = makeCitation({
+    id: 'Durand_2019',
+    type: 'article',
+    author: 'Durand, Marie',
+    year: '2019',
+    title: 'Encoder les personnes avec <persName> dans la TEI',
+    journal: 'Revue',
+  });
+
+  it('un chevron du titre reste du texte, en note comme en bibliographie', async () => {
+    const processed = await processMarkdownCitations('Texte [@Durand_2019].\n', {
+      resolve: resolveMap({ Durand_2019: tei }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+    // Ce que citeproc rend vraiment : l'entité, pas la balise.
+    expect(processed.footnotes[0].text).toContain('&#60;persName&#62;');
+
+    const md = appendEngineCitations(processed.md, processed, 'Références');
+
+    expect(md).toMatch(/^\[\^1\]: Marie Durand, «\u00a0Encoder les personnes avec \\<persName> dans la TEI\u00a0»/m);
+    expect(md).toMatch(/^Durand, Marie\. «\u00a0Encoder les personnes avec \\<persName> dans la TEI\u00a0»/m);
+    expect(md).not.toMatch(/(?<!\\)<persName>/);
+  });
+
+  it('en place (style auteur-date, ou note de l’auteur), le chevron reste du texte aussi', async () => {
+    const processed = await processMarkdownCitations('Texte.[^1]\n\n[^1]: Voir [@Durand_2019].\n', {
+      resolve: resolveMap({ Durand_2019: tei }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+    expect(processed.md).toContain('\\<persName> dans la TEI');
+    expect(processed.md).not.toMatch(/(?<!\\)<persName>/);
+  });
+
+  /**
+   * citeproc pose en français des espaces insécables autour des guillemets (U+00A0) et devant
+   * `:` ou `?` (U+202F). Réduits à une espace ordinaire avec les autres blancs, ils laissaient la
+   * ligne se couper entre « et le titre ; recopiés tels quels, pandoc les rend en `~` et `\,`.
+   */
+  it('les espaces insécables de citeproc restent, en note comme en bibliographie', async () => {
+    const processed = await processMarkdownCitations('Texte [@Durand_2019].\n', {
+      resolve: resolveMap({ Durand_2019: makeCitation({ ...tei, title: 'Encoder : qui ?' }) }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+
+    const md = appendEngineCitations(processed.md, processed, 'Références');
+
+    expect(md).toMatch(/^\[\^1\]: Marie Durand, «\u00a0Encoder\u202f: qui\u202f\?\u00a0»/m);
+    expect(md).toMatch(/^Durand, Marie\. «\u00a0Encoder\u202f: qui\u202f\?\u00a0»/m);
+  });
+
+  it('une entité n’est décodée qu’une fois : `&` et `<` sortent échappés', () => {
+    const md = appendEngineCitations(
+      'Texte.',
+      {
+        footnotes: [],
+        bibliography: [
+          '<div class="csl-entry">Dupont, Jean. <i>Le &#38;lt;br&#38;gt; et &#60;teiHeader&#62;</i>. 2020.</div>',
+        ],
+      },
+      'Références'
+    );
+    expect(md).toContain('*Le \\&lt;br\\&gt; et \\<teiHeader>*. 2020.');
   });
 });

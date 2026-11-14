@@ -172,6 +172,44 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())('export PDF : les cit
     COMPILE_MS
   );
 
+  /**
+   * Revue de L10-5 : le chevron d'un titre (un élément TEI cité, cas courant en humanités
+   * numériques) sortait du moteur en `<persName>` nu ; pandoc le lisait comme une balise HTML
+   * brute, que l'écrivain LaTeX supprime, et le mot disparaissait de la note et de la
+   * bibliographie, sans un mot.
+   */
+  it(
+    'style intégré : le chevron d’un titre s’imprime, en note comme en bibliographie',
+    async () => {
+      writeFileSync(
+        join(project, 'refs.bib'),
+        BIBLIOGRAPHY +
+          `@article{Durand_2019,
+  author = {Durand, Marie},
+  title = {Encoder les personnes avec <persName> dans la TEI},
+  journal = {Revue},
+  year = {2019}
+}
+`
+      );
+      await bibliographyService.loadFromFile(join(project, 'refs.bib'));
+
+      const result = await exportArticle('Texte [@Durand_2019].\n', {
+        bibliographyPath: join(project, 'refs.bib'),
+        citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+      });
+
+      expect(result, result.error).toMatchObject({ success: true });
+      expect(result.unresolvedCitations).toBeUndefined();
+      if (pdftotextAvailable()) {
+        const text = pdfText(join(project, 'article.pdf')).replace(/\s+/g, ' ');
+        // Une fois en note, une fois en bibliographie.
+        expect(text.match(/avec <persName> dans la TEI/g), text).toHaveLength(2);
+      }
+    },
+    COMPILE_MS
+  );
+
   it(
     'pandoc avec le style du projet : la bibliographie a son titre, la clé fautive est signalée',
     async () => {
