@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { FileDown, X, AlertCircle, CheckCircle, Lightbulb } from 'lucide-react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
-import { useManuscriptStore } from '../../stores/manuscriptStore';
+import { currentRelativePath, useManuscriptStore } from '../../stores/manuscriptStore';
 import { resolveManuscriptContent } from '../../services/export-manuscript-content';
 import { exportErrorMessage, exportThrownMessage } from './export-error';
 import {
@@ -194,12 +194,17 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
           }
         | undefined;
       if (isBook) {
-        const relative = filePath?.startsWith(currentProject.path + '/')
-          ? filePath.slice(currentProject.path.length + 1)
-          : null;
+        const relative = currentRelativePath();
         const current = relative
           ? (chapters ?? []).find((c) => c.filePath === relative)
           : undefined;
+        // Même garde que la fenêtre PDF : le fichier ouvert n'est pas un chapitre (`abstract.md`,
+        // une note de lecture). L'export retombait sans un mot sur tout l'ouvrage (S12-2-4).
+        if (bookScope === 'chapter' && !current) {
+          setError(t('export.pdf.noChapterOpen'));
+          setIsExporting(false);
+          return;
+        }
         manuscript = {
           chapters,
           liveOverrides: relative ? { [relative]: getLiveContent() } : undefined,
