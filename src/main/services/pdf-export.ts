@@ -18,6 +18,7 @@ import {
   type ExportResult,
 } from './export-time-limit.js';
 import { stripLeadingHeading } from '../../editor/outline.js';
+import { speakerNotesToPandoc } from '../../editor/slides.js';
 import { removeResourceLinks, resolveProjectCsl, stageResourcePaths } from './export-project-files.js';
 import {
   BEAMER_STAGING_DIR,
@@ -882,6 +883,16 @@ export class PDFExportService {
         if (perChapterBib) {
           options = { ...options, bibliographyPath: undefined };
         }
+      }
+
+      // Notes du présentateur : pandoc ne connaît pas les lignes `Note:` du format reveal.js et
+      // les imprimait sur la diapositive projetée (S12-1-8). Balisées en `::: notes`, elles
+      // deviennent `\note{…}`, imprimées seulement quand la case « notes » des réglages beamer
+      // est cochée (`buildBeamerCustomizations`). Avant CitationEngine : ses notes et sa
+      // bibliographie, ajoutées en fin de texte, tomberaient sinon dans les notes de la dernière
+      // diapositive.
+      if (options.projectType === 'presentation') {
+        cleanedContent = speakerNotesToPandoc(cleanedContent);
       }
 
       // In-process CitationEngine pipeline (opt-in). Runs BEFORE pandoc —

@@ -219,6 +219,13 @@ export function buildBeamerCustomizations(cfg: BeamerConfig = {}): string[] {
     out.push('}');
   }
 
+  if (cfg.showNotes) {
+    // Les notes du présentateur, balisées en `::: notes` (`speakerNotesToPandoc`), sont des
+    // `\note{…}` : beamer ne les imprime que sous cette option, chacune sur une page après sa
+    // diapositive.
+    out.push('\\setbeameroption{show notes}');
+  }
+
   if (cfg.tocBeforeSection && cfg.showToc) {
     out.push(
       '\\AtBeginSection[]{',
@@ -263,10 +270,12 @@ function presentationArgs(
 
   if (cfg.sectionNumberInToc) args.push('-V', 'toc-numbering=true');
   if (!cfg.navigation) args.push('-V', 'navigation:empty');
-  if (cfg.showNotes) {
-    args.push('-V', 'classoption=handout');
-    args.push('-V', 'notes=show');
-  }
+  // Les notes elles-mêmes : `buildBeamerCustomizations` (`-V notes=show` était inerte : le
+  // gabarit beamer de pandoc n'a pas de variable `notes`). `handout` aplatit les pauses
+  // (`--incremental`, `. . .`) : sans lui, chaque étape d'une diapositive aurait sa page de
+  // notes, la même note répétée (mesuré : 6 pages au lieu de 4 pour deux diapositives notées,
+  // dont une à une pause).
+  if (cfg.showNotes) args.push('-V', 'classoption=handout');
   if (cfg.incremental) args.push('--incremental');
   if (cfg.showToc) {
     args.push('--toc');

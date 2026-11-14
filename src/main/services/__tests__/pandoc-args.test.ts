@@ -449,3 +449,25 @@ describe('buildBeamerCustomizations', () => {
     expect(avec).toContain('/tmp/w/beamer-custom.tex');
   });
 });
+
+/**
+ * Notes du présentateur (S12-1-8). Une fois balisées en `::: notes` (`speakerNotesToPandoc`),
+ * pandoc les écrit en `\note{…}`, que beamer n'imprime que sous `\setbeameroption{show notes}` :
+ * c'est le seul effet de la case « notes » des réglages beamer. `-V notes=show` était inerte (le
+ * gabarit beamer de pandoc n'a pas de variable `notes`, mesuré avec pandoc 3.13).
+ */
+describe('buildBeamerCustomizations — notes du présentateur', () => {
+  it('la case « notes » demande à beamer d’imprimer les pages de notes', () => {
+    expect(buildBeamerCustomizations({ showNotes: true })).toContain('\\setbeameroption{show notes}');
+    expect(buildBeamerCustomizations({ showNotes: false })).not.toContain('\\setbeameroption{show notes}');
+    expect(buildBeamerCustomizations()).not.toContain('\\setbeameroption{show notes}');
+  });
+
+  it('plus de `-V notes=show`, inerte ; `handout` reste lié à la case', () => {
+    const avec = buildPandocArgs({ ...BASE, projectType: 'presentation', beamerConfig: { showNotes: true } });
+    expect(variable(avec, 'notes')).toBeUndefined();
+    expect(variable(avec, 'classoption')).toBe('handout');
+    const sans = buildPandocArgs({ ...BASE, projectType: 'presentation', beamerConfig: { showNotes: false } });
+    expect(variable(sans, 'classoption')).toBeUndefined();
+  });
+});

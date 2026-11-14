@@ -20,7 +20,8 @@
  * avec le gabarit de pandoc, en sort pour ce chemin (voir `failsIn`).
  *
  * Compiler ne suffit pas toujours : le texte du PDF (pdftotext, gardé par sa présence) montre où
- * vont les notes d'un tableau dans un livre à notes de fin, et ce que devient une citation liée.
+ * vont les notes d'un tableau dans un livre à notes de fin, ce que devient une citation liée, et
+ * où vont les notes du présentateur d'une présentation (L10-3).
  *
  * Une image en chemin relatif au projet (`images/relative.png`) y est depuis L07-2 : pandoc tourne
  * dans le dossier temporaire de l'export, et sans `--resource-path` la remplaçait par sa légende,
@@ -50,6 +51,8 @@ import { delimiter, join } from 'path';
 import { inflateSync } from 'zlib';
 import { pdfExportService } from '../pdf-export.js';
 import type { ExportResult } from '../export-time-limit.js';
+import type { BeamerConfig } from '../pandoc-args.js';
+import { speakerNotesToPandoc } from '../../../editor/slides.js';
 import {
   DEFAULT_BOOK_SETTINGS,
   type BookSettings,
@@ -260,7 +263,8 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
     async function exportAs(
       projectType: ProjectType,
       markdown: string | readonly string[],
-      book: Partial<BookSettings> = {}
+      book: Partial<BookSettings> = {},
+      beamerConfig?: BeamerConfig
     ): Promise<{ result: ExportResult; outputPath: string }> {
       // Une espace dans le chemin du projet : `--resource-path` le passe en un seul argument. Le
       // séparateur des listes de chemins : pandoc découperait la liste sur lui.
@@ -297,7 +301,7 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
       }
 
       const content = typeof markdown === 'string' ? markdown : markdown.join('\n');
-      const result = await pdfExportService.exportToPDF({ ...common, projectType, content });
+      const result = await pdfExportService.exportToPDF({ ...common, projectType, content, beamerConfig });
       return { result, outputPath };
     }
 
@@ -305,9 +309,10 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
     async function expectCompiles(
       projectType: ProjectType,
       markdown: string | readonly string[],
-      book?: Partial<BookSettings>
+      book?: Partial<BookSettings>,
+      beamerConfig?: BeamerConfig
     ): Promise<string> {
-      const { result, outputPath } = await exportAs(projectType, markdown, book);
+      const { result, outputPath } = await exportAs(projectType, markdown, book, beamerConfig);
 
       expect(latexErrors(result)).toEqual([]);
       expect(result, result.error).toMatchObject({ success: true });
@@ -423,5 +428,236 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
         );
       }
     );
+
+    /**
+     * Notes du présentateur (S12-1-8, L10-3). Le gabarit de présentation écrit des lignes `Note:` :
+     * pandoc ne les connaît pas et les imprimait sur la diapositive projetée. Balisées en
+     * `::: notes`, elles deviennent `\note{…}`, que beamer n'imprime que si la case « notes » des
+     * réglages beamer est cochée, sur une page à part après la diapositive. Un `Note:` cité dans un
+     * bloc de code reste du code : c'est le découpage partagé (`src/editor/slides.ts`).
+     */
+    describe.skipIf(!pdftotextAvailable())('présentation : notes du présentateur (texte du PDF)', () => {
+      const DECK = [
+        '## Ouverture',
+        '',
+        'Autrice',
+        '',
+        'Note: NOTESECRETE pour moi.',
+        '',
+        '---',
+        '',
+        '## Syntaxe',
+        '',
+        '```markdown',
+        '---',
+        'Note: CODENOTE dans le code',
+        '```',
+        '',
+        'Texte visible.',
+        '',
+        'Note:',
+        'NOTEDEUX ici.',
+        '',
+      ].join('\n');
+
+      /** Le texte du PDF, page par page. La première est la page de titre (titre du banc). */
+      function pdfPages(pdf: string): string[] {
+        return pdfText(pdf).split('\f').slice(0, -1);
+      }
+
+      it('pandoc -t beamer : une note devient \\note{…}, le `Note:` du code reste du code', () => {
+        const tex = execFileSync(
+          'pandoc',
+          ['--from=markdown+autolink_bare_uris', '--to=beamer', '--slide-level=1'],
+          { input: speakerNotesToPandoc(DECK), encoding: 'utf8', env: toolEnv() }
+        );
+        expect(tex.match(/\\note\{/g)).toHaveLength(2);
+        expect(tex).toContain('\\note{NOTESECRETE pour moi.}');
+        expect(tex).toContain('\\note{NOTEDEUX ici.}');
+        expect(tex).toMatch(/\\AnnotationTok\{Note:\}\\CommentTok\{ CODENOTE dans le code\}/);
+      });
+
+      it(
+        'case décochée : aucune note sur les diapositives, le code entier',
+        async () => {
+          const pages = pdfPages(await expectCompiles('presentation', DECK, undefined, { showNotes: false }));
+          expect(pages).toHaveLength(3);
+          expect(pages.join('\n')).not.toMatch(/NOTESECRETE|NOTEDEUX/);
+          expect(pages[1]).toContain('Ouverture');
+          expect(pages[2]).toContain('Note: CODENOTE dans le code');
+          expect(pages[2]).toContain('Texte visible.');
+        },
+        COMPILE_MS
+      );
+
+      it(
+        'case cochée : chaque note sur sa page de notes, après sa diapositive, jamais sur elle',
+        async () => {
+          const pages = pdfPages(await expectCompiles('presentation', DECK, undefined, { showNotes: true }));
+          // Titre (sans note, sans page de notes), puis chaque diapositive suivie de ses notes.
+          expect(pages).toHaveLength(5);
+          expect(pages[1]).toContain('Ouverture');
+          expect(pages[1]).not.toContain('NOTESECRETE');
+          expect(pages[2]).toContain('NOTESECRETE pour moi.');
+          expect(pages[3]).toContain('Note: CODENOTE dans le code');
+          expect(pages[3]).not.toContain('NOTEDEUX');
+          expect(pages[4]).toContain('NOTEDEUX ici.');
+        },
+        COMPILE_MS
+      );
+
+      /**
+       * Un bloc de code dans une note : `\note{…}` ne peut pas contenir de verbatim (fancyvrb), comme
+       * une note de bas de page (`failsIn: ['presentation']`). Mesuré avec pandoc 3.13 et xelatex :
+       * case décochée, beamer ne compose pas la note et le PDF sort ; case cochée, la compilation
+       * échoue (« Argument of \FV@BeginScanning has an extra } »). Avant L10-3, la note s'imprimait
+       * sur la diapositive et compilait. L'échec se dit par la ligne LaTeX, jamais un PDF muet.
+       */
+      const CODE_IN_NOTE = '## Diapo\n\nTexte visible.\n\nNote:\nMontrer ce code :\n\n```r\nx <- 1\n```\n';
+
+      it(
+        'code dans une note, case décochée : le PDF sort, sans la note',
+        async () => {
+          const pages = pdfPages(await expectCompiles('presentation', CODE_IN_NOTE, undefined, { showNotes: false }));
+          expect(pages).toHaveLength(2);
+          expect(pages[1]).toContain('Texte visible.');
+          expect(pages.join('\n')).not.toContain('Montrer ce code');
+        },
+        COMPILE_MS
+      );
+
+      it(
+        'code dans une note, case cochée : l’échec nomme l’erreur et la ligne LaTeX',
+        async () => {
+          const { result, outputPath } = await exportAs('presentation', CODE_IN_NOTE, undefined, { showNotes: true });
+          expect(result.success).toBe(false);
+          const errors = latexErrors(result);
+          expect(errors.some((line) => line.startsWith('! '))).toBe(true);
+          expect(errors.some((line) => /^l\.\d+ /.test(line))).toBe(true);
+          expect(() => readFileSync(outputPath)).toThrow();
+        },
+        COMPILE_MS
+      );
+
+      /**
+       * Revue de L10-3. Un `Note:` dans du HTML brut n'ouvre pas de notes : sinon `::: notes` s'ouvrait
+       * dans le commentaire posé par Cmd+/ (`<!-- … -->`, toggleComment), le `-->` le fermait au
+       * milieu du bloc, et le `:::` de clôture s'imprimait sur la diapositive projetée, case cochée ou
+       * non. Un bloc de code indenté qui commence par `Note:` reste du code : la diapositive perdait
+       * ce code et ce qui le suit. Cmd+/ sur deux diapositives écrit un commentaire à cheval sur le
+       * `---`, que pandoc lit d'un seul tenant.
+       */
+      const RAW_DECK = [
+        '## Garde', '', 'Texte garde.', '', 'Note: NOTEGARDE', '',
+        '---', '',
+        '<!-- ## Commentee', '', '- Point COMMENTE', '', 'Note: NOTECOMMENTEE -->', '',
+        '---', '',
+        '## Apres commentaire', '', '<!--', 'Note: NOTEDANSCOMMENTAIRE', '-->', '', 'Texte apres commentaire.', '',
+        '---', '',
+        '## Code indente', '', 'Avant.', '', '    Note: CODEINDENTE', '    x <- 1', '', 'Apres code VISIBLE.', '',
+        '---', '',
+        '<!-- ## Cachee un', '', 'Note: NOTECACHEE1', '', '---', '', '## Cachee deux', '', 'Note: NOTECACHEE2 -->', '',
+        '---', '',
+        '## Fin', '', 'Fin.', '',
+      ].join('\n');
+
+      it.each([false, true])(
+        'HTML brut et code indenté, case %s : aucun `:::` imprimé, rien de projeté ne part aux notes',
+        async (showNotes) => {
+          const pages = pdfPages(await expectCompiles('presentation', RAW_DECK, undefined, { showNotes }));
+          const text = pages.join('\n');
+          expect(text).not.toContain(':::');
+          expect(text).not.toMatch(/COMMENTE|NOTEDANSCOMMENTAIRE|NOTECACHEE/);
+          // Titre, Garde (et sa page de notes, case cochée), la diapositive commentée (vide),
+          // Apres commentaire, Code indente, les deux diapositives commentées d'un seul tenant
+          // (un cadre vide), Fin.
+          const slides = showNotes ? [pages[0], pages[1], ...pages.slice(3)] : pages;
+          expect(slides).toHaveLength(7);
+          expect(slides[2].trim()).toBe('');
+          expect(slides[3]).toMatch(/Apres commentaire[\s\S]*Texte apres commentaire\./);
+          expect(slides[4]).toMatch(/Avant\.[\s\S]*Note: CODEINDENTE[\s\S]*x <- 1[\s\S]*Apres code VISIBLE\./);
+          expect(slides[5].trim()).toBe('');
+          expect(slides[6]).toContain('Fin.');
+          if (showNotes) expect(pages[2]).toContain('NOTEGARDE');
+          else expect(text).not.toContain('NOTEGARDE');
+        },
+        COMPILE_MS
+      );
+
+      /**
+       * Revue de L10-3, seconde passe. Un `Note:` tapé juste sous une image ou un `</div>` tombait,
+       * pour CommonMark, dans le bloc HTML : pandoc l'imprimait sur le cadre projeté. Une note qui
+       * finit par un commentaire suivi de blancs, ou dans un fichier CRLF (l'éditeur garde les fins de
+       * ligne du fichier), restait aussi sur le cadre. Une note dans un `<div>` qu'elle referme reste
+       * telle quelle : balisée, elle laisserait ce div ouvert, et la diapositive suivante tomberait
+       * dans le même cadre (mesuré avec pandoc 3.13). Elle s'imprime alors comme avant L10-3.
+       */
+      const HTML_DECK = [
+        '## Figure', '', '<img src="figure.png" width="600">', 'Note: NOTEIMAGE', '',
+        '---', '',
+        '## Colonnes', '', '<div class="colonnes">', '', 'Texte colonne.', '', '</div>', 'Note: NOTEDIV', '',
+        '---', '',
+        '## Enveloppe', '', '<div class="cadre">', '', 'Texte enveloppe.', '', 'Note: NOTEENVELOPPE', '', '</div>', '',
+        '---', '',
+        '## Brouillon', '', 'Texte brouillon.', '', 'Note: NOTEBROUILLON', '', '<!-- ancienne version -->  ', '',
+        '---', '',
+        '## Fin', '', 'Fin.', '',
+      ];
+
+      it.each([
+        [false, 'LF', '\n'],
+        [false, 'CRLF', '\r\n'],
+        [true, 'CRLF', '\r\n'],
+      ])(
+        'HTML juste au-dessus ou au bout d’une note, case %s, %s : la note quitte le cadre, chaque diapositive le sien',
+        async (showNotes, _, eol) => {
+          const pages = pdfPages(
+            await expectCompiles('presentation', HTML_DECK.join(eol), undefined, { showNotes })
+          );
+          const text = pages.join('\n');
+          expect(text).not.toContain(':::');
+          expect(text).not.toMatch(/Note: NOTE(IMAGE|DIV|BROUILLON)/);
+          // Titre, Figure, Colonnes, Enveloppe, Brouillon, Fin ; case cochée, une page de notes après
+          // chaque diapositive dont la note est balisée.
+          const slides = showNotes ? [pages[0], pages[1], pages[3], pages[5], pages[6], pages[8]] : pages;
+          expect(pages).toHaveLength(showNotes ? 9 : 6);
+          expect(slides[1]).toContain('Figure');
+          expect(slides[2]).toContain('Texte colonne.');
+          expect(slides[3]).toMatch(/Texte enveloppe\.[\s\S]*Note: NOTEENVELOPPE/);
+          expect(slides[4]).toContain('Texte brouillon.');
+          expect(slides[5]).toContain('Fin.');
+          for (const s of slides) expect(s).not.toMatch(/NOTE(IMAGE|DIV|BROUILLON)/);
+          if (showNotes) {
+            expect(pages[2]).toContain('NOTEIMAGE');
+            expect(pages[4]).toContain('NOTEDIV');
+            expect(pages[7]).toContain('NOTEBROUILLON');
+          } else {
+            expect(text).not.toMatch(/NOTE(IMAGE|DIV|BROUILLON)/);
+          }
+        },
+        COMPILE_MS
+      );
+
+      /**
+       * Revue de L10-3, comportement retenu : une note court jusqu'à la fin de sa partie au sens de
+       * reveal.js (prochain `---`, ou prochain `## ` sous un `# ` d'ouverture), règle de l'aperçu.
+       * Un `# ` venu après la note sans `---`, dont `--slide-level=1` ferait un cadre, est dans la
+       * note : case décochée, ce cadre n'est pas projeté. Avant L10-3, il l'était, note imprimée
+       * dessus. Finir une note au `# ` suivant changerait aussi l'aperçu : décision de l'auteur.
+       */
+      it.each([false, true])(
+        'un `# ` après la note sans `---`, case %s : dans la note, comme dans l’aperçu',
+        async (showNotes) => {
+          const deck = '# Cadre un\n\nTexte un.\n\nNote: note un\n\n# Cadre deux\n\nTexte deux VISIBLE.\n';
+          const pages = pdfPages(await expectCompiles('presentation', deck, undefined, { showNotes }));
+          expect(pages).toHaveLength(showNotes ? 3 : 2);
+          expect(pages[1]).toContain('Texte un.');
+          expect(pages[1]).not.toMatch(/note un|Cadre deux/);
+          if (showNotes) expect(pages[2]).toMatch(/note un[\s\S]*Cadre deux[\s\S]*Texte deux VISIBLE\./);
+          else expect(pages.join('\n')).not.toMatch(/note un|Cadre deux/);
+        },
+        COMPILE_MS
+      );
+    });
   }
 );

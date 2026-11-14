@@ -128,6 +128,113 @@ function inRanges(
   return false;
 }
 
+/**
+ * Nœuds dont le texte n'est pas du Markdown : le code (blocs clôturés, indentés, en ligne), les
+ * commentaires et les instructions de traitement. marked dans le navigateur comme pandoc les
+ * rendent tels quels : rien de ce qui s'y écrit n'est une note du présentateur. Les blocs HTML ont
+ * leur propre règle (`scanHtmlBlock`).
+ */
+const RAW_NODES = new Set([
+  'FencedCode',
+  'CodeBlock',
+  'InlineCode',
+  'CommentBlock',
+  'ProcessingInstructionBlock',
+  'Comment',
+]);
+
+/** Éléments HTML sans balise fermante : `<img …>` ne laisse rien d'ouvert. */
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
+
+/**
+ * Blocs HTML dont tout le texte est brut jusqu'à leur fin : `<pre>`, `<script>`, `<style>`,
+ * `<textarea>`, `<!…>` et `<?…>` (types 1 à 5 de CommonMark, qui finissent à leur balise fermante).
+ */
+const RAW_HTML_BLOCK = /^[ \t]*<(?:[!?]|(?:pre|script|style|textarea)(?:[\s>]|$))/i;
+
+/** Un commentaire (refermé ou non), ou une balise ouvrante ou fermante. */
+const HTML_TOKEN = /<!--[\s\S]*?(?:-->|$)|<(\/?)([A-Za-z][A-Za-z0-9-]*)(?:\s(?:"[^"]*"|'[^']*'|[^'">])*)?(\/?)>/g;
+
+type Range = { from: number; to: number };
+
+/** Une balise `<div>` ou `</div>` : pour pandoc, un div natif, donc une structure et non du brut. */
+type DivTag = { at: number; open: boolean };
+
+/**
+ * Le brut d'un bloc HTML, et ses balises `<div>`. Un bloc de type 6 ou 7 (`<img …>`, `<div>`,
+ * `</div>`, `<p>…</p>`) ne s'arrête qu'à la ligne vide : la ligne `Note:` tapée juste dessous en
+ * fait partie pour CommonMark. Elle n'est brute que dans un élément encore ouvert ou dans un
+ * commentaire ; sous un élément refermé, c'est une note (revue de L10-3, seconde passe : la note
+ * s'affichait sinon sur la diapositive projetée, alors que main la cachait).
+ */
+function scanHtmlBlock(text: string, at: number): { raw: Range[]; divs: DivTag[] } {
+  if (RAW_HTML_BLOCK.test(text)) return { raw: [{ from: at, to: at + text.length }], divs: [] };
+  const raw: Range[] = [];
+  const divs: DivTag[] = [];
+  let depth = 0;
+  let openedAt = 0;
+  for (const m of text.matchAll(HTML_TOKEN)) {
+    const from = at + (m.index ?? 0);
+    const to = from + m[0].length;
+    if (m[2] === undefined) {
+      if (depth === 0) raw.push({ from, to });
+      continue;
+    }
+    const name = m[2].toLowerCase();
+    const closing = m[1] === '/';
+    if (name === 'div') divs.push({ at: from, open: !closing });
+    if (VOID_ELEMENTS.has(name) || m[3] === '/') continue;
+    if (!closing) {
+      if (depth++ === 0) openedAt = from;
+    } else if (depth > 0 && --depth === 0) {
+      raw.push({ from: openedAt, to });
+    }
+  }
+  if (depth > 0) raw.push({ from: openedAt, to: at + text.length });
+  return { raw, divs };
+}
+
+/** Le brut d'un texte parsé, et les balises `<div>` de ses blocs HTML. */
+function scanRaw(tree: Tree, text: string, offset = 0): { raw: Range[]; divs: DivTag[] } {
+  const raw: Range[] = [];
+  const divs: DivTag[] = [];
+  tree.iterate({
+    enter: (node) => {
+      if (node.name === 'HTMLBlock') {
+        const block = scanHtmlBlock(text.slice(node.from, node.to), node.from + offset);
+        raw.push(...block.raw);
+        divs.push(...block.divs);
+        return false;
+      }
+      if (!RAW_NODES.has(node.name)) return undefined;
+      raw.push({ from: node.from + offset, to: node.to + offset });
+      return false;
+    },
+  });
+  return { raw, divs };
+}
+
+/**
+ * La note `from`–`to` referme-t-elle un `<div>` ouvert avant elle, ou en laisse-t-elle un ouvert ?
+ * Balisée en `::: notes`, elle laisserait alors un div ouvert jusqu'à la fin du deck, et la
+ * diapositive suivante tomberait dans le même cadre, sans message (mesuré avec pandoc 3.13).
+ */
+function unbalancedDivs(divs: readonly DivTag[], from: number, to: number): boolean {
+  let depth = 0;
+  for (const tag of divs) {
+    if (tag.at < from || tag.at >= to) continue;
+    if (tag.open) depth++;
+    else if (--depth < 0) return true;
+  }
+  return depth !== 0;
+}
+
+function containsPoint(ranges: readonly { from: number; to: number }[], at: number): boolean {
+  return ranges.some((r) => at >= r.from && at < r.to);
+}
+
 const HEADING = /^(?:ATXHeading|SetextHeading)([12])$/;
 
 export function parseSlides(source: string): DeckInfo {
@@ -235,6 +342,130 @@ function firstHeading(
     },
   });
   return found;
+}
+
+// MARK: - Parties d'une slide et notes du présentateur
+
+/**
+ * Une diapositive reveal.js tirée d'un segment du découpage : le segment entier, ou, quand il
+ * ouvre sur un titre de niveau 1, chacune de ses parties ouvertes par un titre de niveau 2 (les
+ * verticales de reveal). Offsets relatifs au segment ; les parties le couvrent bout à bout.
+ */
+export interface SlidePart {
+  from: number;
+  to: number;
+  /** Début de la ligne `Note:` qui ouvre les notes du présentateur, null sans notes. */
+  notesLineFrom: number | null;
+  /** Ce qui se projette : la partie jusqu'aux notes, sans les blancs de bord. */
+  markdown: string;
+  /** Les notes, sans le `Note:` qui les ouvre ni les blancs de bord. */
+  notes: string;
+}
+
+/** La ligne qui ouvre les notes : `Note:` ou `Notes:`, en toute casse, en tête de ligne. */
+const NOTES_LINE = /^\s*notes?:/i;
+
+/**
+ * Largeur des blancs en tête d'une ligne `Note:`. Le `Note:` se cherche après eux : c'est là, et
+ * non en début de ligne, que Lezer fait commencer un bloc de code indenté.
+ */
+function indentOf(text: string): number {
+  return text.length - text.trimStart().length;
+}
+
+/** Le segment ouvre-t-il sur un titre `# …` ? Il commence alors une section reveal. */
+export function startsWithH1(segment: string): boolean {
+  return slidesParser.parse(segment).topNode.firstChild?.name === 'ATXHeading1';
+}
+
+/**
+ * Parties d'un segment et leurs notes, sur l'arbre Lezer comme parseSlides : le contenu d'un
+ * bloc de code n'est jamais un séparateur. Les regex qui faisaient ce travail ignoraient les
+ * blocs de code : un commentaire R (`## …`) coupait la diapositive, et un `Note:` cité dans du
+ * code en envoyait la suite aux notes (S12-2-3). Les notes courent de la première ligne `Note:`
+ * hors code et hors HTML brut (`scanRaw`) jusqu'à la fin de la partie : le prochain `---`, ou
+ * le prochain `## ` sous un `# ` d'ouverture. Un `# ` venu après la note sans `---` est donc dans
+ * la note. Un commentaire posé par Cmd+/ (`<!-- … -->`) garde ses `Note:` : sinon les notes s'y
+ * ouvraient, et le `-->` fermait le commentaire au milieu (revue de L10-3). Règle unique de
+ * l'aperçu, des exports reveal.js et de l'export beamer (`speakerNotesToPandoc`).
+ */
+export function splitSlideParts(segment: string): SlidePart[] {
+  if (segment.trim() === '') return [];
+  const tree = slidesParser.parse(segment);
+  const { raw } = scanRaw(tree, segment);
+
+  // Une partie par titre `## ` du premier niveau, sous un `# ` d'ouverture : un `## ` de bloc
+  // de code n'est pas un nœud de titre.
+  const starts = [0];
+  const first = tree.topNode.firstChild;
+  if (first?.name === 'ATXHeading1') {
+    for (let node = first.nextSibling; node; node = node.nextSibling) {
+      if (node.name === 'ATXHeading2') starts.push(segment.lastIndexOf('\n', node.from - 1) + 1);
+    }
+  }
+
+  const lines = splitLines(segment);
+  return starts.map((from, i) => {
+    const to = i + 1 < starts.length ? starts[i + 1] : segment.length;
+    const notesLine = lines.find(
+      (l) => l.from >= from && l.from < to && NOTES_LINE.test(l.text) && !containsPoint(raw, l.from + indentOf(l.text))
+    );
+    return {
+      from,
+      to,
+      notesLineFrom: notesLine?.from ?? null,
+      markdown: segment.slice(from, notesLine?.from ?? to).trim(),
+      notes: notesLine ? segment.slice(notesLine.from, to).replace(NOTES_LINE, '').trim() : '',
+    };
+  });
+}
+
+/**
+ * Le deck avec chaque note du présentateur en bloc `::: notes`, que pandoc écrit `\note{…}` pour
+ * beamer. Pandoc ne connaît pas les lignes `Note:` du format reveal.js : il les imprimait sur la
+ * diapositive projetée (S12-1-8). Seules les notes changent, découpées comme dans l'aperçu ; un
+ * `Note:` sans texte disparaît.
+ *
+ * Pandoc lit le deck d'un seul tenant, sans `---` pour couper un commentaire : Cmd+/ sur deux
+ * diapositives écrit un `<!-- … -->` qui enjambe le séparateur, et que le découpage par
+ * diapositive ne voit pas fermé. Une note dont le bloc s'ouvrirait ou se fermerait dans ce que
+ * pandoc lit comme brut reste telle quelle (mesuré avec pandoc 3.13). Ouvert dans le
+ * commentaire, le bloc laisserait son `:::` de clôture dehors, imprimé sur la diapositive
+ * projetée. Fermé dedans, il resterait ouvert jusqu'à la fin du deck et avalerait les
+ * diapositives suivantes. Il n'est fermé dans le brut que si du texte le suit encore : les blancs
+ * de fin de ligne et le `\r` d'un fichier CRLF, que Lezer compte dans le bloc, n'en sont pas. De
+ * même, une note qui referme un `<div>` ouvert avant elle, ou en laisse un ouvert, reste telle
+ * quelle (`unbalancedDivs`). Laissée telle quelle, la note s'imprime comme avant L10-3.
+ */
+export function speakerNotesToPandoc(source: string): string {
+  const deck = parseSlides(source);
+  // Le frontmatter est du YAML pour pandoc : un `<!--` dans une de ses valeurs n'ouvre rien.
+  const bodyFrom = deck.frontmatter?.to ?? 0;
+  const body = source.slice(bodyFrom);
+  const pandoc = scanRaw(slidesParser.parse(body), body, bodyFrom);
+  let out = '';
+  let last = 0;
+  for (const slide of deck.slides) {
+    const segment = source.slice(slide.from, slide.to);
+    for (const part of splitSlideParts(segment)) {
+      if (part.notesLineFrom === null) continue;
+      const start = slide.from + part.notesLineFrom;
+      const end = slide.from + part.from + segment.slice(part.from, part.to).trimEnd().length;
+      const opensInRaw = containsPoint(pandoc.raw, start + indentOf(segment.slice(part.notesLineFrom, part.to)));
+      const closesInRaw = pandoc.raw.some((r) => r.from < end && end < r.to && source.slice(end, r.to).trim() !== '');
+      if (opensInRaw || closesInRaw || unbalancedDivs(pandoc.divs, start, end)) continue;
+      out += source.slice(last, start);
+      if (part.notes) {
+        // Pandoc ne lit un bloc `:::` qu'après une ligne vide : collé à un paragraphe, il en
+        // devient le texte (mesuré).
+        if (!/(^|\n)[ \t]*\n$/.test(out) && out !== '') out += '\n';
+        out += `::: notes\n${part.notes}\n:::`;
+      }
+      // Les blancs qui suivent les notes restent : ils séparent la partie suivante.
+      last = end;
+    }
+  }
+  return out + source.slice(last);
 }
 
 /**
