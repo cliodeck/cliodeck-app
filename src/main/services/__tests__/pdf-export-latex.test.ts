@@ -538,6 +538,72 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
         },
         COMPILE_MS
       );
+
+      /**
+       * Revue de L10-3. Un `Note:` dans du HTML brut n'ouvre pas de notes : sinon `::: notes` s'ouvrait
+       * dans le commentaire posé par Cmd+/ (`<!-- … -->`, toggleComment), le `-->` le fermait au
+       * milieu du bloc, et le `:::` de clôture s'imprimait sur la diapositive projetée, case cochée ou
+       * non. Un bloc de code indenté qui commence par `Note:` reste du code : la diapositive perdait
+       * ce code et ce qui le suit. Cmd+/ sur deux diapositives écrit un commentaire à cheval sur le
+       * `---`, que pandoc lit d'un seul tenant.
+       */
+      const RAW_DECK = [
+        '## Garde', '', 'Texte garde.', '', 'Note: NOTEGARDE', '',
+        '---', '',
+        '<!-- ## Commentee', '', '- Point COMMENTE', '', 'Note: NOTECOMMENTEE -->', '',
+        '---', '',
+        '## Apres commentaire', '', '<!--', 'Note: NOTEDANSCOMMENTAIRE', '-->', '', 'Texte apres commentaire.', '',
+        '---', '',
+        '## Code indente', '', 'Avant.', '', '    Note: CODEINDENTE', '    x <- 1', '', 'Apres code VISIBLE.', '',
+        '---', '',
+        '<!-- ## Cachee un', '', 'Note: NOTECACHEE1', '', '---', '', '## Cachee deux', '', 'Note: NOTECACHEE2 -->', '',
+        '---', '',
+        '## Fin', '', 'Fin.', '',
+      ].join('\n');
+
+      it.each([false, true])(
+        'HTML brut et code indenté, case %s : aucun `:::` imprimé, rien de projeté ne part aux notes',
+        async (showNotes) => {
+          const pages = pdfPages(await expectCompiles('presentation', RAW_DECK, undefined, { showNotes }));
+          const text = pages.join('\n');
+          expect(text).not.toContain(':::');
+          expect(text).not.toMatch(/COMMENTE|NOTEDANSCOMMENTAIRE|NOTECACHEE/);
+          // Titre, Garde (et sa page de notes, case cochée), la diapositive commentée (vide),
+          // Apres commentaire, Code indente, les deux diapositives commentées d'un seul tenant
+          // (un cadre vide), Fin.
+          const slides = showNotes ? [pages[0], pages[1], ...pages.slice(3)] : pages;
+          expect(slides).toHaveLength(7);
+          expect(slides[2].trim()).toBe('');
+          expect(slides[3]).toMatch(/Apres commentaire[\s\S]*Texte apres commentaire\./);
+          expect(slides[4]).toMatch(/Avant\.[\s\S]*Note: CODEINDENTE[\s\S]*x <- 1[\s\S]*Apres code VISIBLE\./);
+          expect(slides[5].trim()).toBe('');
+          expect(slides[6]).toContain('Fin.');
+          if (showNotes) expect(pages[2]).toContain('NOTEGARDE');
+          else expect(text).not.toContain('NOTEGARDE');
+        },
+        COMPILE_MS
+      );
+
+      /**
+       * Revue de L10-3, comportement retenu : une note court jusqu'à la fin de sa partie au sens de
+       * reveal.js (prochain `---`, ou prochain `## ` sous un `# ` d'ouverture), règle de l'aperçu.
+       * Un `# ` venu après la note sans `---`, dont `--slide-level=1` ferait un cadre, est dans la
+       * note : case décochée, ce cadre n'est pas projeté. Avant L10-3, il l'était, note imprimée
+       * dessus. Finir une note au `# ` suivant changerait aussi l'aperçu : décision de l'auteur.
+       */
+      it.each([false, true])(
+        'un `# ` après la note sans `---`, case %s : dans la note, comme dans l’aperçu',
+        async (showNotes) => {
+          const deck = '# Cadre un\n\nTexte un.\n\nNote: note un\n\n# Cadre deux\n\nTexte deux VISIBLE.\n';
+          const pages = pdfPages(await expectCompiles('presentation', deck, undefined, { showNotes }));
+          expect(pages).toHaveLength(showNotes ? 3 : 2);
+          expect(pages[1]).toContain('Texte un.');
+          expect(pages[1]).not.toMatch(/note un|Cadre deux/);
+          if (showNotes) expect(pages[2]).toMatch(/note un[\s\S]*Cadre deux[\s\S]*Texte deux VISIBLE\./);
+          else expect(pages.join('\n')).not.toMatch(/note un|Cadre deux/);
+        },
+        COMPILE_MS
+      );
     });
   }
 );

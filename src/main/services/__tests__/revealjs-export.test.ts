@@ -268,6 +268,28 @@ describe('découpage hors blocs de code : export HTML, tel que le navigateur le 
     expect(slides.map((s) => s.notes)).toEqual(['', 'VRAIENOTE à ne pas projeter.']);
   });
 
+  /**
+   * Revue de L10-3 : un `Note:` dans un commentaire (Cmd+/) ou en tête d'un bloc de code indenté
+   * envoyait aux notes tout ce qui le suit dans la diapositive. Aperçu et export, même règle.
+   */
+  it('un `Note:` dans un commentaire ou un code indenté : la suite reste projetée, aperçu compris', async () => {
+    const deck = [
+      '## Apres commentaire', '', '<!--', 'Note: NOTEDANSCOMMENTAIRE', '-->', '', 'Texte apres commentaire.', '',
+      '---', '',
+      '## Code indente', '', 'Avant.', '', '    Note: CODEINDENTE', '    x <- 1', '', 'Apres code VISIBLE.', '',
+    ].join('\n');
+    const slides = browserSlides(await exportHtml(deck));
+    expect(slides.map((s) => s.notes)).toEqual(['', '']);
+    expect(slides[0].slide).toContain('<!--\nNote: NOTEDANSCOMMENTAIRE\n-->\n\nTexte apres commentaire.');
+    expect(slides[1].slide).toContain('    Note: CODEINDENTE\n    x <- 1\n\nApres code VISIBLE.');
+
+    for (const index of [0, 1]) {
+      const preview = generatePreviewHtml(deck, OPTS, index);
+      expect(preview).not.toContain('<div class="slide-notes">');
+      expect(preview).toMatch(index === 0 ? /<p>Texte apres commentaire\.<\/p>/ : /<p>Apres code VISIBLE\.<\/p>/);
+    }
+  });
+
   it('aperçu et export s’accordent sur le même deck : diapositives et notes', async () => {
     const deck = `${DECK}\n---\n\n${CODE_DECK}\n---\n\n# Partie\n\nOuverture\n\nNote: n-ouverture\n\n## Sous-partie\n\nSuite\n\nNotes:\nn-sous\n`;
     const slides = browserSlides(await exportHtml(deck));

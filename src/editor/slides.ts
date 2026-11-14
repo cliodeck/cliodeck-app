@@ -128,6 +128,37 @@ function inRanges(
   return false;
 }
 
+/**
+ * Nœuds dont le texte n'est pas du Markdown : le code (blocs clôturés, indentés, en ligne) et le
+ * HTML brut (blocs, commentaires, instructions de traitement). marked dans le navigateur comme
+ * pandoc les rendent tels quels : rien de ce qui s'y écrit n'est une note du présentateur.
+ */
+const RAW_NODES = new Set([
+  'FencedCode',
+  'CodeBlock',
+  'InlineCode',
+  'HTMLBlock',
+  'CommentBlock',
+  'ProcessingInstructionBlock',
+  'Comment',
+]);
+
+function rawRanges(tree: Tree, offset = 0): Array<{ from: number; to: number }> {
+  const out: Array<{ from: number; to: number }> = [];
+  tree.iterate({
+    enter: (node) => {
+      if (!RAW_NODES.has(node.name)) return undefined;
+      out.push({ from: node.from + offset, to: node.to + offset });
+      return false;
+    },
+  });
+  return out;
+}
+
+function containsPoint(ranges: readonly { from: number; to: number }[], at: number): boolean {
+  return ranges.some((r) => at >= r.from && at < r.to);
+}
+
 const HEADING = /^(?:ATXHeading|SetextHeading)([12])$/;
 
 export function parseSlides(source: string): DeckInfo {
@@ -258,6 +289,14 @@ export interface SlidePart {
 /** La ligne qui ouvre les notes : `Note:` ou `Notes:`, en toute casse, en tête de ligne. */
 const NOTES_LINE = /^\s*notes?:/i;
 
+/**
+ * Largeur des blancs en tête d'une ligne `Note:`. Le `Note:` se cherche après eux : c'est là, et
+ * non en début de ligne, que Lezer fait commencer un bloc de code indenté.
+ */
+function indentOf(text: string): number {
+  return text.length - text.trimStart().length;
+}
+
 /** Le segment ouvre-t-il sur un titre `# …` ? Il commence alors une section reveal. */
 export function startsWithH1(segment: string): boolean {
   return slidesParser.parse(segment).topNode.firstChild?.name === 'ATXHeading1';
@@ -268,13 +307,16 @@ export function startsWithH1(segment: string): boolean {
  * bloc de code n'est jamais un séparateur. Les regex qui faisaient ce travail ignoraient les
  * blocs de code : un commentaire R (`## …`) coupait la diapositive, et un `Note:` cité dans du
  * code en envoyait la suite aux notes (S12-2-3). Les notes courent de la première ligne `Note:`
- * hors code jusqu'à la fin de la partie. Règle unique de l'aperçu, des exports reveal.js et de
- * l'export beamer (`speakerNotesToPandoc`).
+ * hors code et hors HTML brut (`RAW_NODES`) jusqu'à la fin de la partie : le prochain `---`, ou
+ * le prochain `## ` sous un `# ` d'ouverture. Un `# ` venu après la note sans `---` est donc dans
+ * la note. Un commentaire posé par Cmd+/ (`<!-- … -->`) garde ses `Note:` : sinon les notes s'y
+ * ouvraient, et le `-->` fermait le commentaire au milieu (revue de L10-3). Règle unique de
+ * l'aperçu, des exports reveal.js et de l'export beamer (`speakerNotesToPandoc`).
  */
 export function splitSlideParts(segment: string): SlidePart[] {
   if (segment.trim() === '') return [];
   const tree = slidesParser.parse(segment);
-  const code = codeRanges(tree);
+  const raw = rawRanges(tree);
 
   // Une partie par titre `## ` du premier niveau, sous un `# ` d'ouverture : un `## ` de bloc
   // de code n'est pas un nœud de titre.
@@ -290,7 +332,7 @@ export function splitSlideParts(segment: string): SlidePart[] {
   return starts.map((from, i) => {
     const to = i + 1 < starts.length ? starts[i + 1] : segment.length;
     const notesLine = lines.find(
-      (l) => l.from >= from && l.from < to && NOTES_LINE.test(l.text) && !inRanges(code, l.from, l.to)
+      (l) => l.from >= from && l.from < to && NOTES_LINE.test(l.text) && !containsPoint(raw, l.from + indentOf(l.text))
     );
     return {
       from,
@@ -307,15 +349,31 @@ export function splitSlideParts(segment: string): SlidePart[] {
  * beamer. Pandoc ne connaît pas les lignes `Note:` du format reveal.js : il les imprimait sur la
  * diapositive projetée (S12-1-8). Seules les notes changent, découpées comme dans l'aperçu ; un
  * `Note:` sans texte disparaît.
+ *
+ * Pandoc lit le deck d'un seul tenant, sans `---` pour couper un commentaire : Cmd+/ sur deux
+ * diapositives écrit un `<!-- … -->` qui enjambe le séparateur, et que le découpage par
+ * diapositive ne voit pas fermé. Une note dont le bloc s'ouvrirait ou se fermerait dans ce que
+ * pandoc lit comme brut reste telle quelle (mesuré avec pandoc 3.13). Ouvert dans le
+ * commentaire, le bloc laisserait son `:::` de clôture dehors, imprimé sur la diapositive
+ * projetée. Fermé dedans, il resterait ouvert jusqu'à la fin du deck et avalerait les
+ * diapositives suivantes. Laissée telle quelle, la note s'imprime comme avant L10-3.
  */
 export function speakerNotesToPandoc(source: string): string {
+  const deck = parseSlides(source);
+  // Le frontmatter est du YAML pour pandoc : un `<!--` dans une de ses valeurs n'ouvre rien.
+  const bodyFrom = deck.frontmatter?.to ?? 0;
+  const pandocRaw = rawRanges(slidesParser.parse(source.slice(bodyFrom)), bodyFrom);
   let out = '';
   let last = 0;
-  for (const slide of parseSlides(source).slides) {
+  for (const slide of deck.slides) {
     const segment = source.slice(slide.from, slide.to);
     for (const part of splitSlideParts(segment)) {
       if (part.notesLineFrom === null) continue;
       const start = slide.from + part.notesLineFrom;
+      const end = slide.from + part.from + segment.slice(part.from, part.to).trimEnd().length;
+      const opensInRaw = containsPoint(pandocRaw, start + indentOf(segment.slice(part.notesLineFrom, part.to)));
+      const closesInRaw = pandocRaw.some((r) => r.from < end && end < r.to);
+      if (opensInRaw || closesInRaw) continue;
       out += source.slice(last, start);
       if (part.notes) {
         // Pandoc ne lit un bloc `:::` qu'après une ligne vide : collé à un paragraphe, il en
@@ -324,7 +382,7 @@ export function speakerNotesToPandoc(source: string): string {
         out += `::: notes\n${part.notes}\n:::`;
       }
       // Les blancs qui suivent les notes restent : ils séparent la partie suivante.
-      last = slide.from + part.from + segment.slice(part.from, part.to).trimEnd().length;
+      last = end;
     }
   }
   return out + source.slice(last);

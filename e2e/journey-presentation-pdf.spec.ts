@@ -17,7 +17,9 @@
  * plugin markdown de reveal.js redécoupait chaque section dans le navigateur, sans rien savoir
  * des blocs de code. Le `---` du code ajoutait une page, et la vraie note s'imprimait sur la
  * diapositive (S12-2-3). Le texte du PDF, lu par pdftotext quand il est là, le montre : le
- * code reste entier, la note n'est pas imprimée (`showNotes` est faux).
+ * code reste entier, la note n'est pas imprimée (`showNotes` est faux). Une dernière diapositive
+ * cache un `Note:` dans un commentaire (Cmd+/) et en cite un en tête d'un bloc de code indenté :
+ * ni l'un ni l'autre n'ouvre de notes, et le texte qui les suit reste projeté (revue de L10-3).
  *
  * reveal.js est chargé depuis son CDN : sans réseau, le test est sauté. C'est le seul test qui
  * passe par le vrai plugin : à relancer si `REVEAL_VERSION` change.
@@ -37,6 +39,8 @@ const DECK = [
   '## Troisième diapositive\n\nConclusion',
   '## Exemple de syntaxe\n\n```markdown\n---\nNote: CODENOTE dans le code\n```\n\nSuite du texte visible.\n\n' +
     'Note:\nVRAIENOTE à ne pas projeter.',
+  '## Commentaire\n\n<!--\nNote: NOTECOMMENTEE\n-->\n\nTexte après le commentaire.\n\n' +
+    '    Note: CODEINDENTE\n    x <- 1\n\nSuite après le code indenté.',
 ].join('\n\n---\n\n');
 
 type ExportBridge = {
@@ -98,8 +102,12 @@ test('l’export PDF d’une présentation rend une page par diapositive', async
       expect(text).not.toContain('VRAIENOTE');
       expect(text).toContain('Note: CODENOTE dans le code');
       expect(text).toContain('Suite du texte visible.');
+      expect(text).not.toContain('NOTECOMMENTEE');
+      expect(text).toContain('Texte après le commentaire.');
+      expect(text).toContain('Note: CODEINDENTE');
+      expect(text).toContain('Suite après le code indenté.');
     }
-    expect(metadata.pageCount).toBe(4);
+    expect(metadata.pageCount).toBe(5);
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });
