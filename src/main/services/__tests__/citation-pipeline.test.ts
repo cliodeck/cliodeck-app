@@ -262,7 +262,7 @@ describe('appendEngineCitations — notes et bibliographie du moteur, en markdow
     );
     expect(md).toBe(
       'Texte.\n\n# Literatur {.unnumbered}\n\n' +
-        'Dupont, Jean. *Archives \\& pouvoirs*. 2020.\n\nMartin, Paul. *Autre*. 2021.\n'
+        'Dupont, Jean. *Archives & pouvoirs*. 2020.\n\nMartin, Paul. *Autre*. 2021.\n'
     );
   });
 
@@ -331,7 +331,7 @@ describe('appendEngineCitations — notes et bibliographie du moteur, en markdow
     expect(md).toMatch(/^Durand, Marie\. «\u00a0Encoder\u202f: qui\u202f\?\u00a0»/m);
   });
 
-  it('une entité n’est décodée qu’une fois : `&` et `<` sortent échappés', () => {
+  it('une entité n’est décodée qu’une fois : `&` et `<` sortent échappés devant une entité ou une balise', () => {
     const md = appendEngineCitations(
       'Texte.',
       {
@@ -343,5 +343,88 @@ describe('appendEngineCitations — notes et bibliographie du moteur, en markdow
       'Références'
     );
     expect(md).toContain('*Le \\&lt;br\\&gt; et \\<teiHeader>*. 2020.');
+  });
+
+  it('ailleurs, `&` et `<` restent nus : pandoc et `marked` les impriment tels quels', () => {
+    const md = appendEngineCitations(
+      'Texte.',
+      {
+        footnotes: [],
+        bibliography: ['<div class="csl-entry">Dupont, Jean. <i>Archives &#38; pouvoirs, 3 &#60; 4</i>. 2020.</div>'],
+      },
+      'Références'
+    );
+    expect(md).toContain('*Archives & pouvoirs, 3 < 4*. 2020.');
+  });
+
+  /**
+   * Revue de L10-5, seconde passe : échapper tout `&` et tout `<` cassait les adresses que citeproc
+   * imprime en clair. Pandoc lit une adresse nue comme un lien (`autolink_bare_uris`), y garde la
+   * barre oblique inverse et la change en `/` : `searchRetrieve/&query=x/&page=2`, dans le texte
+   * comme dans la cible du lien, en note comme en bibliographie. Un DOI à chevrons (revues de
+   * l'AMS, DOI SICI de Wiley) était coupé à son `\<`. Dans une adresse, `&` reste nu, et `<`, `>`
+   * s'encodent `%3C`, `%3E`, comme pandoc le faisait lui-même sur `main`.
+   */
+  const gallica = makeCitation({
+    id: 'Url_2019',
+    type: 'article',
+    author: 'Durand, Marie',
+    year: '2019',
+    title: 'Recherche',
+    journal: 'Revue',
+    customFields: { url: 'https://gallica.bnf.fr/sru?operation=searchRetrieve&query=x&page=2' },
+  });
+  const sici = makeCitation({
+    id: 'Doi_1996',
+    type: 'article',
+    author: 'Martin, Paul',
+    year: '1996',
+    title: 'Nouvelle',
+    journal: 'Bulletin',
+    customFields: { doi: '10.1175/1520-0477(1996)077<0437:TNYRP>2.0.CO;2' },
+  });
+  const GALLICA = /https:\/\/gallica\.bnf\.fr\/sru\?operation=searchRetrieve&query=x&page=2/g;
+  const SICI = /https:\/\/doi\.org\/10\.1175\/1520-0477\(1996\)077%3C0437:TNYRP%3E2\.0\.CO;2/g;
+
+  it('une adresse de référence garde ses `&` et encode ses chevrons, en note comme en bibliographie', async () => {
+    const processed = await processMarkdownCitations('Texte [@Url_2019] et [@Doi_1996].\n', {
+      resolve: resolveMap({ Url_2019: gallica, Doi_1996: sici }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+    // Ce que citeproc rend vraiment : des entités dans l'adresse.
+    expect(processed.footnotes[0].text).toContain('searchRetrieve&#38;query=x&#38;page=2');
+    expect(processed.footnotes[1].text).toContain('077&#60;0437:TNYRP&#62;2.0.CO;2');
+
+    const md = appendEngineCitations(processed.md, processed, 'Références');
+
+    expect(md.match(GALLICA) ?? [], md).toHaveLength(2);
+    expect(md.match(SICI) ?? [], md).toHaveLength(2);
+    expect(md).not.toContain('\\&');
+    expect(md).not.toContain('\\<');
+  });
+
+  it('en place (note de l’auteur), l’adresse garde ses `&` aussi', async () => {
+    const processed = await processMarkdownCitations('Texte.[^1]\n\n[^1]: Voir [@Url_2019] et [@Doi_1996].\n', {
+      resolve: resolveMap({ Url_2019: gallica, Doi_1996: sici }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+    expect(processed.md.match(GALLICA) ?? [], processed.md).toHaveLength(1);
+    expect(processed.md.match(SICI) ?? [], processed.md).toHaveLength(1);
+    expect(processed.md).not.toContain('\\&');
+  });
+
+  it('dans une adresse, une suite qui ressemble à une entité reste littérale', () => {
+    const md = appendEngineCitations(
+      'Texte.',
+      {
+        footnotes: [],
+        bibliography: ['<div class="csl-entry">Dupont, Jean. 2020. https://x.org/a?b=1&#38;lt;c=2&#38;d=&#60;e&#62;.</div>'],
+      },
+      'Références'
+    );
+    // pandoc et `marked` décodent `&amp;` une fois dans le lien : il reste `&lt;c=2`.
+    expect(md).toContain('2020. https://x.org/a?b=1&amp;lt;c=2&d=%3Ce%3E.');
   });
 });

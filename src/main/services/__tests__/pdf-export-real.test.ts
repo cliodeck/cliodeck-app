@@ -210,6 +210,62 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())('export PDF : les cit
     COMPILE_MS
   );
 
+  /**
+   * Revue de L10-5, seconde passe : le correctif du chevron échappait aussi les `&` et les `<` des
+   * adresses que citeproc imprime en clair. Pandoc garde la barre oblique inverse dans un lien nu
+   * et la change en `/` : toute adresse à paramètres (Gallica, Google Books, portails d'archives)
+   * sortait fausse, en texte comme en cible du lien, et un DOI à chevrons était coupé.
+   */
+  it(
+    'style intégré : une adresse à paramètres et un DOI à chevrons sortent justes, en texte comme en lien',
+    async () => {
+      const gallica = 'https://gallica.bnf.fr/services/engine/search/sru?operation=searchRetrieve&query=x&page=2';
+      const sici = 'https://doi.org/10.1175/1520-0477(1996)077%3C0437:TNYRP%3E2.0.CO;2';
+      writeFileSync(
+        join(project, 'refs.bib'),
+        BIBLIOGRAPHY +
+          `@article{Url_2019,
+  author = {Durand, Marie},
+  title = {Recherche},
+  journal = {Revue},
+  year = {2019},
+  url = {${gallica}}
+}
+@article{Doi_1996,
+  author = {Martin, Paul},
+  title = {Nouvelle},
+  journal = {Bulletin},
+  year = {1996},
+  doi = {10.1175/1520-0477(1996)077<0437:TNYRP>2.0.CO;2}
+}
+`
+      );
+      await bibliographyService.loadFromFile(join(project, 'refs.bib'));
+
+      const result = await exportArticle('Texte [@Url_2019] et [@Doi_1996].\n', {
+        bibliographyPath: join(project, 'refs.bib'),
+        citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+      });
+
+      expect(result, result.error).toMatchObject({ success: true });
+      if (pdftotextAvailable()) {
+        const pdf = join(project, 'article.pdf');
+        // Blancs retirés : une adresse se coupe en fin de ligne.
+        const text = pdfText(pdf).replace(/\s+/g, '');
+        // Une fois en note, une fois en bibliographie.
+        expect(text.split('operation=searchRetrieve&query=x&page=2'), text).toHaveLength(3);
+        expect(text.split('077%3C0437:TNYRP%3E2.0.CO;2'), text).toHaveLength(3);
+        expect(text).not.toContain('/&');
+        // La cible des liens, que pdftotext ne montre pas.
+        const urls = execFileSync('pdfinfo', ['-url', pdf], { encoding: 'utf8', env: toolEnv() });
+        expect(urls).toContain(gallica);
+        expect(urls).toContain(sici);
+        expect(urls).not.toContain('/&');
+      }
+    },
+    COMPILE_MS
+  );
+
   it(
     'pandoc avec le style du projet : la bibliographie a son titre, la clé fautive est signalée',
     async () => {
