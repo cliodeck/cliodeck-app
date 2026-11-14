@@ -150,6 +150,33 @@ export function computeSecnumdepth(settings?: BookSettings): number {
 }
 
 /**
+ * Numérotation des titres d'un livre exporté en Word par pandoc (S12-1-5). Dans un .docx,
+ * `--number-sections` numérote tous les niveaux de titre, et `secnumdepth` n'y fait rien (ni en
+ * `-V`, ni en `-M`) : avec les réglages par défaut, les sections sortaient « 1.1 », « 1.1.1 ». Le
+ * filtre Lua (`luaFilter`, son texte, que l'appelant écrit et passe en `--lua-filter`) marque
+ * `unnumbered` les niveaux au-delà de la profondeur de `computeSecnumdepth`, dans le même sens que
+ * le PDF : des sections numérotées numérotent aussi les chapitres, car un niveau 1 sans numéro
+ * donnerait « 0.1 » à ses sections (mesuré, pandoc 3.13). Rien de coché : ni option ni filtre. Le
+ * titre de la bibliographie, que pandoc marque déjà `unnumbered`, n'a jamais de numéro.
+ */
+export function wordHeadingNumbering(settings?: BookSettings): { numberSections: boolean; luaFilter?: string } {
+  const depth = computeSecnumdepth(settings);
+  if (depth < 0) return { numberSections: false };
+  const deepest = depth + 1;
+  return {
+    numberSections: true,
+    luaFilter: [
+      `-- ClioDeck : titres de niveau superieur a ${deepest} sans numero (reglages d'ouvrage).`,
+      'function Header(el)',
+      `  if el.level > ${deepest} then el.classes:insert('unnumbered') end`,
+      '  return el',
+      'end',
+      '',
+    ].join('\n'),
+  };
+}
+
+/**
  * Bibliographie par chapitre : possible seulement si une bibliographie
  * existe ET que le pipeline CitationEngine ne tourne pas (il inline ses
  * propres notes, citeproc n'aurait plus rien à résoudre). Sinon repli
