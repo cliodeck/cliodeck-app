@@ -35,17 +35,40 @@ function footnoteXml(footnotes: string, id: number): string {
   return footnotes.match(new RegExp(`<w:footnote\\b[^>]*w:id="${id}"[^>]*>.*?</w:footnote>`, 's'))?.[0] ?? '';
 }
 
-/**
- * Le numéro par lequel commence la liste d'un paragraphe : la surcharge de départ (`startOverride`)
- * de sa numérotation dans `numbering.xml`.
- */
-function listStartOf(document: string, numbering: string, text: string): number | undefined {
+/** La numérotation d'un paragraphe de liste : son instance (`numId`) et le niveau qu'il emploie (`ilvl`). */
+function listParagraph(document: string, numbering: string, text: string): { num: string; ilvl: string } | undefined {
   const paragraph = document.split('</w:p>').find((p) => plain(p).includes(text));
   const numId = paragraph?.match(/<w:numId w:val="(\d+)"\/>/)?.[1];
-  if (!numId) return undefined;
+  const ilvl = paragraph?.match(/<w:ilvl w:val="(\d+)"\/>/)?.[1];
+  if (!numId || !ilvl) return undefined;
   const num = numbering.match(new RegExp(`<w:num w:numId="${numId}"[^>]*>.*?</w:num>`, 's'))?.[0];
-  const start = num?.match(/<w:startOverride w:val="(\d+)"\/>/)?.[1];
+  return num ? { num, ilvl } : undefined;
+}
+
+/**
+ * Le numéro par lequel commence la liste d'un paragraphe : la surcharge de départ (`startOverride`)
+ * de sa numérotation dans `numbering.xml`, au niveau que le paragraphe emploie. docx ne la pose
+ * qu'au niveau 0 : un paragraphe d'un autre niveau n'en a pas, et son compteur ne repart pas.
+ */
+function listStartOf(document: string, numbering: string, text: string): number | undefined {
+  const list = listParagraph(document, numbering, text);
+  const start = list?.num.match(
+    new RegExp(`<w:lvlOverride w:ilvl="${list.ilvl}"><w:startOverride w:val="(\\d+)"\\/>`)
+  )?.[1];
   return start === undefined ? undefined : Number(start);
+}
+
+/** Le retrait gauche (twips) du niveau qu'emploie un paragraphe de liste. */
+function listIndentOf(document: string, numbering: string, text: string): number | undefined {
+  const list = listParagraph(document, numbering, text);
+  const abstractId = list?.num.match(/<w:abstractNumId w:val="(\d+)"\/>/)?.[1];
+  if (!list || !abstractId) return undefined;
+  const abstract = numbering.match(
+    new RegExp(`<w:abstractNum w:abstractNumId="${abstractId}"[^>]*>.*?</w:abstractNum>`, 's')
+  )?.[0];
+  const level = abstract?.match(new RegExp(`<w:lvl w:ilvl="${list.ilvl}"[^>]*>.*?</w:lvl>`, 's'))?.[0];
+  const left = level?.match(/<w:ind w:left="(\d+)"/)?.[1];
+  return left === undefined ? undefined : Number(left);
 }
 
 async function exportNative(
@@ -277,6 +300,31 @@ describe('générateur docx interne : citations par le moteur', () => {
     expect(plain(document)).not.toContain('[^');
     expect(document).toMatch(/<w:footnoteReference w:id="1"\/>/);
     expect(plain(footnoteXml(footnotes, 1))).toContain('Allure of the Archives');
+  });
+
+  /**
+   * Revue de L10-6 : la note de l'auteur se lit dans l'arbre, et le moteur décidait ligne à ligne.
+   * Une citation sur une ligne que l'arbre range dans la note (ligne collée sans retrait,
+   * définition en retrait, dans une citation ou un élément de liste) devenait un appel du moteur,
+   * emporté dans le texte de la note : un `<w:footnoteReference>` dans `footnotes.xml`, que
+   * LibreOffice refuse d'ouvrir. pandoc la rend en place, dans la note.
+   */
+  it.each([
+    ['ligne collée sans retrait', 'Texte[^a].\n\n[^a]: Voir à ce sujet\n[@Farge_2013], p. 12.\n\nCorps final.\n'],
+    ['définition en retrait de deux espaces', 'Texte[^a].\n\n  [^a]: Voir [@Farge_2013], p. 12.\n'],
+    ['définition dans une citation en retrait', 'Texte[^a].\n\n> [^a]: Voir [@Farge_2013], p. 12.\n'],
+    ['définition dans un élément de liste', 'Texte[^a].\n\n1. item\n\n   [^a]: Voir [@Farge_2013], p. 12.\n'],
+  ])('une citation dans la note de l’auteur y reste, sans note dans la note : %s', async (_case, content) => {
+    const { document, footnotes } = await exportNative(content, {
+      citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+    });
+    expect(footnotes).not.toContain('<w:footnoteReference');
+    expect(document.match(/<w:footnoteReference /g)).toHaveLength(1);
+    const note = plain(footnoteXml(footnotes, Number(document.match(/<w:footnoteReference w:id="(\d+)"/)?.[1])));
+    expect(note).toContain('Voir');
+    expect(note).toContain('Allure of the Archives');
+    expect(note).toContain('p. 12');
+    expect(plain(document)).not.toContain('p. 12');
   });
 
   it('signale les clés introuvables au lieu de réussir en silence', async () => {
@@ -576,6 +624,32 @@ describe('listes numérotées qui ne commencent pas à 1', () => {
     expect(listStartOf(document, numbering, 'troisième point')).toBe(3);
     expect(listStartOf(document, numbering, 'quatrième point')).toBe(3);
     expect(listStartOf(document, numbering, 'premier')).toBe(1);
+  });
+
+  /**
+   * Revue de L10-6 : une référence par départ séparait la sous-liste de sa liste parente, et docx
+   * ne pose la surcharge de départ qu'au niveau 0. Les sous-points numérotés au niveau 1
+   * continuaient d'une sous-liste à l'autre : sous « 4. », le premier sous-point sortait « 3. ».
+   */
+  it('une sous-liste numérotée repart à son départ sous chaque item, en retrait de sa liste', async () => {
+    const { document, numbering } = await exportNative(
+      '3. parent trois\n   1. sous-a premier\n   2. sous-a second\n4. parent quatre\n   1. sous-b premier\n\n' +
+        'Paragraphe.\n\n1. autre parent\n   3. sous-c trois\n   4. sous-c quatre\n2. autre suite\n   3. sous-d trois\n'
+    );
+
+    expect(listStartOf(document, numbering, 'parent trois')).toBe(3);
+    expect(listStartOf(document, numbering, 'parent quatre')).toBe(3);
+    expect(listStartOf(document, numbering, 'sous-a premier')).toBe(1);
+    expect(listStartOf(document, numbering, 'sous-b premier')).toBe(1);
+    expect(listStartOf(document, numbering, 'sous-c trois')).toBe(3);
+    expect(listStartOf(document, numbering, 'sous-d trois')).toBe(3);
+    // Deux sous-listes, deux instances : chacune a son compteur.
+    expect(listParagraph(document, numbering, 'sous-a premier')?.num).not.toBe(
+      listParagraph(document, numbering, 'sous-b premier')?.num
+    );
+    expect(listIndentOf(document, numbering, 'sous-a premier')).toBeGreaterThan(
+      listIndentOf(document, numbering, 'parent trois') ?? Infinity
+    );
   });
 
   it('une liste du résumé garde son départ, comme celles du corps', async () => {

@@ -1,7 +1,7 @@
 import { CitationEngine, type CSLItem } from '../../../backend/core/citation/CitationEngine.js';
 import { citationToCSL } from '../../../backend/core/citation/citationFromZotero.js';
 import type { Citation } from '../../../backend/types/citation.js';
-import { nextFootnoteNumber } from '../../editor/footnote-tools.js';
+import { collectFootnoteDefinitions, nextFootnoteNumber } from '../../editor/footnote-tools.js';
 
 /**
  * Options for {@link processMarkdownCitations}.
@@ -60,8 +60,6 @@ const CITATION_RE = new RegExp(
 /** One `;`-separated member of a cluster: optional prefix, key, optional suffix. */
 const CLUSTER_PART_RE = new RegExp(`^(?:(.*?)\\s)?-?@(${KEY})(.*)$`);
 
-/** Début d'un bloc de définition `[^label]: …` en tête de ligne. */
-const NOTE_DEFINITION_RE = /^\[\^[^\]\s]+\]:/;
 const FENCE_RE = /^\s*(```|~~~)/;
 
 interface ClusterPart {
@@ -308,10 +306,26 @@ export async function processMarkdownCitations(
     return { text, items };
   };
 
-  const rewrite = (segment: string, inNote: boolean): string =>
+  // « Dans une note de l'auteur » se lit aux positions de l'arbre Lezer, celui où l'export Word
+  // prend les notes de l'auteur (`extractManualFootnotes`), et qui les délimite comme pandoc
+  // (mesuré, pandoc 3.13) : ligne collée sous la définition sans retrait, définition en retrait,
+  // dans une citation ou un élément de liste. La règle ligne à ligne (définition en colonne 0, puis
+  // lignes en retrait) faisait de ces citations des appels `[^n]`, que la note emportait : une note
+  // dans une note, et un .docx que LibreOffice refuse d'ouvrir (revue de L10-6).
+  const definitions = markdown.includes('[^') ? collectFootnoteDefinitions(markdown) : [];
+  const inNoteAt = (pos: number): boolean => definitions.some((d) => pos >= d.from && pos < d.to);
+
+  const rewrite = (segment: string, segmentStart: number): string =>
     segment.replace(
       CITATION_RE,
-      (match: string, space: string | undefined, inner: string | undefined, bareKey: string | undefined) => {
+      (
+        match: string,
+        space: string | undefined,
+        inner: string | undefined,
+        bareKey: string | undefined,
+        index: number
+      ) => {
+        const inNote = inNoteAt(segmentStart + index + (space?.length ?? 0));
         const parts =
           inner !== undefined ? parseCluster(inner) : [{ prefix: '', key: bareKey!, suffix: '' }];
         if (!parts) return match;
@@ -330,24 +344,28 @@ export async function processMarkdownCitations(
       }
     );
 
-  // Ligne à ligne : c'est la position de la ligne (définition de note, bloc
-  // de code) qui décide du traitement, et un marqueur ne franchit jamais une
-  // fin de ligne.
-  let inNote = false;
+  // Ligne à ligne : un marqueur ne franchit jamais une fin de ligne, et un
+  // bloc de code se reconnaît à sa ligne de clôture. La position de chaque
+  // segment dans le texte entier sert à situer ses citations dans les notes.
   let inFence = false;
+  let lineStart = 0;
   const out = markdown.split('\n').map((line) => {
+    const start = lineStart;
+    lineStart += line.length + 1;
     if (FENCE_RE.test(line)) {
       inFence = !inFence;
       return line;
     }
-    if (inFence) return line;
-    if (NOTE_DEFINITION_RE.test(line)) inNote = true;
-    else if (inNote && line.trim() !== '' && !/^\s+\S/.test(line)) inNote = false;
-    if (!line.includes('@')) return line;
+    if (inFence || !line.includes('@')) return line;
     // Les segments impairs sont des extraits de code en ligne.
+    let segmentStart = start;
     return line
       .split(/(`[^`]*`)/)
-      .map((seg, i) => (i % 2 === 1 ? seg : rewrite(seg, inNote)))
+      .map((seg, i) => {
+        const at = segmentStart;
+        segmentStart += seg.length;
+        return i % 2 === 1 ? seg : rewrite(seg, at);
+      })
       .join('');
   });
 

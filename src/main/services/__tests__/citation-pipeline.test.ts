@@ -149,6 +149,35 @@ describe('formes de citation au-delà de [@clé] dans le corps', () => {
     expect(res.bibliography).toHaveLength(1);
   });
 
+  /**
+   * Revue de L10-6 : « dans une note » se décidait ligne à ligne (définition en colonne 0, puis
+   * lignes en retrait), alors que l'export Word lit ses notes dans l'arbre Lezer, comme pandoc
+   * (mesuré, pandoc 3.13). Une citation sur une ligne collée sous la définition devenait un appel
+   * `[^n]` que la note de l'auteur emportait : une note dans une note, et un .docx que LibreOffice
+   * refuse d'ouvrir.
+   */
+  it.each([
+    ['ligne collée sans retrait', 'Texte[^a].\n\n[^a]: Voir à ce sujet\n[@alice2020], p. 12.\n\nCorps final.\n'],
+    ['définition en retrait de deux espaces', 'Texte[^a].\n\n  [^a]: Voir [@alice2020]\n'],
+    ['définition dans une citation en retrait', 'Texte[^a].\n\n> [^a]: Voir [@alice2020]\n'],
+    ['définition dans un élément de liste', 'Texte[^a].\n\n1. item\n\n   [^a]: Voir [@alice2020]\n'],
+  ])('rend en place une citation de la note de l’auteur : %s', async (_case, src) => {
+    const res = await processMarkdownCitations(src, { resolve });
+    expect(res.footnotes).toHaveLength(0);
+    expect(res.md).not.toMatch(/\[\^\d+\]/);
+    expect(res.md).not.toContain('@alice2020');
+    expect(res.md).toContain('*Histoire exemplaire*');
+  });
+
+  it('un paragraphe en retrait de deux espaces après une ligne vide sort de la note : la citation y devient une note', async () => {
+    // pandoc range ce paragraphe dans le corps (retrait de quatre espaces exigé après une ligne vide).
+    const res = await processMarkdownCitations('Texte[^a].\n\n[^a]: Note.\n\n  Suite [@alice2020] du corps.\n', {
+      resolve,
+    });
+    expect(res.footnotes.map((f) => f.n)).toEqual([1]);
+    expect(res.md).toContain('Suite[^1] du corps.');
+  });
+
   it('comprend une clé nue, dans le corps comme dans une note', async () => {
     const src = 'Selon @alice2020, c’est établi[^1].\n\n[^1]: @alice2020, p. 8.\n';
     const res = await processMarkdownCitations(src, { resolve });
