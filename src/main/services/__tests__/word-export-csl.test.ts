@@ -245,7 +245,8 @@ describe.skipIf(!pandocAvailable())('export Word par pandoc : le style CSL du pr
     const projectPath = makeProject('article');
     const { bibliographyPath: _figee, ...options } = articleOptions(projectPath);
 
-    const result = await new WordExportService().exportToWord(options);
+    // Posé par le handler de la fenêtre (L04-8) : le chemin du renderer n'est qu'un repli.
+    const result = await new WordExportService().exportToWord({ ...options, bibliographyFromProject: true });
 
     expect(result).toMatchObject({ success: true });
     const text = docxText(options.outputPath!);

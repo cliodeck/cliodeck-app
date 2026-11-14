@@ -25,6 +25,7 @@ import {
 import { CitationEngine, type StyleProblem } from '../../../backend/core/citation/CitationEngine.js';
 import {
   citationKeysIn,
+  citationsLeftWithoutBibliography,
   processMarkdownCitations,
   type ProcessedFootnote,
 } from './citation-pipeline.js';
@@ -75,6 +76,13 @@ export interface WordExportOptions {
   content: string;
   outputPath?: string;
   bibliographyPath?: string;
+  /**
+   * La bibliographie est celle que déclare `project.json`, relu au début de l'export, sous son
+   * horloge : `bibliographyPath` n'est qu'un repli quand il n'en déclare aucune
+   * (`resolveProjectBibliography`). Le handler de la fenêtre le pose, car elle envoie
+   * `currentProject.bibliography`, figé à l'ouverture du projet (S18-2-2).
+   */
+  bibliographyFromProject?: boolean;
   cslPath?: string; // Path to CSL file for citation styling
   templatePath?: string; // Path to .dotx template
   /** Réglages d'ouvrage (notes, bibliographie, numérotation). */
@@ -473,11 +481,15 @@ export class WordExportService {
       // renderer, figé à l'ouverture : un `.bib` importé pendant la séance
       // envoyait l'export au générateur interne, qui ignorait le style.
       const projectCsl = await resolveProjectCsl(options.projectPath, options.cslPath);
+      const bibliography = options.bibliographyFromProject
+        ? await resolveProjectBibliography(options.projectPath, options.bibliographyPath)
+        : { path: options.bibliographyPath };
       options = {
         ...options,
-        bibliographyPath: await resolveProjectBibliography(options.projectPath, options.bibliographyPath),
+        bibliographyPath: bibliography.path,
         cslPath: projectCsl.path,
       };
+      if (bibliography.missing) console.warn('⚠️ word-export: bibliographie du projet introuvable:', bibliography.missing);
       // Case « style intégré » cochée, le style du projet n'est pas demandé :
       // son absence n'a rien à dire.
       const missingCsl = options.citation?.useEngine ? undefined : projectCsl.missing;
@@ -683,6 +695,17 @@ export class WordExportService {
         } else if (keys.length > 0) {
           unresolvedCitations = keys;
         }
+      }
+
+      // Le `.bib` que nomme le projet, introuvable (sans lui, l'export ne passe jamais par pandoc) :
+      // en tête, car il explique les citations restées telles quelles. Sans citation, ou toutes
+      // rendues par le moteur sur les références en mémoire, le document sortirait identique avec
+      // lui : rien à dire, et la fenêtre se referme.
+      if (
+        bibliography.missing &&
+        citationsLeftWithoutBibliography(sourceMarkdown, unresolvedCitations, citationsRendered)
+      ) {
+        warnings.unshift({ code: 'export.bibliographyMissing', params: { file: bibliography.missing } });
       }
 
       // Le générateur interne remplace une image par sa légende (relevé par L07-2).

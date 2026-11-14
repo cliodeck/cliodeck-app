@@ -3,7 +3,12 @@ import { copyFile, writeFile, mkdir, mkdtemp, readFile, rm } from 'fs/promises';
 import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
-import { appendEngineCitations, citationKeysIn, processMarkdownCitations } from './citation-pipeline.js';
+import {
+  appendEngineCitations,
+  citationKeysIn,
+  citationsLeftWithoutBibliography,
+  processMarkdownCitations,
+} from './citation-pipeline.js';
 import { bibliographyService, readBibFile } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
@@ -19,7 +24,12 @@ import {
 } from './export-time-limit.js';
 import { stripLeadingHeading } from '../../editor/outline.js';
 import { speakerNotesToPandoc } from '../../editor/slides.js';
-import { removeResourceLinks, resolveProjectCsl, stageResourcePaths } from './export-project-files.js';
+import {
+  removeResourceLinks,
+  resolveProjectBibliography,
+  resolveProjectCsl,
+  stageResourcePaths,
+} from './export-project-files.js';
 import {
   BEAMER_STAGING_DIR,
   type BeamerConfig,
@@ -68,6 +78,14 @@ export interface ExportOptions {
   };
   outputPath?: string;
   bibliographyPath?: string;
+  /**
+   * La bibliographie est celle que déclare `project.json`, relu au début de l'export, sous son
+   * horloge : `bibliographyPath` n'est qu'un repli quand il n'en déclare aucune
+   * (`resolveProjectBibliography`). Le handler de la fenêtre le pose, car elle envoie
+   * `currentProject.bibliography`, figé à l'ouverture du projet (S18-2-2). Une recette ne le pose
+   * pas : elle garde la bibliographie qu'elle passe.
+   */
+  bibliographyFromProject?: boolean;
   cslPath?: string; // Path to CSL file for citation styling
   /**
    * Citation rendering options. When provided, the in-process
@@ -870,9 +888,16 @@ export class PDFExportService {
       // d'écarter `--csl` en silence. Case « style intégré » cochée, il n'est
       // pas demandé.
       const projectCsl = await resolveProjectCsl(options.projectPath, options.cslPath);
-      options = { ...options, cslPath: projectCsl.path };
+      // La bibliographie du projet aussi : celle du renderer, figée à l'ouverture du projet,
+      // ignorait un `.bib` importé ou synchronisé pendant la séance, et pandoc partait sans
+      // `--citeproc` (S18-2-2). Avant l'assemblage : la bibliographie par chapitre en dépend.
+      const bibliography = options.bibliographyFromProject
+        ? await resolveProjectBibliography(options.projectPath, options.bibliographyPath)
+        : { path: options.bibliographyPath };
+      options = { ...options, bibliographyPath: bibliography.path, cslPath: projectCsl.path };
       const missingCsl = options.citation?.useEngine ? undefined : projectCsl.missing;
       if (missingCsl) console.warn('⚠️ pdf-export: style CSL du projet introuvable:', missingCsl);
+      if (bibliography.missing) console.warn('⚠️ pdf-export: bibliographie du projet introuvable:', bibliography.missing);
 
       // Try to load abstract from abstract.md if no abstract in metadata
       let abstract = options.metadata?.abstract;
@@ -1169,20 +1194,29 @@ export class PDFExportService {
 
       onProgress?.({ stage: 'complete', message: 'Export terminé!', progress: 100 });
 
+      // Quand citeproc a tourné sur tout le document, il dit sur sa sortie d'erreur les clés qu'il
+      // n'a pas trouvées, et les imprime en gras suivies d'un « ? ».
+      for (const key of pandocUnresolvedCitations(pandocStderr)) unresolved.add(key);
+      const unresolvedCitations = [...unresolved];
+      if (unresolvedCitations.length > 0) console.warn('⚠️ pdf-export: citations introuvables :', unresolvedCitations);
+
+      // Le `.bib` que nomme le projet, introuvable : en tête, car il explique les citations restées
+      // telles quelles. Sans citation, ou toutes rendues par le moteur sur les références en
+      // mémoire, le PDF sortirait identique avec lui : rien à dire, et la fenêtre se referme.
+      const bibliographyWarnings: OutcomeIssue[] =
+        bibliography.missing && citationsLeftWithoutBibliography(cleanedContent, unresolvedCitations, useEnginePipeline)
+          ? [{ code: 'export.bibliographyMissing', params: { file: bibliography.missing } }]
+          : [];
       // Une image introuvable, pandoc la remplace par sa légende et réussit : sans cette réserve,
       // le PDF partait sans elle et sans un mot (S12-1-1).
       const warnings = [
+        ...bibliographyWarnings,
         ...manuscriptWarnings,
         ...resources.warnings,
         ...beamer.warnings,
         ...missingImagesWarnings(pandocMissingResources(pandocStderr)),
       ];
       if (warnings.length > 0) console.warn('⚠️ pdf-export: réserves :', warnings);
-      // Quand citeproc a tourné sur tout le document, il dit sur sa sortie d'erreur les clés qu'il
-      // n'a pas trouvées, et les imprime en gras suivies d'un « ? ».
-      for (const key of pandocUnresolvedCitations(pandocStderr)) unresolved.add(key);
-      const unresolvedCitations = [...unresolved];
-      if (unresolvedCitations.length > 0) console.warn('⚠️ pdf-export: citations introuvables :', unresolvedCitations);
 
       console.log('✅ PDF exported successfully:', outputPath);
       return {
