@@ -85,6 +85,32 @@ function parseCluster(inner: string): ClusterPart[] | null {
 }
 
 /**
+ * Les clés des groupes `[@clé]` d'un markdown, dans l'ordre, sans doublon : celles qu'un export
+ * qui ne rend pas les citations laisse telles quelles. Même lecture que
+ * {@link processMarkdownCitations} : rien dans un bloc de code ni dans un extrait de code en
+ * ligne, et pas les `@nom` nus (plus souvent un pseudonyme qu'une citation).
+ */
+export function citationKeysIn(markdown: string): string[] {
+  const keys = new Set<string>();
+  let inFence = false;
+  for (const line of markdown.split('\n')) {
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || !line.includes('@')) continue;
+    line.split(/(`[^`]*`)/).forEach((segment, i) => {
+      if (i % 2 === 1) return;
+      for (const m of segment.matchAll(CITATION_RE)) {
+        if (m[2] === undefined) continue;
+        for (const part of parseCluster(m[2]) ?? []) keys.add(part.key);
+      }
+    });
+  }
+  return [...keys];
+}
+
+/**
  * citeproc rend du HTML (`<i>Titre</i>`, entités). Quand la citation est
  * recopiée DANS le markdown (note de l'auteur, style auteur-date), elle doit
  * redevenir du markdown, sinon l'italique des titres est perdu en route.

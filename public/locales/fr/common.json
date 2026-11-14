@@ -2694,7 +2694,19 @@
       "imageNotConverted": "L'export PDF ne sait pas lire le format de l'image {{file}}. Enregistrez-la en PNG ou en JPEG, puis relancez l'export.",
       "beamerImageNotFound": "Image de la configuration Beamer introuvable ou illisible : {{file}}. La présentation est exportée sans elle. Placez-la dans le dossier du projet, ou corrigez son chemin dans la configuration Beamer.",
       "imageFolderUnreachable": "Les images du dossier {{dir}} n'ont pas pu être cherchées : son chemin contient « {{char}} », que l'outil d'export lit comme un séparateur. Elles sont remplacées par leur légende. Renommez le dossier du projet sans ce caractère, puis relancez l'export.",
-      "outputIsMarkdown": "« {{file}} » est un fichier Markdown : l'export ne l'écrit pas, pour ne pas remplacer votre texte. Donnez un autre nom au fichier de sortie, puis relancez l'export."
+      "outputIsMarkdown": "« {{file}} » est un fichier Markdown : l'export ne l'écrit pas, pour ne pas remplacer votre texte. Donnez un autre nom au fichier de sortie, puis relancez l'export.",
+      "chapterUnreadable": "Chapitre omis : le fichier de « {{title}} » ({{file}}) est introuvable ou illisible. Le reste du livre est exporté. Rétablissez ce fichier, ou retirez le chapitre du manuscrit, puis relancez l'export.",
+      "chapterOutsideProject": "Chapitre omis : « {{title}} » passe par un lien qui sort du projet ({{file}}) et n'est pas exporté. Remplacez ce lien par le fichier réel, puis relancez l'export.",
+      "chapterNotInManifest": "Le chapitre à exporter ne fait plus partie du manuscrit : le document exporté est vide. Ouvrez un chapitre du manuscrit, puis relancez l'export.",
+      "chapterCitationsNotResolved": "Les citations du chapitre « {{title}} » ({{file}}) n'ont pas pu être mises en forme : Pandoc a échoué sur ce chapitre, et elles restent sous forme de clés dans le PDF. Vérifiez le style de citation et la bibliographie du projet, puis relancez l'export.",
+      "perChapterBibliographyIgnored": "La bibliographie par chapitre, demandée dans les réglages du livre, n'est pas suivie : avec un style de citation intégré, les références sont réunies en une seule bibliographie, en fin de livre. Décochez « Utiliser un style de citation intégré » pour une bibliographie par chapitre.",
+      "word": {
+        "templateIgnored": "Le modèle Word {{file}} n'a pas été appliqué : il n'a pas de champ {content} où placer le texte, ou ClioDeck n'a pas su le lire. Le document est exporté sans lui.",
+        "templateRawMarkdown": "Le modèle Word {{file}} a été rempli : son champ {content} reçoit le texte tel qu'il est écrit, en Markdown, sans mise en forme (titres, notes, italique). Retirez ce modèle du dossier du projet pour obtenir un document mis en forme.",
+        "citationsNotFormatted": "Citations non mises en forme, laissées sous forme de clés dans le document : {{keys}}. Sans Pandoc, ClioDeck ne les met en forme qu'avec un style de citation. Cochez « Utiliser un style de citation intégré », choisissez un style dans les paramètres du projet, ou installez Pandoc.",
+        "imagesNotEmbedded_one": "Image non insérée, remplacée par sa légende : {{files}}. Le générateur Word de ClioDeck, employé quand le projet n'a pas de bibliographie ou que Pandoc manque, ne sait pas insérer d'image.",
+        "imagesNotEmbedded_other": "Images non insérées, remplacées par leur légende : {{files}}. Le générateur Word de ClioDeck, employé quand le projet n'a pas de bibliographie ou que Pandoc manque, ne sait pas insérer d'image."
+      }
     }
   }
 }

@@ -1,5 +1,5 @@
 import { writeFile, readFile, mkdtemp, rm } from 'fs/promises';
-import { delimiter, join, dirname, extname, resolve as resolvePath } from 'path';
+import { basename, delimiter, join, dirname, extname, resolve as resolvePath } from 'path';
 import { spawn } from 'child_process';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
@@ -18,11 +18,16 @@ import {
 import {
   MarkdownToWordParser,
   inlineMarkdownRuns,
+  markdownImages,
   ORDERED_LIST_NUMBERING,
   type BlockChild,
 } from './word-markdown.js';
 import { CitationEngine, type StyleProblem } from '../../../backend/core/citation/CitationEngine.js';
-import { processMarkdownCitations, type ProcessedFootnote } from './citation-pipeline.js';
+import {
+  citationKeysIn,
+  processMarkdownCitations,
+  type ProcessedFootnote,
+} from './citation-pipeline.js';
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
 import { assembleManuscript } from './manuscript-assembler.js';
@@ -49,6 +54,7 @@ import {
   stageResourcePaths,
 } from './export-project-files.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
+import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 import { bibliographyService } from './bibliography-service.js';
 // @ts-ignore - No type definitions available
 import Docxtemplater from 'docxtemplater';
@@ -175,6 +181,27 @@ export function pandocUnresolvedCitations(stderr: string): string[] {
   const keys = new Set<string>();
   for (const m of stderr.matchAll(/citation (\S+) not found/g)) keys.add(m[1]);
   return [...keys];
+}
+
+const CONTENT_TYPES_PART = '[Content_Types].xml';
+const TEMPLATE_MAIN_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml';
+const DOCUMENT_MAIN_TYPE = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml';
+
+/**
+ * Le modèle a-t-il une place pour le texte de l'auteur (la balise `{content}`) ? Un modèle de
+ * styles ordinaire n'en a pas. Un modèle que docxtemplater ne sait pas lire (une accolade restée
+ * ouverte dans son texte) n'en a pas davantage.
+ */
+export async function templateDeclaresContent(templatePath: string): Promise<boolean> {
+  try {
+    const zip = new PizZip(await readFile(templatePath, 'binary'));
+    const text: string = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, errorLogging: false })
+      .getFullText();
+    return text.includes('{content}');
+  } catch (error) {
+    console.warn('⚠️ word-export: modèle illisible par docxtemplater:', templatePath, error);
+    return false;
+  }
 }
 
 // MARK: - Service
@@ -489,6 +516,11 @@ export class WordExportService {
         (await pathExists(options.bibliographyPath)) &&
         (await this.checkPandoc());
 
+      // Ce que le document aura de moins que le texte de l'auteur : un chapitre omis à l'assemblage,
+      // un modèle laissé de côté, une citation ou une image que le générateur interne ne rend pas.
+      // Le document est écrit quand même ; la fenêtre le dit et reste ouverte (S12-1-14).
+      const warnings: OutcomeIssue[] = [];
+
       if (options.manuscript?.chapters?.length) {
         const assembled = await assembleManuscript({
           projectPath: options.projectPath,
@@ -498,7 +530,8 @@ export class WordExportService {
           scope: options.manuscript.scope,
           target: willUsePandoc ? 'latex' : 'plain',
         });
-        for (const w of assembled.warnings) console.warn('⚠️ word-export:', w);
+        if (assembled.warnings.length > 0) console.warn('⚠️ word-export: assemblage :', assembled.warnings);
+        warnings.push(...assembled.warnings);
         options = { ...options, content: assembled.markdown };
       }
 
@@ -512,7 +545,13 @@ export class WordExportService {
       if (willUsePandoc) {
         console.log('📚 Bibliography detected, using pandoc for export...');
         const result = await this.exportWithPandoc(options, outputPath, onProgress, clock);
-        return result.success && missingCsl ? { ...result, missingCsl } : result;
+        if (!result.success) return result;
+        warnings.push(...(result.warnings ?? []));
+        return {
+          ...result,
+          ...(missingCsl ? { missingCsl } : {}),
+          ...(warnings.length > 0 ? { warnings } : {}),
+        };
       }
 
       if (hasBibliography && !hasPandoc) {
@@ -539,6 +578,7 @@ export class WordExportService {
       let engineBibliography: string[] = [];
       let unresolvedCitations: string[] = [];
       let unusableCsl: WordExportResult['unusableCsl'];
+      let citationsRendered = false;
       const locale = options.citation?.locale ?? 'fr-FR';
       const engine = new CitationEngine();
       let engineStyle = options.citation?.useEngine
@@ -592,9 +632,34 @@ export class WordExportService {
           );
           engineFootnotes = processed.footnotes;
           engineBibliography = processed.bibliography;
+          citationsRendered = true;
         } catch (err) {
           console.warn('⚠️ CitationEngine pre-processing failed:', err);
         }
+      }
+
+      // Rien n'a rendu les citations : les `[@clé]` restent telles quelles dans le .docx, et
+      // l'export se disait réussi sans un mot (S12-2-2). Le moteur n'est pas forcé pour autant :
+      // il imposerait un style que l'auteur n'a pas choisi. Avec une bibliographie, c'est le style
+      // qui manque (la fenêtre dit « rendues dans le style par défaut », ce que seul pandoc fait) ;
+      // sans elle, ou quand le moteur a échoué, les clés n'ont pas trouvé de référence. Un style
+      // du projet inapplicable a déjà son message (`unusableCsl`), qui dit que les clés restent.
+      if (!citationsRendered && !unusableCsl) {
+        const keys = citationKeysIn(sourceMarkdown);
+        if (keys.length > 0 && hasBibliography && !engineStyle) {
+          warnings.push({ code: 'export.word.citationsNotFormatted', params: { keys: keys.join(', ') } });
+        } else if (keys.length > 0) {
+          unresolvedCitations = keys;
+        }
+      }
+
+      // Le générateur interne remplace une image par sa légende (relevé par L07-2).
+      const images = markdownImages(sourceMarkdown);
+      if (images.length > 0) {
+        warnings.push({
+          code: 'export.word.imagesNotEmbedded',
+          params: { files: images.join(', '), count: images.length },
+        });
       }
 
       // Notes manuelles de l'auteur : leurs définitions sortent du corps et
@@ -835,8 +900,11 @@ export class WordExportService {
         ...(Object.keys(docxFootnotes).length > 0 ? { footnotes: docxFootnotes } : {}),
       });
 
-      // Check if template is provided or exists
-      let finalBuffer: Buffer;
+      // Le modèle .dotx que la fenêtre a trouvé à la racine du projet. Il ne remplace le document
+      // construit que s'il a une place pour le texte (`{content}`) : un modèle de styles ordinaire
+      // n'en a pas, et le .docx sortait sans une ligne de l'auteur, annoncé réussi (S12-1-2).
+      // Sinon le document construit part tel quel, et la réserve dit que le modèle est ignoré.
+      let finalBuffer: Buffer | null = null;
 
       if (options.templatePath && (await pathExists(options.templatePath))) {
         onProgress?.({
@@ -844,27 +912,30 @@ export class WordExportService {
           message: 'Application du modèle Word...',
           progress: 85,
         });
+        const file = basename(options.templatePath);
 
         try {
-          // Load template and merge with content
-          finalBuffer = await this.mergeWithTemplate(
-            options.templatePath,
-            {
-              title: options.metadata?.title || '',
-              author: options.metadata?.author || '',
-              date: options.metadata?.date || '',
-              content: options.content,
-              abstract: abstract || '',
-            }
-          );
+          if (await templateDeclaresContent(options.templatePath)) {
+            finalBuffer = await this.mergeWithTemplate(
+              options.templatePath,
+              {
+                title: options.metadata?.title || '',
+                author: options.metadata?.author || '',
+                date: options.metadata?.date || '',
+                content: options.content,
+                abstract: abstract || '',
+              }
+            );
+            // `{content}` reçoit le markdown, pas sa mise en forme : la balise est un champ texte.
+            warnings.push({ code: 'export.word.templateRawMarkdown', params: { file } });
+          }
         } catch (error) {
           console.warn('⚠️ Template merge failed, using generated document:', error);
-          finalBuffer = await Packer.toBuffer(doc);
         }
-      } else {
-        // No template, use generated document
-        finalBuffer = await Packer.toBuffer(doc);
+        if (!finalBuffer) warnings.push({ code: 'export.word.templateIgnored', params: { file } });
       }
+
+      finalBuffer ??= await Packer.toBuffer(doc);
 
       clock.throwIfExpired();
       await writeFile(outputPath, finalBuffer);
@@ -877,12 +948,14 @@ export class WordExportService {
       });
 
       console.log('✅ Word document exported successfully:', outputPath);
+      if (warnings.length > 0) console.warn('⚠️ word-export: réserves :', warnings);
       return {
         success: true,
         outputPath,
         ...(unresolvedCitations.length > 0 ? { unresolvedCitations } : {}),
         ...(missingCsl ? { missingCsl } : {}),
         ...(unusableCsl ? { unusableCsl } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
       };
     } catch (error: unknown) {
       console.error('❌ Word export failed:', error);
@@ -928,6 +1001,13 @@ export class WordExportService {
 
       // Get the generated zip
       const outputZip = doc.getZip();
+
+      // Un .dotx déclare sa partie principale comme celle d'un modèle : sous l'extension .docx,
+      // le fichier n'est plus un document que Word ouvre comme tel (S12-1-2).
+      const contentTypes = outputZip.file(CONTENT_TYPES_PART);
+      if (contentTypes) {
+        outputZip.file(CONTENT_TYPES_PART, contentTypes.asText().replace(TEMPLATE_MAIN_TYPE, DOCUMENT_MAIN_TYPE));
+      }
 
       // Generate buffer
       const buffer = outputZip.generate({

@@ -2694,7 +2694,19 @@
       "imageNotConverted": "The PDF export cannot read the format of the image {{file}}. Save it as PNG or JPEG, then run the export again.",
       "beamerImageNotFound": "Image from the Beamer configuration not found or unreadable: {{file}}. The presentation is exported without it. Put it in the project folder, or correct its path in the Beamer configuration.",
       "imageFolderUnreachable": "The images in the folder {{dir}} could not be looked up: its path contains “{{char}}”, which the export tool reads as a separator. They are replaced by their captions. Rename the project folder without this character, then run the export again.",
-      "outputIsMarkdown": "“{{file}}” is a Markdown file: the export does not write to it, so as not to replace your text. Give the output file another name, then run the export again."
+      "outputIsMarkdown": "“{{file}}” is a Markdown file: the export does not write to it, so as not to replace your text. Give the output file another name, then run the export again.",
+      "chapterUnreadable": "Chapter left out: the file of “{{title}}” ({{file}}) cannot be found or read. The rest of the book is exported. Restore this file, or remove the chapter from the manuscript, then run the export again.",
+      "chapterOutsideProject": "Chapter left out: “{{title}}” goes through a link that leads outside the project ({{file}}) and is not exported. Replace that link with the real file, then run the export again.",
+      "chapterNotInManifest": "The chapter to export is no longer part of the manuscript: the exported document is empty. Open a chapter of the manuscript, then run the export again.",
+      "chapterCitationsNotResolved": "The citations of the chapter “{{title}}” ({{file}}) could not be formatted: Pandoc failed on this chapter, and they remain as keys in the PDF. Check the project's citation style and bibliography, then run the export again.",
+      "perChapterBibliographyIgnored": "The per-chapter bibliography set in the book settings is not followed: with a built-in citation style, the references are gathered in a single bibliography at the end of the book. Untick “Use a built-in citation style” for a per-chapter bibliography.",
+      "word": {
+        "templateIgnored": "The Word template {{file}} was not applied: it has no {content} field to hold the text, or ClioDeck could not read it. The document is exported without it.",
+        "templateRawMarkdown": "The Word template {{file}} was filled in: its {content} field receives the text as written, in Markdown, without formatting (headings, notes, italics). Remove this template from the project folder to get a formatted document.",
+        "citationsNotFormatted": "Citations not formatted, left as keys in the document: {{keys}}. Without Pandoc, ClioDeck formats them only with a citation style. Tick “Use a built-in citation style”, choose a style in the project settings, or install Pandoc.",
+        "imagesNotEmbedded_one": "Image not inserted, replaced by its caption: {{files}}. ClioDeck's own Word generator, used when the project has no bibliography or Pandoc is missing, cannot insert images.",
+        "imagesNotEmbedded_other": "Images not inserted, replaced by their captions: {{files}}. ClioDeck's own Word generator, used when the project has no bibliography or Pandoc is missing, cannot insert images."
+      }
     }
   }
 }

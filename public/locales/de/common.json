@@ -2694,7 +2694,19 @@
       "imageNotConverted": "Der PDF-Export kann das Format des Bildes {{file}} nicht lesen. Speichern Sie es als PNG oder JPEG, und starten Sie den Export erneut.",
       "beamerImageNotFound": "Bild aus der Beamer-Konfiguration nicht gefunden oder nicht lesbar: {{file}}. Die Präsentation wird ohne das Bild exportiert. Legen Sie es in den Projektordner, oder korrigieren Sie seinen Pfad in der Beamer-Konfiguration.",
       "imageFolderUnreachable": "Die Bilder im Ordner {{dir}} konnten nicht gesucht werden: Sein Pfad enthält „{{char}}“, das das Exportwerkzeug als Trennzeichen liest. Sie werden durch ihre Bildunterschriften ersetzt. Benennen Sie den Projektordner ohne dieses Zeichen um, und starten Sie den Export erneut.",
-      "outputIsMarkdown": "„{{file}}“ ist eine Markdown-Datei: Der Export schreibt nicht hinein, damit Ihr Text nicht ersetzt wird. Geben Sie der Ausgabedatei einen anderen Namen, und starten Sie den Export erneut."
+      "outputIsMarkdown": "„{{file}}“ ist eine Markdown-Datei: Der Export schreibt nicht hinein, damit Ihr Text nicht ersetzt wird. Geben Sie der Ausgabedatei einen anderen Namen, und starten Sie den Export erneut.",
+      "chapterUnreadable": "Kapitel ausgelassen: Die Datei von „{{title}}“ ({{file}}) wurde nicht gefunden oder ist nicht lesbar. Der Rest des Buches wird exportiert. Stellen Sie diese Datei wieder her oder entfernen Sie das Kapitel aus dem Manuskript, und starten Sie den Export dann erneut.",
+      "chapterOutsideProject": "Kapitel ausgelassen: „{{title}}“ läuft über eine Verknüpfung, die aus dem Projekt hinausführt ({{file}}), und wird nicht exportiert. Ersetzen Sie diese Verknüpfung durch die echte Datei und starten Sie den Export dann erneut.",
+      "chapterNotInManifest": "Das zu exportierende Kapitel gehört nicht mehr zum Manuskript: Das exportierte Dokument ist leer. Öffnen Sie ein Kapitel des Manuskripts und starten Sie den Export dann erneut.",
+      "chapterCitationsNotResolved": "Die Zitate des Kapitels „{{title}}“ ({{file}}) konnten nicht formatiert werden: Pandoc ist bei diesem Kapitel gescheitert, und sie bleiben im PDF als Zitierschlüssel stehen. Prüfen Sie den Zitierstil und die Bibliografie des Projekts und starten Sie den Export dann erneut.",
+      "perChapterBibliographyIgnored": "Die in den Bucheinstellungen gewünschte Bibliografie pro Kapitel wird nicht umgesetzt: Mit einem integrierten Zitierstil werden die Quellen in einer einzigen Bibliografie am Ende des Buches zusammengefasst. Deaktivieren Sie „Integrierten Zitierstil verwenden“ für eine Bibliografie pro Kapitel.",
+      "word": {
+        "templateIgnored": "Die Word-Vorlage {{file}} wurde nicht angewendet: Sie hat kein Feld {content} für den Text, oder ClioDeck konnte sie nicht lesen. Das Dokument wird ohne sie exportiert.",
+        "templateRawMarkdown": "Die Word-Vorlage {{file}} wurde ausgefüllt: Ihr Feld {content} erhält den Text so, wie er geschrieben ist, in Markdown, ohne Formatierung (Überschriften, Fußnoten, Kursivschrift). Entfernen Sie diese Vorlage aus dem Projektordner, um ein formatiertes Dokument zu erhalten.",
+        "citationsNotFormatted": "Zitate nicht formatiert, als Zitierschlüssel im Dokument belassen: {{keys}}. Ohne Pandoc formatiert ClioDeck sie nur mit einem Zitierstil. Aktivieren Sie „Integrierten Zitierstil verwenden“, wählen Sie einen Stil in den Projekteinstellungen oder installieren Sie Pandoc.",
+        "imagesNotEmbedded_one": "Bild nicht eingefügt, durch seine Bildunterschrift ersetzt: {{files}}. Der eigene Word-Generator von ClioDeck, der verwendet wird, wenn das Projekt keine Bibliografie hat oder Pandoc fehlt, kann keine Bilder einfügen.",
+        "imagesNotEmbedded_other": "Bilder nicht eingefügt, durch ihre Bildunterschriften ersetzt: {{files}}. Der eigene Word-Generator von ClioDeck, der verwendet wird, wenn das Projekt keine Bibliografie hat oder Pandoc fehlt, kann keine Bilder einfügen."
+      }
     }
   }
 }

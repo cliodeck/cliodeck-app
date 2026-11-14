@@ -707,12 +707,14 @@ export class PDFExportService {
    *
    * Le repli ci-dessous ne vaut que pour un échec isolé. Après un dépassement,
    * l'horloge refuse tout nouvel outil et l'export rend `export_timed_out` :
-   * jamais un PDF aux `[@clef]` non résolues, sans rien dire.
+   * jamais un PDF aux `[@clef]` non résolues, sans rien dire. Un échec isolé se
+   * dit aussi : `resolved` est faux, et l'export en fait une réserve qui nomme
+   * le chapitre (S12-1-14).
    */
   private async resolveCitationsInChapter(
     content: string,
     opts: { bibliographyPath: string; cslPath?: string; tempDir: string; clock: ExportClock }
-  ): Promise<string> {
+  ): Promise<{ content: string; resolved: boolean }> {
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const inPath = join(opts.tempDir, `chapter-${stamp}.md`);
     await writeFile(inPath, content, 'utf-8');
@@ -729,7 +731,7 @@ export class PDFExportService {
     }
 
     const extendedPath = this.getExtendedPath();
-    return new Promise<string>((resolve) => {
+    return new Promise<{ content: string; resolved: boolean }>((resolve) => {
       const proc = opts.clock.spawn('pandoc', args, {
         cwd: opts.tempDir,
         env: { ...process.env, PATH: extendedPath },
@@ -739,17 +741,17 @@ export class PDFExportService {
       proc.on('close', (code) => {
         const resolved = stdout();
         if (code === 0 && resolved.trim()) {
-          resolve(resolved);
+          resolve({ content: resolved, resolved: true });
         } else {
           // Échec isolé : le chapitre part avec ses `[@clef]` non résolues
           // plutôt que de faire échouer tout l'export.
           console.warn('⚠️ citeproc par chapitre a échoué, chapitre laissé tel quel:', stderr().slice(0, 200));
-          resolve(content);
+          resolve({ content, resolved: false });
         }
       });
       proc.on('error', (err) => {
         console.warn('⚠️ citeproc par chapitre indisponible:', err.message);
-        resolve(content);
+        resolve({ content, resolved: false });
       });
     });
   }
@@ -835,6 +837,9 @@ export class PDFExportService {
       // nettoient à la main, cf. CHANGELOG).
       const mdPath = join(tempDir, 'input.md');
       let cleanedContent = options.content;
+      // Ce que le PDF aura de moins que le manuscrit (un chapitre omis, des citations restées en
+      // clés) : le PDF est écrit quand même, la fenêtre le dit et reste ouverte (S12-1-14).
+      const manuscriptWarnings: OutcomeIssue[] = [];
 
       // Assemblage du manuscrit (projets « livre »). La bibliographie par
       // chapitre passe par le hook `transformChapter` : citeproc tourne
@@ -851,7 +856,14 @@ export class PDFExportService {
         });
         const perChapterBib = bibMode.perChapter;
         if (bibMode.warning) console.warn('⚠️ ' + bibMode.warning);
+        // Case « style intégré » cochée, le moteur réunit les références en fin d'ouvrage : le
+        // réglage « par chapitre » n'est pas suivi, et l'auteur doit le savoir. Sans `.bib` ni
+        // moteur, il n'y a pas de bibliographie du tout : rien n'est replié.
+        if (bibMode.warning && options.citation?.useEngine) {
+          manuscriptWarnings.push({ code: 'export.perChapterBibliographyIgnored' });
+        }
 
+        const citeprocFailures: OutcomeIssue[] = [];
         const assembled = await assembleManuscript({
           projectPath: options.projectPath,
           chapters: options.manuscript.chapters,
@@ -859,19 +871,28 @@ export class PDFExportService {
           liveOverrides: options.manuscript.liveOverrides,
           scope: options.manuscript.scope,
           transformChapter: perChapterBib
-            ? (content) =>
-                this.resolveCitationsInChapter(content, {
+            ? async (content, chapter) => {
+                const cited = await this.resolveCitationsInChapter(content, {
                   bibliographyPath: options.bibliographyPath!,
                   cslPath: options.cslPath,
                   tempDir,
                   clock,
-                })
+                });
+                // La passe globale n'aura pas de bibliographie : ses clés s'imprimeraient telles
+                // quelles, sans que rien le dise.
+                if (!cited.resolved) {
+                  citeprocFailures.push({
+                    code: 'export.chapterCitationsNotResolved',
+                    params: { title: chapter.title, file: chapter.filePath },
+                  });
+                }
+                return cited.content;
+              }
             : undefined,
         });
 
-        for (const warning of assembled.warnings) {
-          console.warn('⚠️ Assemblage :', warning);
-        }
+        if (assembled.warnings.length > 0) console.warn('⚠️ Assemblage :', assembled.warnings);
+        manuscriptWarnings.push(...assembled.warnings, ...citeprocFailures);
         console.log(
           `📚 Manuscrit assemblé : ${assembled.chapterCount} pièce(s), bibliographie ${settings.bibliography}`
         );
@@ -1062,11 +1083,12 @@ export class PDFExportService {
       // Une image introuvable, pandoc la remplace par sa légende et réussit : sans cette réserve,
       // le PDF partait sans elle et sans un mot (S12-1-1).
       const warnings = [
+        ...manuscriptWarnings,
         ...resources.warnings,
         ...beamer.warnings,
         ...missingImagesWarnings(pandocMissingResources(pandocStderr)),
       ];
-      if (warnings.length > 0) console.warn('⚠️ pdf-export: images introuvables:', warnings);
+      if (warnings.length > 0) console.warn('⚠️ pdf-export: réserves :', warnings);
 
       console.log('✅ PDF exported successfully:', outputPath);
       return {

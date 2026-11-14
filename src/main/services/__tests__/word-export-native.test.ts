@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import PizZip from 'pizzip';
@@ -10,6 +10,7 @@ import {
 } from '../word-export';
 import { bibliographyService } from '../bibliography-service';
 import { CitationEngine, defaultCSLResourcesRoot } from '../../../../backend/core/citation/CitationEngine';
+import type { OutcomeIssue } from '../../../../backend/types/outcome';
 import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -33,8 +34,18 @@ async function exportNative(
     abstract?: string;
     citation?: { useEngine: boolean; style?: string; locale?: string };
     prepare?: (projectPath: string) => void;
+    /** Fichiers du projet, relatifs à lui, que la fenêtre transmet. */
+    templatePath?: string;
+    bibliographyPath?: string;
   } = {}
-): Promise<{ document: string; footnotes: string; rels: string; unresolved?: string[] }> {
+): Promise<{
+  document: string;
+  footnotes: string;
+  rels: string;
+  contentTypes: string;
+  unresolved?: string[];
+  warnings?: OutcomeIssue[];
+}> {
   const projectPath = mkdtempSync(join(dir, 'projet-'));
   if (extra.abstract) writeFileSync(join(projectPath, 'abstract.md'), extra.abstract);
   extra.prepare?.(projectPath);
@@ -51,6 +62,8 @@ async function exportNative(
     outputPath,
     metadata: { title: 'Titre', author: 'Autrice' },
     citation: extra.citation,
+    templatePath: extra.templatePath && join(projectPath, extra.templatePath),
+    bibliographyPath: extra.bibliographyPath && join(projectPath, extra.bibliographyPath),
   });
   expect(result.success).toBe(true);
   const zip = new PizZip(readFileSync(outputPath));
@@ -59,8 +72,43 @@ async function exportNative(
     document: read('word/document.xml'),
     footnotes: read('word/footnotes.xml'),
     rels: read('word/_rels/footnotes.xml.rels') + read('word/_rels/document.xml.rels'),
+    contentTypes: read('[Content_Types].xml'),
     unresolved: result.unresolvedCitations,
+    warnings: result.warnings,
   };
+}
+
+/**
+ * Un modèle .dotx minimal, tel que Word l'enregistre : la partie principale se déclare
+ * `template.main+xml`, et son corps est `body`.
+ */
+function dotx(body: string): Buffer {
+  const zip = new PizZip();
+  zip.file(
+    '[Content_Types].xml',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ' +
+      'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml"/>' +
+      '</Types>'
+  );
+  zip.file(
+    '_rels/.rels',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>'
+  );
+  zip.file(
+    'word/document.xml',
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+      `<w:p><w:r><w:t>${body}</w:t></w:r></w:p>` +
+      '</w:body></w:document>'
+  );
+  return zip.generate({ type: 'nodebuffer' });
 }
 
 beforeAll(() => {
@@ -167,6 +215,143 @@ describe('générateur docx interne : citations par le moteur', () => {
       citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'en-US' },
     });
     expect(unresolved).toEqual(['Fantome_1999']);
+  });
+});
+
+/**
+ * S12-1-2 : la fenêtre d'export transmet d'office le premier .dotx trouvé à la racine du projet.
+ * Sur le chemin interne, le document construit (titres, notes, citations) était jeté et remplacé
+ * par le modèle : sans balise `{content}`, le .docx ne contenait plus une ligne de l'auteur ; avec
+ * elle, le markdown s'y imprimait tel quel, sous le type d'un modèle (`template.main+xml`) que Word
+ * ouvre comme un modèle et non comme un document. Dans les deux cas, export « réussi ».
+ */
+describe('modèle .dotx sur le chemin interne (S12-1-2)', () => {
+  const TEXTE = 'CORPSTEXTE avec **gras**[^1].\n\n[^1]: NOTEDELAUTEUR.\n';
+
+  it('un modèle de styles sans balise {content} : le texte de l’auteur reste, et le modèle est dit ignoré', async () => {
+    const { document, footnotes, warnings } = await exportNative(TEXTE, {
+      prepare: (projectPath) => writeFileSync(join(projectPath, 'styles.dotx'), dotx('Modèle de styles')),
+      templatePath: 'styles.dotx',
+    });
+
+    expect(plain(document)).toContain('CORPSTEXTE avec gras');
+    expect(plain(document)).not.toContain('Modèle de styles');
+    expect(plain(footnotes)).toContain('NOTEDELAUTEUR.');
+    expect(warnings).toContainEqual({ code: 'export.word.templateIgnored', params: { file: 'styles.dotx' } });
+  });
+
+  it('un modèle illisible (balise ouverte) : le texte reste, et le modèle est dit ignoré', async () => {
+    const { document, warnings } = await exportNative(TEXTE, {
+      prepare: (projectPath) => writeFileSync(join(projectPath, 'casse.dotx'), dotx('Accolade {ouverte')),
+      templatePath: 'casse.dotx',
+    });
+
+    expect(plain(document)).toContain('CORPSTEXTE');
+    expect(warnings).toContainEqual({ code: 'export.word.templateIgnored', params: { file: 'casse.dotx' } });
+  });
+
+  it('un modèle à balise {content} : rempli, déclaré document et non modèle, et la réserve dit le markdown brut', async () => {
+    const { document, contentTypes, warnings } = await exportNative(TEXTE, {
+      prepare: (projectPath) => writeFileSync(join(projectPath, 'revue.dotx'), dotx('En-tête {content} pied')),
+      templatePath: 'revue.dotx',
+    });
+
+    expect(plain(document)).toContain('CORPSTEXTE');
+    expect(contentTypes).toContain('wordprocessingml.document.main+xml');
+    expect(contentTypes).not.toContain('template.main+xml');
+    expect(warnings).toContainEqual({ code: 'export.word.templateRawMarkdown', params: { file: 'revue.dotx' } });
+  });
+});
+
+/**
+ * S12-2-2 : sans pandoc, le générateur interne ne rend les citations qu'avec un style (celui de la
+ * case cochée, ou celui du projet). Sans style, ou sans bibliographie, les `[@clé]` restaient
+ * telles quelles dans le .docx, et l'export était annoncé réussi sans un mot.
+ */
+describe('citations laissées en clés sur le chemin interne (S12-2-2)', () => {
+  const FARGE = '@book{farge1989,\n  author = {Farge, Arlette},\n  title = {Le goût de l’archive},\n  year = {1989}\n}\n';
+
+  it('sans bibliographie : les clés restées telles quelles sont nommées, hors code', async () => {
+    const { document, unresolved } = await exportNative(
+      'Texte cité [@farge1989]. Un `[@encode]` en ligne.\n\n```\n[@enbloc]\n```\n'
+    );
+
+    expect(plain(document)).toContain('[@farge1989]');
+    expect(unresolved).toEqual(['farge1989']);
+  });
+
+  it('avec une bibliographie, sans pandoc ni style : la réserve dit pourquoi, et nomme les clés', async () => {
+    const { document, unresolved, warnings } = await exportNative('Texte cité [@farge1989; @autre2001].\n', {
+      prepare: (projectPath) => writeFileSync(join(projectPath, 'refs.bib'), FARGE),
+      bibliographyPath: 'refs.bib',
+    });
+
+    expect(plain(document)).toContain('[@farge1989; @autre2001]');
+    expect(warnings).toContainEqual({
+      code: 'export.word.citationsNotFormatted',
+      params: { keys: 'farge1989, autre2001' },
+    });
+    expect(unresolved).toBeUndefined();
+  });
+});
+
+/**
+ * S12-1-14, côté Word : l'assemblage omet un chapitre introuvable et le notait en console. Le
+ * document sortait sans lui ; le résultat le dit désormais.
+ */
+describe('livre : chapitre omis à l’assemblage', () => {
+  it('le .docx sort sans lui, et la réserve le nomme', async () => {
+    const projectPath = mkdtempSync(join(dir, 'livre-'));
+    mkdirSync(join(projectPath, 'chapters'));
+    writeFileSync(join(projectPath, 'chapters', '01.md'), '# Ouverture\n\nTEXTEPRESENT.\n');
+    const service = new WordExportService();
+    vi.spyOn(
+      service as unknown as { checkPandoc: () => Promise<boolean> },
+      'checkPandoc'
+    ).mockResolvedValue(false);
+
+    const result = await service.exportToWord({
+      projectPath,
+      projectType: 'book',
+      content: '',
+      outputPath: join(projectPath, 'livre.docx'),
+      metadata: { title: 'Livre' },
+      manuscript: {
+        chapters: [
+          { id: 'a', title: 'Ouverture', filePath: 'chapters/01.md', order: 0 },
+          { id: 'b', title: 'Disparu', filePath: 'chapters/02.md', order: 1 },
+        ],
+      },
+    });
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(result.warnings).toEqual([
+      { code: 'export.chapterUnreadable', params: { title: 'Disparu', file: 'chapters/02.md' } },
+    ]);
+    const zip = new PizZip(readFileSync(join(projectPath, 'livre.docx')));
+    expect(plain(zip.file('word/document.xml')?.asText() ?? '')).toContain('TEXTEPRESENT');
+  });
+});
+
+/**
+ * Relevé par L07-2 : le générateur interne ne sait pas insérer une image ; il la remplaçait par sa
+ * légende, sans un mot. La réserve la nomme.
+ */
+describe('images sur le chemin interne', () => {
+  it('une image remplacée par sa légende est nommée', async () => {
+    const { document, warnings } = await exportNative('Avant.\n\n![Carte des archives](images/carte.png)\n\nAprès.\n');
+
+    expect(plain(document)).toContain('Carte des archives');
+    expect(warnings).toContainEqual({
+      code: 'export.word.imagesNotEmbedded',
+      params: { files: 'images/carte.png', count: 1 },
+    });
+  });
+
+  it('sans image, aucune réserve', async () => {
+    const { warnings } = await exportNative('Un texte sans image.\n');
+
+    expect(warnings).toBeUndefined();
   });
 });
 

@@ -121,7 +121,7 @@ describe('assembleManuscript', () => {
 
     expect(chapterCount).toBe(1);
     expect(markdown).toContain('# Un');
-    expect(warnings.some((w) => w.includes('absent.md'))).toBe(true);
+    expect(warnings).toContainEqual(expect.objectContaining({ code: 'export.chapterUnreadable', params: expect.objectContaining({ file: 'chapters/absent.md' }) }));
   });
 
   it('refuse un chemin qui sort du projet', async () => {
@@ -132,7 +132,7 @@ describe('assembleManuscript', () => {
     });
 
     expect(chapterCount).toBe(0);
-    expect(warnings.some((w) => w.includes('hors projet'))).toBe(true);
+    expect(warnings).toContainEqual(expect.objectContaining({ code: 'export.chapterOutsideProject', params: expect.objectContaining({ file: '../evade.md' }) }));
   });
 
   it('scope chapitre : tirage de travail limité à une pièce', async () => {
@@ -306,7 +306,7 @@ describe('assembleManuscript — cible de sortie', () => {
       expect(markdown).toContain('Texte du livre.');
       expect(markdown).not.toContain('SECRET-HORS-PROJET');
       expect(chapterCount).toBe(1);
-      expect(warnings.some((w) => w.includes('hors projet') && w.includes('chapters/02.md'))).toBe(true);
+      expect(warnings).toContainEqual(expect.objectContaining({ code: 'export.chapterOutsideProject', params: expect.objectContaining({ file: 'chapters/02.md' }) }));
     });
 
     it('même ouvert dans l’éditeur : le texte vivant ne passe pas la garde', async () => {
