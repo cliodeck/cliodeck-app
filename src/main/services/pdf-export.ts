@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
-import { writeFile, mkdir, readFile, rm } from 'fs/promises';
-import { join, dirname } from 'path';
+import { copyFile, writeFile, mkdir, mkdtemp, readFile, rm } from 'fs/promises';
+import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
 import { processMarkdownCitations } from './citation-pipeline.js';
@@ -12,18 +12,26 @@ import {
   pathExists,
   withExportTimeLimit,
   type ExportClock,
+  type ExportImageErrorCode,
   type ExportLimits,
   type ExportResult,
 } from './export-time-limit.js';
 import { stripLeadingHeading } from '../../editor/outline.js';
-import { resolveProjectCsl } from './export-project-files.js';
+import { removeResourceLinks, resolveProjectCsl, stageResourcePaths } from './export-project-files.js';
 import {
+  BEAMER_STAGING_DIR,
   type BeamerConfig,
   buildBeamerCustomizations,
   buildPandocArgs,
+  missingImagesWarnings,
+  pandocImageFailure,
+  pandocMissingResources,
+  projectResourcePaths,
   resolveBibliographyMode,
   resolveBookSettings,
+  stagedBeamerImageName,
 } from './pandoc-args.js';
+import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 
 // MARK: - Types
 
@@ -75,6 +83,30 @@ interface PandocProgress {
   stage: 'preparing' | 'converting' | 'compiling' | 'complete';
   message: string;
   progress: number;
+}
+
+/**
+ * Un échec que la modale sait dire : son code (relatif à `messages.*`) et ses paramètres partent
+ * dans `errorCode` et `errorParams` ; le message garde la sortie de pandoc, pour le journal.
+ */
+class PandocIssueError extends Error {
+  constructor(
+    message: string,
+    readonly issue: { code: ExportImageErrorCode; params: { file: string } }
+  ) {
+    super(message);
+    this.name = 'PandocIssueError';
+  }
+}
+
+/**
+ * Le texte d'un flux, décodé d'un bloc à la fermeture. Décodé morceau par morceau, un caractère
+ * accentué coupé entre deux morceaux (environ 64 Ko chacun) devenait « �� » (S12-2-0).
+ */
+function collectText(stream: NodeJS.EventEmitter): () => string {
+  const chunks: Buffer[] = [];
+  stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+  return () => Buffer.concat(chunks).toString('utf8');
 }
 
 // MARK: - Templates
@@ -587,6 +619,43 @@ $body$
   }
 };
 
+/**
+ * Logo et image de titre de la présentation, copiés dans le dossier de travail de l'export, où
+ * xelatex tourne, sous un nom fixe (`stagedBeamerImageName`), dans un sous-dossier qu'aucune image
+ * du document ne prend. Le réglage les dit « chemin relatif » (`logo.png`), mais xelatex ne voit
+ * pas le projet : l'export échouait sur « Unable to load picture or PDF file 'logo.png' »
+ * (S12-1-24). Un chemin absolu ne suffit pas : pandoc le recopie tel quel dans le LaTeX, où les
+ * barres obliques inverses de Windows, le `#` ou le `%` d'un nom de dossier le font encore
+ * échouer.
+ *
+ * Une image introuvable (ou illisible) est retirée, avec une réserve : la présentation sort sans
+ * elle, au lieu d'échouer sur une erreur de LaTeX.
+ */
+async function stageBeamerImages(
+  projectPath: string,
+  workDir: string,
+  cfg?: BeamerConfig
+): Promise<{ config?: BeamerConfig; warnings: OutcomeIssue[] }> {
+  if (!cfg) return { config: cfg, warnings: [] };
+  const config: BeamerConfig = { ...cfg };
+  const warnings: OutcomeIssue[] = [];
+  for (const kind of ['logo', 'titlegraphic'] as const) {
+    const declared = cfg[kind];
+    if (!declared) continue;
+    const name = stagedBeamerImageName(kind, declared);
+    try {
+      await mkdir(join(workDir, BEAMER_STAGING_DIR), { recursive: true });
+      await copyFile(resolvePath(projectPath, declared), join(workDir, ...name.split('/')));
+      config[kind] = name;
+    } catch (err) {
+      console.warn(`⚠️ pdf-export: ${kind} introuvable ou illisible, exporté sans lui :`, declared, err);
+      delete config[kind];
+      warnings.push({ code: 'export.beamerImageNotFound', params: { file: declared } });
+    }
+  }
+  return { config, warnings };
+}
+
 // MARK: - Service
 
 export class PDFExportService {
@@ -663,17 +732,16 @@ export class PDFExportService {
         cwd: opts.tempDir,
         env: { ...process.env, PATH: extendedPath },
       });
-      let stdout = '';
-      let stderr = '';
-      proc.stdout.on('data', (d) => { stdout += d.toString(); });
-      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      const stdout = collectText(proc.stdout);
+      const stderr = collectText(proc.stderr);
       proc.on('close', (code) => {
-        if (code === 0 && stdout.trim()) {
-          resolve(stdout);
+        const resolved = stdout();
+        if (code === 0 && resolved.trim()) {
+          resolve(resolved);
         } else {
           // Échec isolé : le chapitre part avec ses `[@clef]` non résolues
           // plutôt que de faire échouer tout l'export.
-          console.warn('⚠️ citeproc par chapitre a échoué, chapitre laissé tel quel:', stderr.slice(0, 200));
+          console.warn('⚠️ citeproc par chapitre a échoué, chapitre laissé tel quel:', stderr().slice(0, 200));
           resolve(content);
         }
       });
@@ -705,6 +773,8 @@ export class PDFExportService {
     // laissait sinon le manuscrit complet en clair dans le répertoire
     // temporaire, lisible par tout compte de la machine.
     let tempDir: string | null = null;
+    // Liens de `stageResourcePaths` vers les dossiers du projet : retirés avant le dossier de travail.
+    let resourceLinks: string[] = [];
     try {
       // Check dependencies
       onProgress?.({ stage: 'preparing', message: 'Vérification des dépendances...', progress: 10 });
@@ -718,9 +788,10 @@ export class PDFExportService {
         throw new Error('XeLaTeX n\'est pas installé. Installez-le avec: brew install --cask mactex');
       }
 
-      // Create temporary directory for build
-      tempDir = join(tmpdir(), `cliodeck-export-${Date.now()}`);
-      await mkdir(tempDir, { recursive: true });
+      // Un dossier propre à cet export : nommé par l'horloge, il était partagé par deux exports
+      // lancés dans la même milliseconde (une recette et la fenêtre), et le premier fini
+      // l'effaçait sous l'autre.
+      tempDir = await mkdtemp(join(tmpdir(), 'cliodeck-export-'));
 
       onProgress?.({ stage: 'preparing', message: 'Préparation des fichiers...', progress: 20 });
 
@@ -858,8 +929,12 @@ export class PDFExportService {
       const template = getLatexTemplate(options.projectType);
       await writeFile(templatePath, template);
 
-      // Determine output path
-      const outputPath = options.outputPath || join(dirname(options.projectPath), `${options.metadata?.title || 'output'}.pdf`);
+      // Chemin de sortie résolu contre le projet : pandoc tourne dans le dossier temporaire, et
+      // un nom nu (« article.pdf », saisi dans la fenêtre ou dans une recette) y était écrit, puis
+      // effacé avec lui, l'export déclaré réussi (S12-1-28).
+      const outputPath = options.outputPath
+        ? resolvePath(options.projectPath, options.outputPath)
+        : join(dirname(options.projectPath), `${options.metadata?.title || 'output'}.pdf`);
 
       // Copy bibliography if provided
       let bibPath: string | undefined;
@@ -886,6 +961,21 @@ export class PDFExportService {
         }
       }
 
+      // Le logo ne sert qu'à beamer : un article ou un livre ne copie rien et ne dit rien de lui.
+      const beamer = await stageBeamerImages(
+        options.projectPath,
+        tempDir,
+        options.projectType === 'presentation' ? options.beamerConfig : undefined
+      );
+
+      // Les dossiers d'images du projet, tels que pandoc peut les lire (un `:` dans le nom du
+      // projet coupait `--resource-path` en deux dossiers inexistants).
+      const resources = await stageResourcePaths(
+        projectResourcePaths(options.projectPath, options.projectType),
+        tempDir
+      );
+      resourceLinks = resources.links;
+
       const cslAvailable = !!options.cslPath && (await pathExists(options.cslPath));
       const pandocArgs = buildPandocArgs({
         mdPath,
@@ -893,7 +983,7 @@ export class PDFExportService {
         templatePath,
         projectType: options.projectType,
         bookSettings: options.bookSettings,
-        beamerConfig: options.beamerConfig,
+        beamerConfig: beamer.config,
         metadata: options.metadata,
         abstract,
         bibPath,
@@ -901,6 +991,7 @@ export class PDFExportService {
         cslPath: options.cslPath,
         cslAvailable,
         headerIncludesPath,
+        resourcePaths: resources.paths,
       });
 
       if (bibPath && !useEnginePipeline && cslAvailable) {
@@ -912,7 +1003,7 @@ export class PDFExportService {
 
       const extendedPath = this.getExtendedPath();
 
-      await clock.run(new Promise<void>((resolve, reject) => {
+      const pandocStderr = await clock.run(new Promise<string>((resolve, reject) => {
         console.log('📄 Running pandoc:', 'pandoc', pandocArgs.join(' '));
 
         // TMPDIR : pandoc compile dans son propre dossier temporaire, avec la
@@ -924,10 +1015,9 @@ export class PDFExportService {
           env: { ...process.env, PATH: extendedPath, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir },
         });
 
-        let stderr = '';
+        const stderr = collectText(pandoc.stderr);
 
         pandoc.stderr.on('data', (data) => {
-          stderr += data.toString();
           console.log('📄 Pandoc output:', data.toString());
 
           // Track progress based on output
@@ -937,11 +1027,14 @@ export class PDFExportService {
         });
 
         pandoc.on('close', (code) => {
+          const text = stderr();
           if (code === 0) {
-            resolve();
-          } else {
-            reject(new Error(`Pandoc failed with code ${code}:\n${stderr}`));
+            resolve(text);
+            return;
           }
+          const message = `Pandoc failed with code ${code}:\n${text}`;
+          const image = pandocImageFailure(text);
+          reject(image ? new PandocIssueError(message, image) : new Error(message));
         });
 
         pandoc.on('error', (err) => {
@@ -951,18 +1044,41 @@ export class PDFExportService {
 
       onProgress?.({ stage: 'complete', message: 'Export terminé!', progress: 100 });
 
+      // Une image introuvable, pandoc la remplace par sa légende et réussit : sans cette réserve,
+      // le PDF partait sans elle et sans un mot (S12-1-1).
+      const warnings = [
+        ...resources.warnings,
+        ...beamer.warnings,
+        ...missingImagesWarnings(pandocMissingResources(pandocStderr)),
+      ];
+      if (warnings.length > 0) console.warn('⚠️ pdf-export: images introuvables:', warnings);
+
       console.log('✅ PDF exported successfully:', outputPath);
-      return { success: true, outputPath, ...(missingCsl ? { missingCsl } : {}) };
+      return {
+        success: true,
+        outputPath,
+        ...(missingCsl ? { missingCsl } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
+      };
     } catch (error: unknown) {
       console.error('❌ PDF export failed:', error);
+      if (error instanceof PandocIssueError) {
+        return {
+          success: false,
+          error: error.message,
+          errorCode: error.issue.code,
+          errorParams: error.issue.params,
+        };
+      }
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
     } finally {
       // Le manuscrit, sa bibliographie et le .tex intermédiaire vivent ici :
-      // ils partent, que l'export ait réussi ou échoué.
-      if (tempDir) {
+      // ils partent, que l'export ait réussi ou échoué. Les liens vers le projet d'abord : si
+      // l'un d'eux reste, le dossier reste aussi, plutôt que de risquer le projet.
+      if (tempDir && (await removeResourceLinks(resourceLinks))) {
         await rm(tempDir, { recursive: true, force: true }).catch((err) => {
           console.warn('⚠️ Failed to clean export temp directory:', err);
         });

@@ -15,8 +15,11 @@
  * paramètre.
  */
 
-import type { BookSettings } from '../../../backend/types/book.js';
+import { delimiter, join } from 'path';
+import { CHAPTERS_DIR, type BookSettings } from '../../../backend/types/book.js';
+import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 import { getLanguage } from '../i18n.js';
+import type { ExportImageErrorCode } from './export-time-limit.js';
 
 // MARK: - Types
 
@@ -64,6 +67,13 @@ export interface PandocArgsInput {
   cslAvailable: boolean;
   /** Fichier d'en-têtes beamer, si des personnalisations ont été écrites. */
   headerIncludesPath?: string;
+  /**
+   * Où pandoc cherche les images à chemin relatif (`--resource-path`) : il tourne dans le dossier
+   * temporaire de l'export, où rien du projet ne se trouve (`projectResourcePaths`). Aucun ne
+   * contient `path.delimiter`, sur lequel pandoc découpe la liste : `stageResourcePaths` remplace
+   * un tel dossier par un lien du dossier de travail.
+   */
+  resourcePaths?: string[];
 }
 
 export const DEFAULT_BOOK_SETTINGS: BookSettings = {
@@ -75,6 +85,48 @@ export const DEFAULT_BOOK_SETTINGS: BookSettings = {
 };
 
 // MARK: - Petites décisions pures
+
+/**
+ * Les dossiers où chercher une image à chemin relatif, dans l'ordre. L'éditeur résout une image
+ * relative au fichier ouvert (`CodeMirrorEditor`) : `images/plan.png` sous le projet pour un
+ * article ou une présentation, sous `chapters/` pour un chapitre de livre. Un livre cherche donc
+ * d'abord sous `chapters/` : chercher d'abord à la racine remettait dans le livre une autre image
+ * que celle que l'auteur voit, quand le projet en a une du même nom. Le `../images/plan.png` d'un
+ * chapitre retombe sous le projet par `chapters/`, et la racine reste en second recours.
+ *
+ * Un chapitre rattaché à la racine du projet (hors de `chapters/`) qui partage le nom d'une image
+ * avec `chapters/` prendrait celle de `chapters/` : pandoc ne cherche que dans une liste, commune
+ * à tout le document assemblé.
+ */
+export function projectResourcePaths(
+  projectPath: string,
+  projectType: 'article' | 'book' | 'presentation'
+): string[] {
+  return projectType === 'book' ? [join(projectPath, CHAPTERS_DIR), projectPath] : [projectPath];
+}
+
+/** Le sous-dossier du dossier de travail où l'export copie le logo et l'image de titre. */
+export const BEAMER_STAGING_DIR = 'cliodeck-beamer';
+
+/**
+ * Le chemin, relatif au dossier de travail de l'export où xelatex tourne, sous lequel l'export y
+ * copie le logo ou l'image de titre d'une présentation. Pandoc recopie la variable telle quelle
+ * dans `\logo{\includegraphics{…}}` : un chemin absolu y portait les barres obliques inverses de
+ * Windows (« Undefined control sequence »), le `#` ou le `%` d'un nom de dossier (« Illegal
+ * parameter number », « File ended while scanning ») (S12-1-24). Le chemin fixe n'a que des
+ * lettres, un trait d'union et une barre oblique, que LaTeX lit sous Windows aussi ; l'extension
+ * est gardée quand elle n'a que des lettres et des chiffres, xelatex lisant le type de l'image sur
+ * elle.
+ *
+ * Le nom fixe est rangé dans un sous-dossier (`BEAMER_STAGING_DIR`) : pandoc extrait les images du
+ * document dans son dossier `media-…`, que xelatex lit avant son dossier courant (`TEXINPUTS`), et
+ * une image `![…](logo.png)` du document y remplaçait en silence le logo du réglage.
+ */
+export function stagedBeamerImageName(kind: 'logo' | 'titlegraphic', source: string): string {
+  const base = source.split(/[\\/]/).pop() ?? '';
+  const ext = base.match(/\.[A-Za-z0-9]{1,8}$/)?.[0] ?? '';
+  return `${BEAMER_STAGING_DIR}/${kind}${ext}`;
+}
 
 /** Réglages d'ouvrage complétés par les défauts. */
 export function resolveBookSettings(settings?: BookSettings): BookSettings {
@@ -326,6 +378,13 @@ export function buildPandocArgs(input: PandocArgsInput): string[] {
     '--pdf-engine-opt=-interaction=nonstopmode',
   ];
 
+  if (input.resourcePaths?.length) {
+    // Un seul argument : pas de shell, un projet dont le chemin contient une espace passe tel quel.
+    // Pandoc découpe la liste sur `delimiter` : un dossier qui le contient arrive ici en lien
+    // (`stageResourcePaths`).
+    args.push(`--resource-path=${input.resourcePaths.join(delimiter)}`);
+  }
+
   if (input.projectType === 'presentation') {
     args.push(
       ...presentationArgs(input.beamerConfig ?? {}, input.headerIncludesPath)
@@ -367,4 +426,61 @@ export function referenceSectionTitle(): string {
     de: 'Literatur',
   };
   return titles[getLanguage()] ?? titles.fr;
+}
+
+// MARK: - Sortie d'erreur de pandoc
+
+/**
+ * Les ressources que pandoc n'a pas trouvées (« Could not fetch resource X: replacing image with
+ * description », pandoc 3.x ; d'anciennes versions mettent le chemin entre apostrophes). Pandoc
+ * remplace l'image par sa légende et réussit : c'est la seule trace qu'il en reste.
+ *
+ * Pandoc y écrit l'espace d'un nom de fichier en `%20` (`images/mon%20image.png`) : le nom est
+ * rendu tel qu'il est sur le disque, pour que l'auteur le retrouve.
+ */
+export function pandocMissingResources(stderr: string): string[] {
+  const files = new Set<string>();
+  for (const m of stderr.matchAll(/Could not fetch resource '?(.+?)'?(?:: replacing image with description)?\r?$/gm)) {
+    files.add(decodePercentEscapes(m[1]));
+  }
+  return [...files];
+}
+
+/**
+ * Décode les suites `%XX` d'un chemin, une suite à la fois : un `%` que ne suivent pas deux
+ * chiffres hexadécimaux (`images/100%.png`, que pandoc laisse tel quel) reste un `%`, là où
+ * `decodeURIComponent` lèverait sur tout le chemin.
+ */
+function decodePercentEscapes(path: string): string {
+  return path.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
+}
+
+/** Une seule réserve pour toutes les images introuvables : la modale la dit en une phrase. */
+export function missingImagesWarnings(files: readonly string[]): OutcomeIssue[] {
+  if (files.length === 0) return [];
+  return [{ code: 'export.imagesNotFound', params: { files: files.join(', '), count: files.length } }];
+}
+
+/**
+ * L'image qui fait échouer un export PDF, quand c'en est une : pandoc n'a pas su la convertir pour
+ * xelatex (« Could not convert image »), et la compilation tombe ensuite sur elle. Une image SVG
+ * demande `rsvg-convert` ; un format que ni pandoc ni xelatex ne lisent (WebP) ne passe pas.
+ *
+ * Pandoc nomme la copie qu'il a faite dans son dossier de travail (`…/media-<empreinte>/images/
+ * schema.svg`) : la partie qui suit l'empreinte est le chemin écrit dans le document.
+ */
+export function pandocImageFailure(
+  stderr: string
+): { code: ExportImageErrorCode; params: { file: string } } | null {
+  const m = stderr.match(/Could not convert image (.+?): (.*)$/m);
+  if (!m) return null;
+  const file = m[1].match(/[\\/]media-[0-9a-f]+[\\/](.+)$/)?.[1] ?? m[1];
+  const code = /rsvg-convert/.test(m[2]) ? 'export.imageNeedsRsvgConvert' : 'export.imageNotConverted';
+  return { code, params: { file } };
 }
