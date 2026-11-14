@@ -430,6 +430,53 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
     );
 
     /**
+     * Notes de bas de page d'un livre (S12-1-0). La classe book remet le compteur `footnote` à zéro à
+     * chaque `\chapter` numéroté (`\@addtoreset{footnote}{chapter}`, book.cls) : avec les réglages
+     * par défaut (« Continue sur tout l'ouvrage », chapitres numérotés), la note du chapitre 2
+     * repartait de 1. « Reprise à 1 à chaque chapitre » garde sa remise à zéro, posée par
+     * l'assembleur. Chaque chapitre ouvre ses notes par `[^1]` : l'assembleur les préfixe par
+     * chapitre, et deux notes homonymes restent deux notes, chacune avec son texte.
+     */
+    describe.skipIf(!pdftotextAvailable())('livre à notes de bas de page : numérotation (texte du PDF)', () => {
+      /** Deux notes au premier chapitre, une au second. */
+      const THREE = [
+        '# Premier\n\nTexte APPELUN[^1] et APPELDEUX[^2].\n\n[^1]: NOTEUN.\n[^2]: NOTEDEUX.\n',
+        '# Second\n\nTexte APPELTROIS[^1].\n\n[^1]: NOTETROIS.\n',
+      ];
+      /** Une note `[^1]` par chapitre. */
+      const HOMONYMS = [
+        '# Premier\n\nTexte APPELUN[^1].\n\n[^1]: NOTEUN.\n',
+        '# Second\n\nTexte APPELDEUX[^1].\n\n[^1]: NOTEDEUX.\n',
+      ];
+
+      it.each([
+        ['continue, réglages par défaut', THREE, {}, [1, 2, 3]],
+        ['continue, sections numérotées', THREE, { numberSections: true }, [1, 2, 3]],
+        ['continue, chapitres sans numéro', THREE, { numberChapters: false }, [1, 2, 3]],
+        ['reprise à 1 à chaque chapitre', THREE, { noteNumbering: 'per-chapter' }, [1, 2, 1]],
+        ['continue, deux [^1] homonymes', HOMONYMS, {}, [1, 2]],
+        ['reprise à 1, deux [^1] homonymes', HOMONYMS, { noteNumbering: 'per-chapter' }, [1, 1]],
+      ] as const satisfies readonly (readonly [string, readonly string[], Partial<BookSettings>, readonly number[]])[])(
+        '%s',
+        async (_label, chapters, book, numbers) => {
+          const text = pdfText(await expectCompiles('book', chapters, book));
+          const names = ['UN', 'DEUX', 'TROIS'].slice(0, numbers.length);
+
+          const calls = Object.fromEntries(
+            [...text.matchAll(/APPEL([A-Z]+)\s*(\d+)/g)].map((m) => [m[1], Number(m[2])])
+          );
+          const notes = [...text.matchAll(/(\d+)\s*NOTE([A-Z]+)/g)].map((m) => [Number(m[1]), m[2]]);
+
+          expect(calls).toEqual(Object.fromEntries(names.map((n, i) => [n, numbers[i]])));
+          expect(notes).toEqual(names.map((n, i) => [numbers[i], n]));
+          // Des notes de bas de page : chacune sur la page de son appel, avant le chapitre suivant.
+          expect(text.indexOf('NOTEUN')).toBeLessThan(text.indexOf(`APPEL${names[names.length - 1]}`));
+        },
+        COMPILE_MS
+      );
+    });
+
+    /**
      * Notes du présentateur (S12-1-8, L10-3). Le gabarit de présentation écrit des lignes `Note:` :
      * pandoc ne les connaît pas et les imprimait sur la diapositive projetée. Balisées en
      * `::: notes`, elles deviennent `\note{…}`, que beamer n'imprime que si la case « notes » des

@@ -95,8 +95,11 @@ function endnoteFlush(settings: BookSettings): string {
 
 /**
  * Remise à zéro du compteur de notes de bas de page à l'ouverture d'un
- * chapitre (`noteNumbering: 'per-chapter'`). En classe `book`, LaTeX
- * numérote les notes en continu par défaut.
+ * chapitre (`noteNumbering: 'per-chapter'`). La classe `book` remet bien ce
+ * compteur à zéro à chaque `\chapter` numéroté, mais le gabarit du livre l'en
+ * détache (`\counterwithout`, S12-1-0) : sans cela, la numérotation continue,
+ * le réglage par défaut, repartait de 1 à chaque chapitre. La reprise par
+ * chapitre ne vient donc que d'ici, chapitres numérotés ou non.
  */
 const FOOTNOTE_RESET = '\n\n\\setcounter{footnote}{0}\n';
 
