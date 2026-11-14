@@ -86,10 +86,14 @@
   border-radius: 6px;
   padding: 0.5rem;
   background: var(--bg-app);
+}
+
+/* Une carte déjà proposée ne se glisse pas : la main ne s'affiche que sur les autres. */
+.drafts-panel__card[draggable='true'] {
   cursor: grab;
 }
 
-.drafts-panel__card:active {
+.drafts-panel__card[draggable='true']:active {
   cursor: grabbing;
 }
 

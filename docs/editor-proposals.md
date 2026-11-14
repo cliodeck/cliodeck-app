@@ -114,6 +114,8 @@ Cycle de vie :
 Entrées dans le contrat aujourd'hui :
 
 - drafts Brainstorm (`insertDraftAtCursor`, catégorie `brainstorm-draft`) ;
+- cartes de la file des brouillons glissées dans l'éditeur (`proposeDraftAt`,
+  même catégorie, au point de dépôt) ;
 - diapositives générées (`SlideGenerationPanel`, catégorie `slides-generation`) ;
 - contenu IA du canal IPC `editor:insert-text` (`metadata.modeId` présent,
   catégorie `ai-insert`) ; rien ne l'emprunte aujourd'hui ;
@@ -149,8 +151,23 @@ redevient actif. `onceProposalDecided` (`proposals-ipc.ts`) porte cette décisio
 avant le journal et indépendamment de lui. Une proposition restée sans décision
 à la fermeture de l'app laisse le brouillon dans la file : c'est voulu.
 
-Le glisser-déposer d'une carte reste une insertion directe (drop natif CM6,
-annulable, geste de l'auteur), et n'est pas journalisé.
+Glisser une carte dans l'éditeur la propose **au point de dépôt** (décision
+D9), par le même calcul que le bouton (`editorStore.proposeDraftAt`, sur
+`getDocText`, padding de bloc compris) et avec le même suivi : la carte ne
+quitte pas la file au `dragend`, seule l'acceptation la retire, et la décision
+va aux journaux comme celle de toute proposition. La carte porte un type propre
+à ClioDeck (`application/x-cliodeck-draft`, l'identifiant du brouillon), que le
+gestionnaire `drop` de l'éditeur reconnaît (`CodeMirrorEditor.tsx`) : il
+empêche le dépôt natif de CM6 avant toute autre chose, si bien qu'une
+proposition qui échoue ne retombe jamais sur une insertion directe. Sans rien
+pour la recevoir (vue en lecture seule pendant un changement de projet, livre
+sans chapitre ouvert), ou sans point de dépôt (`posAtCoords` se calcule sous la
+même garde que la proposition, dans `proposeQueuedDraft`), rien n'entre, la
+carte reste, et le message de `notifyDraftKept` le dit. Une carte déjà proposée
+ne se glisse pas. Les autres dépôts (texte d'une autre application, fichier)
+gardent le dépôt natif. La
+carte porte aussi `text/plain` : glissée hors de ClioDeck (un courriel, un
+traitement de texte), elle y est copiée, et reste dans la file.
 
 ## 3. Journalisation (4c)
 

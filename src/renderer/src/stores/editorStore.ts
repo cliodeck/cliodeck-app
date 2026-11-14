@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import i18n from '../i18n';
 import type { ChangeOrigin } from '@/editor/cm/change-origin';
-import { detectLineSeparator } from '@/editor/cm/fidelity';
 import { computeSelectionWrap, type SnippetTemplates } from '@/editor/cm/inline-formatting';
 import type { EditorFacade } from '@/editor/facade';
 import { planFootnoteInsertion } from '@/editor/footnote-tools';
@@ -223,6 +222,17 @@ interface EditorState {
    * recevoir une proposition, rien n'entre nulle part : `unavailable`.
    */
   insertDraftAtCursor: (
+    draft: string,
+    source?: { model?: string; task?: string }
+  ) => DraftInsertion;
+
+  /**
+   * Propose un brouillon à un offset du document (`getDocText`), avec le padding de bloc
+   * d'`insertDraftAtOffset` : le calcul que partagent le bouton (au curseur) et le dépôt d'une carte
+   * (au point de dépôt, D9). `cursor` dit que la proposition attend, quel que soit l'endroit.
+   */
+  proposeDraftAt: (
+    offset: number,
     draft: string,
     source?: { model?: string; task?: string }
   ) => DraftInsertion;
@@ -694,23 +704,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   ): DraftInsertion => {
     const { editorFacade } = get();
     if (!editorFacade) return { mode: 'unavailable' };
+    // Sans curseur posé par l'auteur, l'offset 0 serait au-dessus du titre.
+    const offset = editorFacade.hasKnownCursor()
+      ? editorFacade.getCursorOffset()
+      : editorFacade.getDocText().length;
+    return get().proposeDraftAt(offset, draft, source);
+  },
+
+  proposeDraftAt: (
+    offset: number,
+    draft: string,
+    source?: { model?: string; task?: string }
+  ): DraftInsertion => {
+    const { editorFacade } = get();
+    if (!editorFacade) return { mode: 'unavailable' };
 
     // Le draft IA passe par le CONTRAT PROPOSITIONNEL (Phase 4b) —
     // proposition d'insertion adjudicable, jamais d'écriture directe
     // (« aucune fonctionnalité IA d'écriture ne contourne cette API »,
     // docs/editor-proposals.md). Le document ne change qu'à l'acceptation.
-    // Les offsets de la façade comptent une fin de ligne pour un caractère : dans un fichier CRLF,
-    // ils ne tombent juste que sur le texte en LF. Accepter rend au fichier ses fins de ligne.
-    const value = editorFacade.getValue();
-    const current = detectLineSeparator(value) === '\r\n' ? value.replace(/\r\n/g, '\n') : value;
-    // Sans curseur posé par l'auteur, l'offset 0 serait au-dessus du titre.
-    const offset = editorFacade.hasKnownCursor() ? editorFacade.getCursorOffset() : current.length;
+    // Texte et offset sont ceux du document : une fin de ligne y vaut un `\n`, même dans un fichier
+    // CRLF. Accepter rend au fichier ses fins de ligne.
+    const current = editorFacade.getDocText();
     const newContent = insertDraftAtOffset(current, offset, draft);
-    // L'ancre est le curseur, et le segment tout ce que insertDraftAtOffset pose après lui, padding
+    // L'ancre est l'offset, et le segment tout ce que insertDraftAtOffset pose après lui, padding
     // de bloc compris. Le premier point de divergence des deux chaînes ne le dit pas : ce padding
     // ressemble aux fins de ligne qui suivent, et un balayage quittait le curseur pour le bloc
     // suivant, où la frappe d'après un rejet serait tombée.
-    const at = Math.min(offset, current.length);
+    const at = Math.max(0, Math.min(offset, current.length));
     const inserted = newContent.slice(
       at,
       at + (newContent.length - current.length)

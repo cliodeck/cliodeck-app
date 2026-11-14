@@ -3,62 +3,42 @@
  *
  * Panneau flottant du mode Écriture (même famille que SimilarityPanel) :
  * liste des réponses mises de côté depuis le chat, chacune proposable au
- * curseur (via `insertDraftAtCursor` — la proposition reste adjudicable
- * et annulable), glissable dans l'éditeur (drop natif CM6 : le texte
- * s'insère à la position exacte du dépôt, Cmd+Z l'annule), ou jetable.
- * Une proposition ne fait pas sortir le brouillon de la file : seule son
- * acceptation le fait.
+ * curseur par son bouton, ou au point de dépôt en glissant sa carte dans
+ * l'éditeur (D9 : l'éditeur reconnaît la carte et la propose, jamais par le
+ * dépôt natif de CM6), ou jetable. Dans les deux cas la proposition reste
+ * adjudicable (`proposeQueuedDraft`), et elle ne fait pas sortir le
+ * brouillon de la file : seule son acceptation le fait.
  */
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ArrowDownToLine, Check, GripVertical, Inbox, Trash2, X } from 'lucide-react';
 import { useDraftsStore, draftTitle, draftsForProject, type BrainstormDraft } from '../../stores/draftsStore';
-import { useEditorStore } from '../../stores/editorStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
-import { noDocumentForProposal, notifyDraftKept } from '../../services/send-draft-to-write';
-import { onceProposalDecided } from './proposals-ipc';
+import { DRAFT_DRAG_TYPE, proposeQueuedDraft } from './draft-proposal';
 import './DraftsPanel.css';
-
-/**
- * Hors du composant : quand la décision tombe, le panneau a pu se fermer et le mode changer.
- * Accepté ou modifié, le texte est entré. Rejeté, invalidé ou expiré, il ne serait plus nulle part.
- */
-function followProposal(draftId: string, proposalId: string): void {
-  useDraftsStore.getState().setProposed(draftId, true);
-  onceProposalDecided(proposalId, (decision) => {
-    const drafts = useDraftsStore.getState();
-    drafts.setProposed(draftId, false);
-    if (decision === 'accepted' || decision === 'modified') drafts.remove(draftId);
-  });
-}
 
 const DraftCard: React.FC<{ draft: BrainstormDraft }> = ({ draft }) => {
   const { t } = useTranslation('common');
   const remove = useDraftsStore((s) => s.remove);
   const inserted = useDraftsStore((s) => s.proposedIds.includes(draft.id));
 
-  const insertAtCursor = () => {
-    const outcome = noDocumentForProposal()
-      ? null
-      : useEditorStore.getState().insertDraftAtCursor(draft.content, draft.source);
-    if (outcome?.mode === 'cursor') followProposal(draft.id, outcome.proposalId);
-    else notifyDraftKept(t);
-  };
-
   return (
     <div
       className="drafts-panel__card"
-      draggable
+      // Déjà proposée, elle ne se glisse pas, comme son bouton est désactivé.
+      draggable={!inserted}
       onDragStart={(e) => {
-        // Drop natif CM6 : le texte s'insère à la position du dépôt, avec
-        // l'historique d'annulation de l'éditeur (userEvent input.drop).
+        if (inserted) {
+          e.preventDefault();
+          return;
+        }
+        // Le dépôt dans l'éditeur ne fait qu'une proposition, et la carte attend sa décision : elle
+        // ne quitte pas la file au `dragend`. `text/plain` sert un dépôt hors de ClioDeck, une copie
+        // qui ne vaut pas acceptation.
+        e.dataTransfer.setData(DRAFT_DRAG_TYPE, draft.id);
         e.dataTransfer.setData('text/plain', draft.content);
         e.dataTransfer.effectAllowed = 'copy';
-      }}
-      onDragEnd={(e) => {
-        // dropEffect 'none' = glissé annulé (Échap, dépôt hors cible).
-        if (e.dataTransfer.dropEffect !== 'none') remove(draft.id);
       }}
     >
       <div className="drafts-panel__card-head">
@@ -76,7 +56,7 @@ const DraftCard: React.FC<{ draft: BrainstormDraft }> = ({ draft }) => {
         <button
           type="button"
           className="chat-surface__inline-btn"
-          onClick={insertAtCursor}
+          onClick={() => proposeQueuedDraft(draft.id, 'cursor', t)}
           disabled={inserted}
           title={t('drafts.insertTitle')}
         >

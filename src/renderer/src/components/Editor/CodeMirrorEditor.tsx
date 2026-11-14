@@ -44,6 +44,7 @@ import {
 import type { DocChange, EditorFacade } from '@/editor/facade';
 import { editorStateKey, editorStates } from './editor-state-memory';
 import { recordAdjudication } from './proposals-ipc';
+import { DRAFT_DRAG_TYPE, proposeQueuedDraft } from './draft-proposal';
 import { normalizeInsertPayload } from './insert-payload';
 import { useEditorStore, type EditorSettings } from '../../stores/editorStore';
 
@@ -501,6 +502,27 @@ export const CodeMirrorEditor: React.FC = () => {
         EditorView.domEventObservers({
           mousedown: () => {
             cursorPlaced = true;
+          },
+        }),
+        // Une carte de la file des brouillons (D9) : proposée au point de dépôt, comme son bouton le
+        // fait au curseur, jamais insérée par le dépôt natif. Tout autre dépôt (texte d'une autre
+        // application, fichier) garde celui de CM6.
+        EditorView.domEventHandlers({
+          // Une vue en lecture seule n'est pas une cible pour le navigateur : la carte y retomberait
+          // sans un mot. Acceptée là, elle dit pourquoi rien n'entre. Une vue éditable garde le
+          // comportement du navigateur, et son curseur de dépôt.
+          dragover: (event, view) =>
+            view.state.readOnly && (event.dataTransfer?.types.includes(DRAFT_DRAG_TYPE) ?? false),
+          drop: (event, view) => {
+            const draftId = event.dataTransfer?.getData(DRAFT_DRAG_TYPE);
+            if (!draftId) return false;
+            // D'abord : CM6 avale l'exception d'un gestionnaire et passe au suivant, son dépôt natif,
+            // qui insérerait le texte. Un dépôt déjà empêché l'arrête.
+            event.preventDefault();
+            // Le point de dépôt se calcule sous la garde de la proposition : sans lui, rien n'entre,
+            // la carte reste, et le message le dit.
+            proposeQueuedDraft(draftId, () => view.posAtCoords({ x: event.clientX, y: event.clientY }, false), t);
+            return true;
           },
         }),
         EditorView.updateListener.of((update) => {

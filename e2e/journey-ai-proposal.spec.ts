@@ -929,3 +929,90 @@ test('livre : un brouillon proposé reste dans la file sans décision, à un cha
     await stop(session);
   }
 });
+
+/**
+ * D9 : glisser une carte de brouillon dans le texte la propose au point de dépôt. Le dépôt natif de
+ * CM6 l'insérait sans proposition ni décision au journal, et la carte quittait la file au `dragend`.
+ * Vrai glisser HTML5 de Chromium, vrai chat, vraie vue, vrai autosave, et les deux journaux relus.
+ */
+test('une carte glissée au milieu d’un paragraphe y est proposée : rien sur le disque avant « Accepter », la carte reste après un rejet, et les journaux ont les deux décisions', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle();
+  const projectDir = dirname(document);
+  const onDisk = () => readFileSync(document, 'utf8');
+  const cards = window.locator('.drafts-panel__card');
+  const target = line(window, 'Deuxième paragraphe');
+  /** « Deuxième p|aragraphe » : un pixel dans le onzième caractère, le dépôt tombe juste avant lui. */
+  const dropPoint = () =>
+    target.evaluate((el) => {
+      const range = document.createRange();
+      const text = el.firstChild as Text;
+      range.setStart(text, 10);
+      range.setEnd(text, 11);
+      const char = range.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      return { x: char.left - box.left + 1, y: char.top - box.top + char.height / 2 };
+    });
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(target).toBeVisible({ timeout: 20_000 });
+    // Le curseur au bout du premier paragraphe : le dépôt ne lui doit rien.
+    await line(window, 'Premier paragraphe').click();
+    await window.keyboard.press('End');
+    await window.locator('.right-panel #right-tab-chat').click();
+    await askChat(window, '.right-panel');
+    await window.getByRole('button', { name: 'Mettre en brouillon' }).first().click();
+    await window.locator('button[title="Brouillons Brainstorm"]').click();
+    await expect(cards).toHaveCount(1);
+
+    await cards.first().dragTo(target, { targetPosition: await dropPoint() });
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await expect(proposal(window)).toContainText(ANSWER);
+    await expect(proposalLine(window)).toContainText('Deuxième p');
+    await expect(window.locator('.drafts-panel__card-actions').getByRole('button', { name: 'Proposé' })).toBeDisabled();
+    await expect(cards.first()).toHaveAttribute('draggable', 'false');
+    await window.waitForTimeout(AUTOSAVE_MS);
+    expect(onDisk()).toBe(TEXT);
+    await expect(cards).toHaveCount(1);
+
+    // Rejeter : rien n'entre, et la carte reste, de nouveau glissable.
+    await rejectProposal(window);
+    await expect(proposal(window)).toHaveCount(0);
+    await expect(cards.first()).toHaveAttribute('draggable', 'true');
+    await window.waitForTimeout(AUTOSAVE_MS);
+    expect(onDisk()).toBe(TEXT);
+    await expect(cards).toHaveCount(1);
+
+    // De nouveau, puis Accepter : le texte entre au point de dépôt, en bloc à part, et la carte part.
+    await cards.first().dragTo(target, { targetPosition: await dropPoint() });
+    await expect(proposal(window)).toBeVisible({ timeout: 8_000 });
+    await acceptProposal(window);
+    await expect(proposal(window)).toHaveCount(0);
+    await expect(cards).toHaveCount(0);
+    await expect.poll(onDisk, { timeout: 10_000 }).toContain(ANSWER);
+    const written = onDisk();
+    expect(written).toMatch(/\n\nDeuxième p\n\n<!-- cliodeck:brainstorm-draft[^\n]*-->\n/);
+    expect(written).toContain('<!-- /cliodeck:brainstorm-draft -->\n\naragraphe, au milieu duquel on écrit.');
+    expect(written.replace(/\n\n<!-- cliodeck:brainstorm-draft[\s\S]*?<!-- \/cliodeck:brainstorm-draft -->\n\n/, '')).toBe(TEXT);
+  } finally {
+    await stop(session);
+  }
+
+  // Sur le disque, l'app fermée : les deux décisions de l'auteur, et rien d'autre.
+  const research = query<{ decision: string; category: string }>(
+    join(projectDir, '.cliodeck', 'brain.db'),
+    'SELECT decision, category FROM history_proposal_events ORDER BY rowid',
+  );
+  expect(research).toEqual([
+    { decision: 'rejected', category: 'brainstorm-draft' },
+    { decision: 'accepted', category: 'brainstorm-draft' },
+  ]);
+  const usage = query<{ decision: string }>(
+    join(projectDir, '.cliodeck', 'journal.db'),
+    'SELECT decision FROM proposal_adjudications ORDER BY rowid',
+  );
+  expect(usage.map((r) => r.decision)).toEqual(['rejected', 'accepted']);
+});
