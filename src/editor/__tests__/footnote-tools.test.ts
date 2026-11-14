@@ -533,6 +533,35 @@ describe('planFootnoteInsertion', () => {
       const plan = planFootnoteInsertion(DOC, DOC.length, [{ from: DOC.length, to: DOC.length }]);
       expect(plan.changes).toEqual([{ from: DOC.length, to: DOC.length, insert: '[^1]\n\n[^1]: ' }]);
     });
+
+    /**
+     * Seconde revue L01-6 : la note posée au bout du dernier paragraphe, ou dans les blancs de fin,
+     * avant un brouillon qui attend plus loin. Un seul changement du curseur à la fin le touchait,
+     * alors qu'une frappe au même curseur le laisse.
+     */
+    it.each([
+      ['curseur au bout du dernier mot, brouillon après la fin de ligne finale', DOC, DOC.trimEnd().length, DOC.length],
+      ['curseur au bout du dernier mot, brouillon dans les blancs de fin', 'Texte.\n\n\n', 'Texte.'.length, 'Texte.\n'.length],
+      ['curseur dans les blancs de fin, brouillon plus loin', 'Texte.\n\n\n', 'Texte.\n'.length, 'Texte.\n\n\n'.length],
+      ['curseur au bout du texte, suivi d’espaces', 'Une phrase.  \n', 'Une phrase.'.length, 'Une phrase.  \n'.length],
+    ])('%s : l’appel au curseur, les blancs restent, la définition vient après eux', (_label, doc, at, anchor) => {
+      const plan = planFootnoteInsertion(doc, at, [{ from: anchor, to: anchor }]);
+
+      expect(plan.changes).toEqual([
+        { from: at, to: at, insert: '[^1]' },
+        { from: doc.length, to: doc.length, insert: '\n\n[^1]: ', afterProposals: true },
+      ]);
+      expect(applied(doc, plan.changes)).toBe(appended(doc, at));
+      expect(plan.cursor).toBe(appended(doc, at).length);
+    });
+
+    it('témoin : un brouillon avant le curseur, dans les blancs de fin, ne change rien au calcul d’avant', () => {
+      const doc = 'Texte.\n\n\n';
+      const at = doc.length;
+      const plan = planFootnoteInsertion(doc, at, [{ from: 'Texte.\n'.length, to: 'Texte.\n'.length }]);
+      expect(plan.changes).toEqual([{ from: at, to: at, insert: '[^1]\n\n[^1]: ' }]);
+      expect(applied(doc, plan.changes)).toBe(previousComputation(doc, at).text);
+    });
   });
 
   /**
@@ -588,9 +617,9 @@ describe('planFootnoteInsertion', () => {
       const label = JSON.stringify({ doc, at, anchor });
       const n = plan.footnoteNumber;
 
-      // Seule la note posée sur la proposition la retire : l'appel au même endroit, ou un curseur
-      // dans les blancs de fin, à elle ou avant elle.
-      const touched = anchor === at || (at >= end && anchor >= at);
+      // Seule la note posée sur la proposition la retire : l'appel au même endroit, comme une frappe.
+      // Un curseur dans les blancs de fin, avant elle, la laisse aussi (seconde revue L01-6).
+      const touched = anchor === at;
       expect(events.map((e) => e.decision), label).toEqual(touched ? ['invalidated'] : []);
       const text = state.doc.toString();
       expect(text.endsWith(`[^${n}]: `), label).toBe(true);

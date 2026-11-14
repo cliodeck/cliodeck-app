@@ -218,6 +218,31 @@ describe('propositions : ajout au bout du document après elles (afterProposalsE
     expect(pending(current, instance)).toHaveLength(1);
   });
 
+  /**
+   * Seconde revue L01-6 : l'exception ne vaut que pour la proposition qui finit au début de la plage.
+   * Une proposition posée après l'ajout (curseur laissé dans la définition) s'appuie sur lui : Cmd+Z,
+   * qui le retire, la touche, et elle est retirée comme par toute autre édition.
+   */
+  it('témoin : une proposition posée après l’ajout est retirée par Cmd+Z, celle d’avant reste', () => {
+    const { events, instance, state } = withProposal({ from: DOC.length, to: DOC.length }, [history()]);
+    let current = state.update({
+      changes: [{ from: 1, insert: '[^1]' }, APPEND],
+      effects: AFTER,
+      annotations: [changeOrigin.of('programmatic'), isolateHistory.of('full')],
+    }).state;
+    const end = current.doc.length;
+    current = current.update({
+      effects: addProposalEffect.of(makeProposal({ id: 'note', range: { from: end, to: end }, proposed: 'Source.' })),
+    }).state;
+    expect(pending(current, instance).map((p) => p.id)).toEqual(['fin', 'note']);
+
+    expect(undo({ state: current, dispatch: (tr) => (current = tr.state) })).toBe(true);
+
+    expect(current.doc.toString()).toBe(DOC);
+    expect(events.map((e) => [e.proposalId, e.decision])).toEqual([['note', 'invalidated']]);
+    expect(pending(current, instance).map((p) => [p.id, p.range])).toEqual([['fin', { from: DOC.length, to: DOC.length }]]);
+  });
+
   it('témoin : sans l’effet, le contact retire la proposition', () => {
     const { events, instance, state } = withProposal({ from: DOC.length, to: DOC.length });
     const next = state.update({ changes: APPEND, annotations: changeOrigin.of('programmatic') }).state;

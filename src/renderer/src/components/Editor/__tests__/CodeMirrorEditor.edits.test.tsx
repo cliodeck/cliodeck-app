@@ -385,6 +385,61 @@ describe('insérer une note : une proposition au bout du document reste devant l
     expect(proposalBoxes()).toHaveLength(1);
   });
 
+  /**
+   * Seconde revue L01-6 : la note au bout du dernier paragraphe, cas courant, avant le brouillon
+   * envoyé sans curseur posé. L'appel et la définition remplaçaient d'un seul tenant la fin de ligne
+   * finale, et le brouillon qui attendait après elle était retiré, alors qu'une frappe au même
+   * curseur le laisse.
+   */
+  it('brouillon envoyé sans curseur posé, note au bout du dernier paragraphe : le brouillon reste, accepté à part', async () => {
+    await mountArticle();
+    let insertion = { mode: 'unavailable' } as DraftInsertion;
+    act(() => {
+      insertion = editor().insertDraftAtCursor(DRAFT, { model: 'modele', task: 'brainstorm' });
+    });
+    if (insertion.mode !== 'cursor') throw new Error('La proposition n’a pas été posée');
+    const decided = vi.fn();
+    onceProposalDecided(insertion.proposalId, decided);
+
+    placeCursor(TEXT.indexOf(P4) + P4.length);
+    pressFootnote();
+
+    const notedP4 = TEXT.replace(P4, `${P4}[^1]`);
+    // La fin de ligne finale reste devant le brouillon, la définition vient après lui.
+    expect(docText()).toBe(`${notedP4}\n\n[^1]: `);
+    expect(adjudications).toEqual([]);
+    expect(proposalBoxes()).toHaveLength(1);
+
+    type('Source.');
+    acceptProposal();
+    expect(docText()).toBe(`${notedP4}\n${DRAFT}\n\n[^1]: Source.`);
+    expect(adjudications.map((e) => e.decision)).toEqual(['accepted']);
+    expect(decided).toHaveBeenCalledWith('accepted');
+  });
+
+  it('témoin : une proposition posée dans la définition est retirée par Cmd+Z, le brouillon d’avant reste', async () => {
+    await mountArticle();
+    act(() => {
+      editor().insertDraftAtCursor(DRAFT, { model: 'modele', task: 'brainstorm' });
+    });
+    placeCursor(endOfP1);
+    pressFootnote();
+    // Le curseur est resté dans la définition : le second brouillon s'y pose, après elle.
+    act(() => {
+      editor().insertDraftAtCursor('Texte de note proposé.', { model: 'modele', task: 'brainstorm' });
+    });
+    expect(proposalBoxes()).toHaveLength(2);
+    expect(adjudications).toEqual([]);
+
+    undoOnce();
+
+    expect(docText()).toBe(TEXT);
+    expect(adjudications.map((e) => e.decision)).toEqual(['invalidated']);
+    expect(proposalBoxes()).toHaveLength(1);
+    acceptProposal();
+    expect(docText()).toBe(`${TEXT}\n${DRAFT}`);
+  });
+
   it('témoin : un curseur dans les blancs de fin pose la note sur la proposition qui y attend, qui est retirée', async () => {
     await mountArticle();
     proposeDraftAt(TEXT.length);

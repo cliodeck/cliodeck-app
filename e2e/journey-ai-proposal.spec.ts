@@ -722,9 +722,11 @@ function query<T>(dbPath: string, sql: string): T[] {
  * envoyé sans curseur posé, c'était la définition de la note qui la touchait (revue L01-6).
  */
 const NOTED = TEXT.replace('sans histoire.', 'sans histoire.[^1]');
+const NOTED_LAST = TEXT.replace('Dernier paragraphe.', 'Dernier paragraphe.[^1]');
 const NOTE_CASES = [
   {
     where: 'plus loin dans le texte',
+    noteLine: 'Premier paragraphe',
     anchor: TEXT.indexOf('Dernier paragraphe.') + 'Dernier paragraphe.'.length,
     proposed: ' PROPOSÉ.',
     noted: `${NOTED}\n[^1]: Texte de la note.`,
@@ -734,14 +736,25 @@ const NOTE_CASES = [
     // Après la fin de ligne finale, avec le padding de bloc d'un brouillon : elle reste devant la
     // définition, qui vient après une ligne vide.
     where: 'au bout du document',
+    noteLine: 'Premier paragraphe',
     anchor: TEXT.length,
     proposed: '\nPROPOSÉ.',
     noted: `${NOTED}\n\n[^1]: Texte de la note.`,
     accepted: `${NOTED}\nPROPOSÉ.\n\n[^1]: Texte de la note.`,
   },
+  {
+    // La note au bout du dernier paragraphe, juste avant la fin de ligne finale : la proposition qui
+    // attend après elle n'est pas à l'endroit de l'appel, et reste (seconde revue L01-6).
+    where: 'au bout du document, la note au bout du dernier paragraphe,',
+    noteLine: 'Dernier paragraphe',
+    anchor: TEXT.length,
+    proposed: '\nPROPOSÉ.',
+    noted: `${NOTED_LAST}\n\n[^1]: Texte de la note.`,
+    accepted: `${NOTED_LAST}\nPROPOSÉ.\n\n[^1]: Texte de la note.`,
+  },
 ];
 
-for (const { where, anchor, proposed, noted, accepted } of NOTE_CASES) {
+for (const { where, noteLine, anchor, proposed, noted, accepted } of NOTE_CASES) {
   test(`une note insérée avant une proposition en attente ${where} la laisse, et seul « Accepter » va aux journaux`, async () => {
     const session = await start();
     if (!session) return;
@@ -767,8 +780,8 @@ for (const { where, anchor, proposed, noted, accepted } of NOTE_CASES) {
       );
       await expect(proposal(window)).toHaveCount(1);
 
-      // La note au bout du premier paragraphe, par le bouton : le curseur passe dans la définition.
-      await line(window, 'Premier paragraphe').click();
+      // La note au bout du paragraphe, par le bouton : le curseur passe dans la définition.
+      await line(window, noteLine).click();
       await window.keyboard.press('End');
       await window.locator('button[title^="Note de bas de page"]').first().click();
       await window.keyboard.type('Texte de la note.');

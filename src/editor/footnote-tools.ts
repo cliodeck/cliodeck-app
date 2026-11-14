@@ -175,8 +175,9 @@ export function nextFootnoteNumber(content: string): number {
  * `pending` : les plages des propositions en attente. Une proposition qui finit au bout du texte ou
  * dans les blancs de fin (un brouillon envoyé sans curseur posé y attend) garde ces blancs, et la
  * définition s'ajoute après eux, marquée `afterProposals` : elle ne la touche pas, et un brouillon
- * accepté reste séparé d'elle par une ligne vide. Seul cas où le texte diffère de celui d'avant :
- * des blancs de fin en plus.
+ * accepté reste séparé d'elle par une ligne vide. De même quand le curseur est au bout du dernier
+ * mot ou dans les blancs de fin, et que la proposition attend plus loin. Seul cas où le texte
+ * diffère de celui d'avant : des blancs de fin en plus.
  */
 export function planFootnoteInsertion(
   doc: string,
@@ -191,11 +192,26 @@ export function planFootnoteInsertion(
   const at = Math.max(0, Math.min(position, doc.length));
   const call = `[^${footnoteNumber}]`;
   const definition = `\n\n[^${footnoteNumber}]: `;
-  // Les blancs de fin partent : la définition suit le dernier texte, comme avant.
+  // Les blancs de fin restent, l'appel va au curseur, et la définition s'ajoute après les blancs et
+  // les propositions qui y attendent, sans les toucher.
+  const afterPending = () => ({
+    changes: [
+      { from: at, to: at, insert: call },
+      { from: doc.length, to: doc.length, insert: definition, afterProposals: true },
+    ],
+    cursor: doc.length + call.length + definition.length,
+    footnoteNumber,
+  });
+  // Sans proposition au bout, les blancs de fin partent : la définition suit le dernier texte, comme
+  // avant.
   const end = doc.trimEnd().length;
   if (at >= end) {
-    // Le curseur est dans ces blancs : l'appel et la définition les remplacent d'un seul tenant.
-    // Une proposition qui y attend au curseur ou après est touchée, comme par une frappe.
+    // Le curseur est au bout du dernier mot ou dans les blancs de fin. Une proposition qui attend
+    // plus loin n'est pas à l'endroit de l'appel : la note la laisse, comme une frappe au même
+    // curseur (seconde revue L01-6).
+    if (pending.some((r) => r.from > at)) return afterPending();
+    // Sinon l'appel et la définition remplacent ces blancs d'un seul tenant. Une proposition posée
+    // au curseur est touchée, comme par une frappe ; une qui attend avant lui, non.
     return {
       changes: [{ from: at, to: doc.length, insert: call + definition }],
       cursor: at + call.length + definition.length,
@@ -209,16 +225,7 @@ export function planFootnoteInsertion(
   // touchée, donc retirée ; une qui finit dans les blancs de fin verrait changer ce qui la suit, que
   // son texte compte (accepté, un brouillon se collerait à la définition, que pandoc imprimerait en
   // clair). Les blancs restent alors, et la définition vient après eux.
-  if (pending.some((r) => r.to >= end + kept || r.to > end)) {
-    return {
-      changes: [
-        { from: at, to: at, insert: call },
-        { from: doc.length, to: doc.length, insert: definition, afterProposals: true },
-      ],
-      cursor: doc.length + call.length + definition.length,
-      footnoteNumber,
-    };
-  }
+  if (pending.some((r) => r.to >= end + kept || r.to > end)) return afterPending();
   return {
     changes: [
       { from: at, to: at, insert: call },

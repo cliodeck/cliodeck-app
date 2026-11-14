@@ -28,8 +28,8 @@ export const setProposalUiEffect = StateEffect.define<{
  * Le texte que la transaction ajoute au bout du document vient après les propositions en attente :
  * la définition d'une note (L01-6). `from`…`to` est sa plage dans le document de départ : vide pour
  * l'ajout, le texte même pour son retrait par Cmd+Z (voir `invertAfterProposals`). Ce changement ne
- * touche pas la proposition qui finit à `from`, qui reste devant lui. Toute autre édition de la
- * transaction compte comme d'habitude.
+ * touche pas une proposition qui finit à `from` ou avant, qui reste devant lui ; une proposition
+ * posée dans sa plage, si. Toute autre édition de la transaction compte comme d'habitude.
  */
 export const afterProposalsEffect = StateEffect.define<{ from: number; to: number }>({
   map: ({ from, to }, mapping) => ({ from: mapping.mapPos(from, -1), to: mapping.mapPos(to, 1) }),
@@ -108,7 +108,9 @@ export function createProposalsField(config: ProposalsConfig) {
 
       if (tr.docChanged && proposals.length > 0) {
         // Le texte ajouté au bout du document après les propositions, ou retiré par Cmd+Z
-        // (`afterProposalsEffect`) : il ne touche pas la proposition qui finit devant lui.
+        // (`afterProposalsEffect`) : il ne touche pas la proposition qui finit devant lui. Une
+        // proposition posée après lui (dans la définition) s'appuie sur lui : son retrait la touche,
+        // comme toute autre édition (seconde revue L01-6).
         const docEnd = tr.startState.doc.length;
         const after = afterProposalsRanges(tr);
         const isAfter = (fromA: number, toA: number) =>
@@ -118,7 +120,7 @@ export function createProposalsField(config: ProposalsConfig) {
         for (const p of proposals) {
           let touched = false;
           tr.changes.iterChangedRanges((fromA, toA) => {
-            if (isAfter(fromA, toA)) return;
+            if (isAfter(fromA, toA) && p.range.to <= fromA) return;
             if (fromA <= p.range.to && toA >= p.range.from) touched = true;
           });
           if (touched) {
