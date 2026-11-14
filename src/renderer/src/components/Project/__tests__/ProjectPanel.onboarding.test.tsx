@@ -376,7 +376,8 @@ describe('rejouer l’assistant quand context.md porte un texte', () => {
   it('context.md ouvert et modifié dans l’éditeur : ce qui y est tapé compte, et le tampon suit', async () => {
     fs.writeFileSync(contextMd, AUTHOR_TEXT);
     await useEditorStore.getState().loadFile(contextMd);
-    useEditorStore.getState().setContent(`${AUTHOR_TEXT}\nTapé à l’instant.\n`);
+    // Tapé sans vue montée : le miroir porte le texte, comme le pousserait la vue.
+    useEditorStore.setState({ content: `${AUTHOR_TEXT}\nTapé à l’instant.\n`, isDirty: true });
     await renderPanel();
 
     await replayAssistant();

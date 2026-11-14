@@ -27,7 +27,13 @@ const SimilarityPanel = lazy(() =>
 const PresentationExportModal = lazy(() =>
   import('../Export/PresentationExportModal').then((m) => ({ default: m.PresentationExportModal })),
 );
-import { openErrorKey, useEditorStore, watchSaveOvertaken } from '../../stores/editorStore';
+import {
+  BufferChangedError,
+  openErrorKey,
+  useEditorStore,
+  watchSaveOvertaken,
+  type BufferOutcome,
+} from '../../stores/editorStore';
 import { useSimilarityStore } from '../../stores/similarityStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { useProjectStore } from '../../stores/projectStore';
@@ -43,7 +49,7 @@ import './EditorPanel.css';
 
 export const EditorPanel: React.FC = () => {
   const { t } = useTranslation('common');
-  const { loadFile, saveFile, setContent, insertFormatting } = useEditorStore();
+  const { loadFile, saveFile, insertFormatting } = useEditorStore();
   const { openPanel: openSimilarityPanel, isPanelOpen: isSimilarityPanelOpen } =
     useSimilarityStore();
   const closeSimilarityPanel = useSimilarityStore((s) => s.closePanel);
@@ -174,13 +180,13 @@ export const EditorPanel: React.FC = () => {
     insertFormatting('footnote');
   };
 
-  // La façade se relit au moment d'écrire : celle d'avant une attente peut être
-  // celle d'une vue détruite, où `setValue` ne fait rien, en silence.
-  const setOpenEditorText = (text: string): void => {
-    const { editorFacade } = useEditorStore.getState();
-    if (editorFacade) editorFacade.setValue(text);
-    else setContent(text);
-  };
+  // Par la porte, qui relit la façade au moment d'écrire (celle d'avant une attente peut être
+  // celle d'une vue détruite), ne change que les étiquettes (le curseur et les propositions en
+  // attente restent), et refuse si le fichier ouvert n'est plus `ifFilePath`. Sans vue, le miroir.
+  const setOpenEditorText = (text: string, ifFilePath: string | null): Promise<BufferOutcome> =>
+    useEditorStore
+      .getState()
+      .replaceBuffer({ kind: 'edit', text, ...(ifFilePath ? { ifFilePath } : {}) }, 'renumber-footnotes');
 
   /**
    * Renumérote tout le livre et rend le message à afficher : l'appelant ne
@@ -194,6 +200,7 @@ export const EditorPanel: React.FC = () => {
     // Le verrou arrête ce qui part après lui, pas ce qui était déjà parti.
     // L'éditeur montre-t-il encore le départ ?
     const startRel = currentRelativePath();
+    const startPath = useEditorStore.getState().filePath;
     const editorMoved = (): boolean =>
       currentRelativePath() !== startRel ||
       useProjectStore.getState().currentProject?.path !== project.path;
@@ -242,7 +249,7 @@ export const EditorPanel: React.FC = () => {
       for (const doc of changed) {
         if (isAbandoned()) return null;
         // Le texte vivant a été lu avant les attentes : ce que l'auteur a tapé
-        // depuis n'est pas dans `doc.content`, et `setValue` l'effacerait.
+        // depuis n'est pas dans `doc.content`, et l'écrire l'effacerait.
         interrupted =
           editorMoved() ||
           (doc.key === openKey &&
@@ -252,7 +259,7 @@ export const EditorPanel: React.FC = () => {
         if (doc.key === openKey) {
           // Chapitre ouvert : passer par l'éditeur, l'édition reste
           // annulable et la sauvegarde suit le chemin habituel.
-          setOpenEditorText(doc.content);
+          await setOpenEditorText(doc.content, startPath);
           // Avant l'écriture : si elle échoue, le tampon porte déjà le texte
           // renuméroté, et l'autosave l'écrirait seul quelques secondes plus tard.
           touched.push(doc.key);
@@ -268,6 +275,7 @@ export const EditorPanel: React.FC = () => {
         onDisk.add(doc.key);
       }
     } catch (error) {
+      if (error instanceof BufferChangedError) interrupted = true;
       if (!interrupted) logger.error('EditorPanel', error);
       // Atomique : ce qui a été écrit est remis dans son état d'origine —
       // un manuscrit à moitié renuméroté serait pire que pas de
@@ -298,10 +306,8 @@ export const EditorPanel: React.FC = () => {
           // restaurer le seul tampon de l'éditeur laissait donc le fichier
           // renuméroté, et ne restaurait rien du tout si la façade était
           // nulle ou l'autosave désactivé. On réécrit explicitement.
-          setOpenEditorText(original);
-          restored = await useEditorStore
-            .getState()
-            .saveFile()
+          restored = await setOpenEditorText(original, useEditorStore.getState().filePath)
+            .then(() => useEditorStore.getState().saveFile())
             .then(
               () => true,
               () => false
@@ -336,8 +342,9 @@ export const EditorPanel: React.FC = () => {
 
     // Document isolé : comportement historique, et ce qui n'a pas pu être lié se dit.
     if (!isBook) {
-      const result = renumberFootnotes(useEditorStore.getState().getLiveContent());
-      if (result.changed) setOpenEditorText(result.content);
+      const { filePath, getLiveContent } = useEditorStore.getState();
+      const result = renumberFootnotes(getLiveContent());
+      if (result.changed) await setOpenEditorText(result.content, filePath);
       const unlinkedNote = unlinkedFootnotesNote([{ unlinked: result.unlinked }], t);
       if (unlinkedNote) await useDialogStore.getState().showAlert(unlinkedNote);
       return;

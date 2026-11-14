@@ -22,6 +22,7 @@ function fakeFacade(proposals: Array<Partial<Proposal>>, accepts = true): Editor
   return {
     engine: 'cm6',
     getValue: () => TEXT,
+    getDocText: () => TEXT,
     getCursorOffset: () => 9,
     hasKnownCursor: () => true,
     getSelectionText: () => null,
@@ -30,6 +31,7 @@ function fakeFacade(proposals: Array<Partial<Proposal>>, accepts = true): Editor
     replaceSelection: () => undefined,
     editSelection: () => false,
     setValue: () => undefined,
+    applyChanges: () => false,
     appendText: () => undefined,
     propose: (p) => {
       proposals.push(p);

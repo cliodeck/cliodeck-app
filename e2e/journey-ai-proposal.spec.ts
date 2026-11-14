@@ -8,11 +8,16 @@
  */
 
 import { test, expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { launchApp } from './_helpers/launch';
 import { startFakeOllama, type FakeOllama } from './_helpers/fake-ollama';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const ANSWER = 'Réponse du modèle sur le corridor de Danzig.';
 const TEXT =
@@ -690,6 +695,82 @@ test('un fichier CRLF garde ses fins de ligne : rien n’est écrit sans décisi
   } finally {
     await stop(session);
   }
+});
+
+/** Une requête en lecture seule, par le Node d'Electron, sur une base que l'app a fermée. */
+function query<T>(dbPath: string, sql: string): T[] {
+  const script = `
+    const Database = require('better-sqlite3');
+    const [file, sql] = process.argv.slice(1);
+    const db = new Database(file, { readonly: true, fileMustExist: true });
+    process.stdout.write(JSON.stringify(db.prepare(sql).all()));
+    db.close();
+  `;
+  const electronPath = createRequire(import.meta.url)('electron') as string;
+  const out = execFileSync(electronPath, ['-e', script, dbPath, sql], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: 'pipe',
+  });
+  return JSON.parse(out.toString()) as T[];
+}
+
+/**
+ * L01-6 : insérer une note réécrivait le document du curseur à la fin. Une proposition en attente
+ * plus loin disparaissait, et son retrait partait aux deux journaux comme une décision
+ * (`invalidated`) que l'auteur n'avait pas prise.
+ */
+test('une note insérée avant une proposition en attente la laisse, et seul « Accepter » va aux journaux', async () => {
+  const session = await start();
+  if (!session) return;
+  const { app, window } = session;
+  const { projectJson, document } = makeArticle();
+  const projectDir = dirname(document);
+  const onDisk = () => readFileSync(document, 'utf8');
+  const lastEnd = TEXT.indexOf('Dernier paragraphe.') + 'Dernier paragraphe.'.length;
+
+  try {
+    await openProject(app, window, projectJson);
+    await expect(line(window, 'Dernier paragraphe')).toBeVisible({ timeout: 20_000 });
+    await window.evaluate((at) => {
+      (window as unknown as { __cliodeckProposals: { inject(p: object): void } }).__cliodeckProposals.inject({
+        range: { from: at, to: at },
+        original: '',
+        proposed: ' PROPOSÉ.',
+        category: 'ai-insert',
+        source: { model: 'modele-e2e', task: 'e2e' },
+      });
+    }, lastEnd);
+    await expect(proposal(window)).toHaveCount(1);
+
+    // La note au bout du premier paragraphe, par le bouton : le curseur passe dans la définition.
+    await line(window, 'Premier paragraphe').click();
+    await window.keyboard.press('End');
+    await window.locator('button[title^="Note de bas de page"]').first().click();
+    await window.keyboard.type('Texte de la note.');
+    const noted = TEXT.replace('sans histoire.', 'sans histoire.[^1]') + '\n[^1]: Texte de la note.';
+    await expect.poll(onDisk, { timeout: 10_000 }).toBe(noted);
+    await expect(proposal(window)).toHaveCount(1);
+
+    await acceptProposal(window);
+    await expect
+      .poll(onDisk, { timeout: 10_000 })
+      .toBe(noted.replace('Dernier paragraphe.', 'Dernier paragraphe. PROPOSÉ.'));
+  } finally {
+    await stop(session);
+  }
+
+  // Sur le disque, l'app fermée : la seule décision est celle de l'auteur.
+  const research = query<{ decision: string }>(
+    join(projectDir, '.cliodeck', 'brain.db'),
+    'SELECT decision FROM history_proposal_events ORDER BY rowid',
+  );
+  expect(research.map((r) => r.decision)).toEqual(['accepted']);
+  const usage = query<{ decision: string }>(
+    join(projectDir, '.cliodeck', 'journal.db'),
+    'SELECT decision FROM proposal_adjudications ORDER BY rowid',
+  );
+  expect(usage.map((r) => r.decision)).toEqual(['accepted']);
 });
 
 test('« Ouvrir la source » vers un chapitre déjà visité : le passage est à l’écran, pas l’ancienne position', async () => {

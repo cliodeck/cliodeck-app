@@ -183,6 +183,67 @@ test('livre : la bascule immédiate écrit chaque chapitre chez lui, et le retou
   }
 });
 
+/**
+ * L01-6 : renuméroter les notes, ou renommer le chapitre ouvert, remplaçait tout le document. Le
+ * curseur retombait en tête, et la phrase que l'auteur reprenait partait au début du chapitre.
+ */
+const NOTES_CHAPTER =
+  '# Chapitre un\n\nPremier appel[^3] dans le texte, puis la suite.\n\nSecond appel[^1].\n\n[^1]: un.\n[^3]: trois.\n';
+const NOTES_RENUMBERED =
+  '# Chapitre un\n\nPremier appel[^1] dans le texte, puis la suite.\n\nSecond appel[^2].\n\n[^2]: un.\n[^1]: trois.\n';
+
+test('livre : renuméroter le curseur au milieu d’un chapitre, puis renommer : la frappe entre là où il était', async () => {
+  const outcome = await launchApp();
+  if (outcome.kind === 'skip') {
+    test.skip(true, outcome.reason);
+    return;
+  }
+  const { app, window, userDataDir } = outcome.value;
+  const book = makeBook();
+  writeFileSync(book.one, NOTES_CHAPTER);
+  const onDisk = () => readFileSync(book.one, 'utf8');
+
+  try {
+    await openProject(app, window, book.projectJson);
+    await expect(editor(window)).toContainText('Premier appel', { timeout: 20_000 });
+
+    // Au clavier, juste après « texte » : du texte sans widget de note, compté sûrement.
+    await editor(window).locator('.cm-line', { hasText: 'Premier appel' }).click();
+    await window.keyboard.press('End');
+    for (let i = 0; i < ', puis la suite.'.length; i += 1) await window.keyboard.press('ArrowLeft');
+
+    await window.locator('button[title="Renuméroter les notes"]').first().click();
+    await expect(window.locator('#alert-dialog-message')).toContainText('Notes renumérotées dans 1 chapitre(s).', {
+      timeout: 10_000,
+    });
+    await window.locator('.alert-dialog-btn-ok').click();
+    await expect.poll(onDisk, { timeout: 8_000 }).toBe(NOTES_RENUMBERED);
+
+    // Le dialogue rend le focus au texte, le curseur où il était.
+    await window.keyboard.type(' ICI');
+    const typed = NOTES_RENUMBERED.replace('le texte,', 'le texte ICI,');
+    await expect.poll(onDisk, { timeout: 8_000 }).toBe(typed);
+
+    // Renommer le chapitre ouvert : seul le titre change, le curseur reste dans le paragraphe.
+    await chapterButton(window, 'Un').dblclick();
+    const title = window.locator('input.chapter-title-input');
+    await title.fill('Danzig');
+    await title.press('Enter');
+    await expect.poll(onDisk, { timeout: 8_000 }).toBe(typed.replace('# Chapitre un', '# Danzig'));
+    // Le focus est resté au champ du titre, retiré : le rendre au texte sans cliquer, qui
+    // déplacerait le curseur.
+    await editor(window).focus();
+    await window.keyboard.type(' LA');
+    await expect
+      .poll(onDisk, { timeout: 8_000 })
+      .toBe(typed.replace('# Chapitre un', '# Danzig').replace('ICI,', 'ICI LA,'));
+  } finally {
+    await app.close();
+    rmSync(userDataDir, { recursive: true, force: true });
+    rmSync(book.dir, { recursive: true, force: true });
+  }
+});
+
 test('livre : cliquer le chapitre ouvert ne perd ni le texte ni l’annulation', async () => {
   const outcome = await launchApp();
   if (outcome.kind === 'skip') {
