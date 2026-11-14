@@ -1,6 +1,7 @@
 import { readFile } from 'fs/promises';
 import path from 'path';
 import type { Chapter, BookSettings } from '../../../backend/types/book.js';
+import type { OutcomeIssue } from '../../../backend/types/outcome.js';
 import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import { prefixFootnoteLabels } from '../../editor/footnote-tools.js';
 
@@ -53,8 +54,11 @@ export interface AssembledManuscript {
   /** Flux unique prêt pour pandoc. */
   markdown: string;
   chapterCount: number;
-  /** Chapitres ignorés, fichiers illisibles… — à remonter à l'utilisateur. */
-  warnings: string[];
+  /**
+   * Chapitres omis (introuvables, illisibles, hors du projet) : codes relatifs à `messages.*`, que
+   * les exports rendent dans leurs réserves (`ExportResult.warnings`).
+   */
+  warnings: OutcomeIssue[];
 }
 
 /** Ordre de rendu : liminaires, corps, pièces finales (arbitrage 6). */
@@ -108,7 +112,7 @@ export async function assembleManuscript(
   } = opts;
   /** Le docx natif n'interprète pas le LaTeX : on ne lui en donne pas. */
   const emitsLatex = target === 'latex';
-  const warnings: string[] = [];
+  const warnings: OutcomeIssue[] = [];
 
   const selected =
     typeof scope === 'object'
@@ -116,7 +120,7 @@ export async function assembleManuscript(
       : [...opts.chapters];
 
   if (typeof scope === 'object' && selected.length === 0) {
-    warnings.push(`Chapitre introuvable dans le manifeste : ${scope.chapterId}`);
+    warnings.push({ code: 'export.chapterNotInManifest' });
   }
 
   // L'ordre du manifeste fait foi (arbitrage 7) ; le `kind` regroupe
@@ -143,7 +147,10 @@ export async function assembleManuscript(
       !isInsideProject(projectPath, chapter.filePath) ||
       !(await isInsideAsync(projectPath, path.resolve(projectPath, chapter.filePath)))
     ) {
-      warnings.push(`Chapitre ignoré (chemin hors projet) : ${chapter.filePath}`);
+      warnings.push({
+        code: 'export.chapterOutsideProject',
+        params: { title: chapter.title, file: chapter.filePath },
+      });
       continue;
     }
 
@@ -152,7 +159,10 @@ export async function assembleManuscript(
       try {
         content = await readFile(path.resolve(projectPath, chapter.filePath), 'utf-8');
       } catch {
-        warnings.push(`Chapitre ignoré (fichier illisible) : ${chapter.filePath}`);
+        warnings.push({
+          code: 'export.chapterUnreadable',
+          params: { title: chapter.title, file: chapter.filePath },
+        });
         continue;
       }
     }

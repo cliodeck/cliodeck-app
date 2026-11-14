@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { processMarkdownCitations } from '../citation-pipeline';
+import { citationKeysIn, processMarkdownCitations } from '../citation-pipeline';
 
 // Ces tests exercent le VRAI moteur citeproc : chaque appel construit un
 // `CSL.Engine` et parse la feuille de style CSL (CitationEngine.ts:95).
@@ -190,5 +190,24 @@ describe('formes de citation au-delà de [@clé] dans le corps', () => {
   it('ne signale qu’une fois une clé introuvable répétée', async () => {
     const res = await processMarkdownCitations('A [@ghost]. B [@ghost].', { resolve });
     expect(res.missingKeys).toEqual(['ghost']);
+  });
+});
+
+describe('citationKeysIn — les clés qu’un export laisse brutes', () => {
+  const md = [
+    'Voir [@alice2020, p. 3; @bob2019].',
+    'Comme le montre @carol2021, et @alice2020 encore.',
+    'Écrire à jean@example.org, ou `@code2000` et `[@code2001]`.',
+    '```',
+    '[@dansuncode] et @dansuncode2',
+    '```',
+  ].join('\n');
+
+  it('par défaut, seulement les groupes entre crochets, hors code', () => {
+    expect(citationKeysIn(md)).toEqual(['alice2020', 'bob2019']);
+  });
+
+  it('avec `narrative`, aussi les `@clé` nues, hors code et hors adresse', () => {
+    expect(citationKeysIn(md, { narrative: true })).toEqual(['alice2020', 'bob2019', 'carol2021']);
   });
 });

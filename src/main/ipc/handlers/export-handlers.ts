@@ -123,7 +123,7 @@ export function setupExportHandlers() {
         success: result.success,
         outputPath: result.outputPath,
       });
-      return result;
+      return exportResponse(result);
     } catch (error: unknown) {
       console.error('❌ revealjs-export:export error:', error);
       return errorResponse(error);
@@ -142,7 +142,7 @@ export function setupExportHandlers() {
       });
 
       console.log('📤 IPC Response: revealjs-export:export-offline', { success: result.success });
-      return result;
+      return exportResponse(result);
     } catch (error: unknown) {
       console.error('❌ revealjs-export:export-offline error:', error);
       return errorResponse(error);
@@ -168,7 +168,7 @@ export function setupExportHandlers() {
       });
 
       console.log('📤 IPC Response: revealjs-export:export-pdf', { success: result.success });
-      return result;
+      return exportResponse(result);
     } catch (error: unknown) {
       console.error('❌ revealjs-export:export-pdf error:', error);
       return errorResponse(error);

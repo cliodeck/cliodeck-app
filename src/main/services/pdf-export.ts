@@ -3,8 +3,8 @@ import { copyFile, writeFile, mkdir, mkdtemp, readFile, rm } from 'fs/promises';
 import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
-import { processMarkdownCitations } from './citation-pipeline.js';
-import { bibliographyService } from './bibliography-service.js';
+import { citationKeysIn, processMarkdownCitations } from './citation-pipeline.js';
+import { bibliographyService, readBibFile } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
 import { refuseMarkdownOutput } from './export-output-path.js';
@@ -109,6 +109,30 @@ function collectText(stream: NodeJS.EventEmitter): () => string {
   const chunks: Buffer[] = [];
   stream.on('data', (chunk: Buffer) => chunks.push(chunk));
   return () => Buffer.concat(chunks).toString('utf8');
+}
+
+/** Les clés d'un `.bib` (clé BibTeX et alias `key`) ; `null` s'il ne se lit pas. */
+async function bibliographyKeysOf(path: string): Promise<Set<string> | null> {
+  const read = await readBibFile(path).catch(() => null);
+  if (read?.kind !== 'ok') return null;
+  return new Set(read.citations.flatMap((c) => (c.key ? [c.id, c.key] : [c.id])));
+}
+
+/**
+ * Des citations restent brutes dans un chapitre que citeproc n'a pas traité : un groupe `[@clé]`, ou
+ * une `@clé` nue que la bibliographie connaît, que pandoc tient pour une citation narrative (revue
+ * de L09-12). Un pseudonyme (`@nom`) qu'elle ignore reste ce qu'il est. Bibliographie illisible :
+ * toute `@clé` nue compte, une réserve de trop plutôt qu'un silence.
+ */
+async function citationsLeftRaw(
+  content: string,
+  knownKeys: () => Promise<Set<string> | null>
+): Promise<boolean> {
+  if (citationKeysIn(content).length > 0) return true;
+  const narrative = citationKeysIn(content, { narrative: true });
+  if (narrative.length === 0) return false;
+  const known = await knownKeys();
+  return known === null || narrative.some((key) => known.has(key));
 }
 
 // MARK: - Templates
@@ -707,12 +731,14 @@ export class PDFExportService {
    *
    * Le repli ci-dessous ne vaut que pour un échec isolé. Après un dépassement,
    * l'horloge refuse tout nouvel outil et l'export rend `export_timed_out` :
-   * jamais un PDF aux `[@clef]` non résolues, sans rien dire.
+   * jamais un PDF aux `[@clef]` non résolues, sans rien dire. Un échec isolé se
+   * dit aussi : `resolved` est faux, et l'export en fait une réserve qui nomme
+   * le chapitre (S12-1-14).
    */
   private async resolveCitationsInChapter(
     content: string,
     opts: { bibliographyPath: string; cslPath?: string; tempDir: string; clock: ExportClock }
-  ): Promise<string> {
+  ): Promise<{ content: string; resolved: boolean }> {
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const inPath = join(opts.tempDir, `chapter-${stamp}.md`);
     await writeFile(inPath, content, 'utf-8');
@@ -729,7 +755,7 @@ export class PDFExportService {
     }
 
     const extendedPath = this.getExtendedPath();
-    return new Promise<string>((resolve) => {
+    return new Promise<{ content: string; resolved: boolean }>((resolve) => {
       const proc = opts.clock.spawn('pandoc', args, {
         cwd: opts.tempDir,
         env: { ...process.env, PATH: extendedPath },
@@ -738,18 +764,20 @@ export class PDFExportService {
       const stderr = collectText(proc.stderr);
       proc.on('close', (code) => {
         const resolved = stdout();
-        if (code === 0 && resolved.trim()) {
-          resolve(resolved);
+        // Un chapitre vide, ou fait de lignes vides, rend une sortie vide avec le code 0 (mesuré,
+        // pandoc 3) : rien n'a échoué.
+        if (code === 0 && (resolved.trim() || !content.trim())) {
+          resolve({ content: resolved, resolved: true });
         } else {
           // Échec isolé : le chapitre part avec ses `[@clef]` non résolues
           // plutôt que de faire échouer tout l'export.
           console.warn('⚠️ citeproc par chapitre a échoué, chapitre laissé tel quel:', stderr().slice(0, 200));
-          resolve(content);
+          resolve({ content, resolved: false });
         }
       });
       proc.on('error', (err) => {
         console.warn('⚠️ citeproc par chapitre indisponible:', err.message);
-        resolve(content);
+        resolve({ content, resolved: false });
       });
     });
   }
@@ -835,6 +863,9 @@ export class PDFExportService {
       // nettoient à la main, cf. CHANGELOG).
       const mdPath = join(tempDir, 'input.md');
       let cleanedContent = options.content;
+      // Ce que le PDF aura de moins que le manuscrit (un chapitre omis, des citations restées en
+      // clés) : le PDF est écrit quand même, la fenêtre le dit et reste ouverte (S12-1-14).
+      const manuscriptWarnings: OutcomeIssue[] = [];
 
       // Assemblage du manuscrit (projets « livre »). La bibliographie par
       // chapitre passe par le hook `transformChapter` : citeproc tourne
@@ -851,7 +882,19 @@ export class PDFExportService {
         });
         const perChapterBib = bibMode.perChapter;
         if (bibMode.warning) console.warn('⚠️ ' + bibMode.warning);
+        // Case « style intégré » cochée, le moteur réunit les références en fin d'ouvrage : le
+        // réglage « par chapitre » n'est pas suivi, et l'auteur doit le savoir. Sans `.bib` ni
+        // moteur, il n'y a pas de bibliographie du tout : rien n'est replié.
+        if (bibMode.warning && options.citation?.useEngine) {
+          manuscriptWarnings.push({ code: 'export.perChapterBibliographyIgnored' });
+        }
 
+        const citeprocFailures: OutcomeIssue[] = [];
+        // Lue une fois, et seulement si un chapitre en échec n'a que des `@clé` nues.
+        const bibliographyPath = options.bibliographyPath;
+        let bibliographyKeys: Promise<Set<string> | null> | undefined;
+        const knownKeys = () =>
+          (bibliographyKeys ??= bibliographyPath ? clock.run(bibliographyKeysOf(bibliographyPath)) : Promise.resolve(null));
         const assembled = await assembleManuscript({
           projectPath: options.projectPath,
           chapters: options.manuscript.chapters,
@@ -859,19 +902,29 @@ export class PDFExportService {
           liveOverrides: options.manuscript.liveOverrides,
           scope: options.manuscript.scope,
           transformChapter: perChapterBib
-            ? (content) =>
-                this.resolveCitationsInChapter(content, {
+            ? async (content, chapter) => {
+                const cited = await this.resolveCitationsInChapter(content, {
                   bibliographyPath: options.bibliographyPath!,
                   cslPath: options.cslPath,
                   tempDir,
                   clock,
-                })
+                });
+                // La passe globale n'aura pas de bibliographie : ses clés s'imprimeraient telles
+                // quelles, sans que rien le dise. Un chapitre sans clé n'en laisse aucune, même
+                // quand le style fait échouer citeproc : rien à dire.
+                if (!cited.resolved && (await citationsLeftRaw(content, knownKeys))) {
+                  citeprocFailures.push({
+                    code: 'export.chapterCitationsNotResolved',
+                    params: { title: chapter.title, file: chapter.filePath },
+                  });
+                }
+                return cited.content;
+              }
             : undefined,
         });
 
-        for (const warning of assembled.warnings) {
-          console.warn('⚠️ Assemblage :', warning);
-        }
+        if (assembled.warnings.length > 0) console.warn('⚠️ Assemblage :', assembled.warnings);
+        manuscriptWarnings.push(...assembled.warnings, ...citeprocFailures);
         console.log(
           `📚 Manuscrit assemblé : ${assembled.chapterCount} pièce(s), bibliographie ${settings.bibliography}`
         );
@@ -1062,11 +1115,12 @@ export class PDFExportService {
       // Une image introuvable, pandoc la remplace par sa légende et réussit : sans cette réserve,
       // le PDF partait sans elle et sans un mot (S12-1-1).
       const warnings = [
+        ...manuscriptWarnings,
         ...resources.warnings,
         ...beamer.warnings,
         ...missingImagesWarnings(pandocMissingResources(pandocStderr)),
       ];
-      if (warnings.length > 0) console.warn('⚠️ pdf-export: images introuvables:', warnings);
+      if (warnings.length > 0) console.warn('⚠️ pdf-export: réserves :', warnings);
 
       console.log('✅ PDF exported successfully:', outputPath);
       return {

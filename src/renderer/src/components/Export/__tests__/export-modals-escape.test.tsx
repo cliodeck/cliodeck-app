@@ -731,3 +731,40 @@ describe.each(MODALS.filter((m) => m.name !== 'présentation'))(
     });
   }
 );
+
+/**
+ * L09-12 : la fenêtre de présentation se fermait sur tout succès. Un PDF dont les formules n'ont
+ * pas été rendues (KaTeX se charge du réseau) est écrit avec une réserve : elle la dit, par
+ * `ExportWarnings`, et reste ouverte, comme les fenêtres PDF et Word.
+ */
+describe('modale d’export présentation : avertissements de l’export', () => {
+  it('les dit, et reste ouverte', async () => {
+    opened.type = 'presentation';
+    opened.file = '/tmp/demo/slides.md';
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const finish = installElectron();
+    const onClose = vi.fn();
+    render(<Host Modal={PresentationExportModal} onClose={onClose} />);
+    await startExport('presentation.export', 'presentation.exporting');
+
+    finish({ success: true, outputPath: '/tmp/demo/demo.pdf', warnings: [{ code: 'presentation.mathNotRendered' }] });
+
+    expect(await screen.findByTestId('export-warning')).toHaveTextContent('messages.presentation.mathNotRendered');
+    await advance(10_000);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('les refus de la fenêtre restent des erreurs, pas des réserves', async () => {
+    opened.type = 'presentation';
+    opened.file = '/tmp/demo/slides.md';
+    const finish = installElectron();
+    const { container } = render(<Host Modal={PresentationExportModal} onClose={vi.fn()} />);
+    await startExport('presentation.export', 'presentation.exporting');
+
+    finish({ success: false, error: 'fetch failed', errorCode: 'presentation.assetsUnavailable' });
+
+    await waitFor(() => expect(container.querySelector('.export-error')).not.toBeNull());
+    expect(container.querySelector('.export-error')).toHaveTextContent('messages.presentation.assetsUnavailable');
+    expect(screen.queryByTestId('export-warning')).toBeNull();
+  });
+});

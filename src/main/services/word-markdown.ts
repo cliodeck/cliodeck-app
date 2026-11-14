@@ -226,6 +226,18 @@ export function inlineRuns(tokens: Token[], base: InlineStyle = {}): InlineChild
   return out;
 }
 
+/**
+ * Les images d'un markdown, par leur chemin, sans doublon : le générateur interne ne sait pas les
+ * insérer et les remplace par leur légende (`inlineRuns`), ce que l'export doit dire.
+ */
+export function markdownImages(markdown: string): string[] {
+  const files = new Set<string>();
+  marked.walkTokens(marked.lexer(markdown), (token) => {
+    if (token.type === 'image') files.add(decodeEntities((token as Tokens.Image).href));
+  });
+  return [...files];
+}
+
 /** Texte en ligne (markdown, ou HTML léger de citeproc) → enfants de paragraphe. */
 export function inlineMarkdownRuns(text: string, base: InlineStyle = {}): InlineChild[] {
   const runs = inlineRuns(marked.Lexer.lexInline(text), base);

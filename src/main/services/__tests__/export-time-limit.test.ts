@@ -127,10 +127,15 @@ vi.mock('electron', () => ({
       return presentation.openPath();
     },
   },
+  // Les téléchargements de reveal.js passent par `net.fetch` (pile réseau de Chromium) : au
+  // `fetch` simulé.
+  net: { fetch: (input: string, init?: RequestInit) => globalThis.fetch(input, init) },
   BrowserWindow: class {
     destroyed = false;
     closed = false;
     webContents = {
+      // La sonde de mise en page (L09-12) : reveal.js a posé ses pages.
+      executeJavaScript: () => Promise.resolve('ready'),
       printToPDF: () => {
         presentation.printing = true;
         return presentation.printToPDF();
@@ -159,7 +164,7 @@ vi.mock('electron', () => ({
 
 const { pdfExportService } = await import('../pdf-export.js');
 const { wordExportService } = await import('../word-export.js');
-const { revealJsExportService } = await import('../revealjs-export.js');
+const { revealJsExportService, RevealJsExportService } = await import('../revealjs-export.js');
 const { ExportClock, watchSystemSleep } = await import('../export-time-limit.js');
 
 /** Ceux qu'`extendedToolPath` remettrait devant le faux pandoc s'ils manquaient au PATH. */
@@ -1137,13 +1142,21 @@ describe('export de présentation', () => {
     outputPath: join(project, 'diapos.pdf'),
   });
 
+  // L'export PDF inclut reveal.js dans la page depuis L09-12 : jamais le vrai réseau ici.
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('/* asset */')));
+  });
+
   it(
     'une page qui ne charge jamais : fenêtre détruite, export_timed_out, HTML supprimé',
     async () => {
       presentation.loadFile = NEVER;
       useFakeClock();
+      // Le chargement de la page a sa propre borne depuis la revue de L09-12
+      // (`revealjs-export.test.ts`) : plus longue ici que la limite, c'est la limite qu'on éprouve.
+      const service = new RevealJsExportService({ renderTimeoutMs: 2 * LIMIT.timeLimitMs });
 
-      const exporting = revealJsExportService.exportToPDF(slides(), undefined, LIMIT);
+      const exporting = service.exportToPDF(slides(), undefined, LIMIT);
       await expireWhen(() => presentation.loadedFile !== null);
 
       expect(await exporting).toMatchObject({ success: false, errorCode: 'export_timed_out' });

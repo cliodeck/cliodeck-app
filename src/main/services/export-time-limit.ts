@@ -59,12 +59,27 @@ export type ExportImageErrorCode = 'export.imageNeedsRsvgConvert' | 'export.imag
  */
 export type ExportOutputErrorCode = 'export.outputIsMarkdown';
 
+/**
+ * L'export PDF ou hors ligne d'une présentation (L09-12) : les fichiers de reveal.js n'ont pu venir
+ * ni du cache ni du réseau ; la page d'impression ne s'est pas chargée, parce qu'une ressource
+ * demandée au réseau n'envoie plus rien (`resourceNotResponding`, adresses en
+ * `errorParams.resources`), parce qu'elle se télécharge encore au bout du plafond
+ * (`pageLoadTooLong`), ou sans rien de plus à en dire (`pageNotLoaded`) ; ou elle n'a pas été mise
+ * en pages dans le délai. Codes relatifs à `messages.*`.
+ */
+export type ExportPresentationErrorCode =
+  | 'presentation.assetsUnavailable'
+  | 'presentation.pageNotLoaded'
+  | 'presentation.resourceNotResponding'
+  | 'presentation.pageLoadTooLong'
+  | 'presentation.notRendered';
+
 /** Le résultat des services d'export, tel que le renderer le reçoit. */
 export interface ExportResult {
   success: boolean;
   outputPath?: string;
   error?: string;
-  errorCode?: ExportErrorCode | ExportImageErrorCode | ExportOutputErrorCode;
+  errorCode?: ExportErrorCode | ExportImageErrorCode | ExportOutputErrorCode | ExportPresentationErrorCode;
   /** Les paramètres du message d'un `errorCode` relatif à `messages.*`. */
   errorParams?: Record<string, string | number>;
   /** Avec `export_timed_out` : le message ne doit pas écrire ce nombre en dur. */

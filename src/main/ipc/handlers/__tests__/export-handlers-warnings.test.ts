@@ -33,7 +33,13 @@ vi.mock('../../../services/pdf-export.js', () => ({
 vi.mock('../../../services/word-export.js', () => ({
   wordExportService: { exportToWord: async () => h.result },
 }));
-vi.mock('../../../services/revealjs-export.js', () => ({ revealJsExportService: {} }));
+vi.mock('../../../services/revealjs-export.js', () => ({
+  revealJsExportService: {
+    exportToRevealJs: async () => h.result,
+    exportOffline: async () => h.result,
+    exportToPDF: async () => h.result,
+  },
+}));
 
 import { setupExportHandlers } from '../export-handlers.js';
 
@@ -58,7 +64,15 @@ beforeEach(() => {
   setupExportHandlers();
 });
 
-describe.each(['pdf-export:export', 'word-export:export'])('%s', (channel) => {
+// Les trois exports de présentation aussi (L09-12) : une formule que KaTeX n'a pas rendue est une
+// réserve du PDF, et la fenêtre de présentation la lit de la même façon.
+describe.each([
+  'pdf-export:export',
+  'word-export:export',
+  'revealjs-export:export',
+  'revealjs-export:export-offline',
+  'revealjs-export:export-pdf',
+])('%s', (channel) => {
   it('une réussite avec réserves : success, la valeur, et les avertissements dans l’enveloppe', async () => {
     h.result = { success: true, outputPath: '/tmp/projet/sortie', warnings: [IMAGE_WARNING] };
 

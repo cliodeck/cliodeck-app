@@ -24,9 +24,15 @@ vi.mock('electron', () => ({
       return '';
     },
   },
-  // Chromium n'imprime pas sous Vitest : seule l'écriture du fichier reçu est en jeu ici.
+  // Les téléchargements passent par `net.fetch` (pile réseau de Chromium) : au `fetch` simulé.
+  net: { fetch: (input: string, init?: RequestInit) => globalThis.fetch(input, init) },
+  // Chromium n'imprime pas sous Vitest : seule l'écriture du fichier reçu est en jeu ici. La
+  // sonde de mise en page répond que reveal.js a posé ses pages (`revealjs-export.test.ts`).
   BrowserWindow: class {
-    webContents = { printToPDF: async () => Buffer.from('%PDF-1.4\n') };
+    webContents = {
+      executeJavaScript: async () => 'ready',
+      printToPDF: async () => Buffer.from('%PDF-1.4\n'),
+    };
     loadFile() {
       return Promise.resolve();
     }

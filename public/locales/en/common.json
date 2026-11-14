@@ -2694,7 +2694,31 @@
       "imageNotConverted": "The PDF export cannot read the format of the image {{file}}. Save it as PNG or JPEG, then run the export again.",
       "beamerImageNotFound": "Image from the Beamer configuration not found or unreadable: {{file}}. The presentation is exported without it. Put it in the project folder, or correct its path in the Beamer configuration.",
       "imageFolderUnreachable": "The images in the folder {{dir}} could not be looked up: its path contains “{{char}}”, which the export tool reads as a separator. They are replaced by their captions. Rename the project folder without this character, then run the export again.",
-      "outputIsMarkdown": "“{{file}}” is a Markdown file: the export does not write to it, so as not to replace your text. Give the output file another name, then run the export again."
+      "outputIsMarkdown": "“{{file}}” is a Markdown file: the export does not write to it, so as not to replace your text. Give the output file another name, then run the export again.",
+      "chapterUnreadable": "Chapter left out: the file of “{{title}}” ({{file}}) cannot be found or read. The rest of the book is exported. Restore this file, or remove the chapter from the manuscript, then run the export again.",
+      "chapterOutsideProject": "Chapter left out: “{{title}}” goes through a link that leads outside the project ({{file}}) and is not exported. Replace that link with the real file, then run the export again.",
+      "chapterNotInManifest": "The chapter to export is no longer part of the manuscript: the exported document is empty. Open a chapter of the manuscript, then run the export again.",
+      "chapterCitationsNotResolved": "The citations of the chapter “{{title}}” ({{file}}) could not be formatted: Pandoc failed on this chapter, and they remain as keys in the PDF. Check the project's citation style and bibliography, then run the export again.",
+      "perChapterBibliographyIgnored": "The per-chapter bibliography set in the book settings is not followed: with a built-in citation style, the references are gathered in a single bibliography at the end of the book. Untick “Use a built-in citation style” for a per-chapter bibliography.",
+      "word": {
+        "templateIgnored": "The Word template {{file}} was not applied: it has no {content} field to hold the text, or ClioDeck could not read it. The document is exported without it.",
+        "templateRawMarkdown": "The Word template {{file}} was filled in: its {content} field receives the text as written, in Markdown, without formatting (headings, notes, italics). Remove this template from the project folder to get a formatted document.",
+        "citationsNotFormatted": "Citations not formatted, left as keys in the document: {{keys}}. Without Pandoc, ClioDeck formats them only with a citation style. Tick “Use a built-in citation style”, choose a style in the project settings, or install Pandoc.",
+        "imagesNotEmbedded_one": "Image not inserted, replaced by its caption: {{files}}. ClioDeck's own Word generator, used when the project has no bibliography or Pandoc is missing, cannot insert images.",
+        "imagesNotEmbedded_other": "Images not inserted, replaced by their captions: {{files}}. ClioDeck's own Word generator, used when the project has no bibliography or Pandoc is missing, cannot insert images."
+      }
+    },
+    "presentation": {
+      "assetsUnavailable": "The reveal.js files could not be downloaded, and the presentation export needs them. They are downloaded once, at the first PDF or self-contained HTML export, then kept on this computer. Check the Internet connection, then run the export again.",
+      "notRendered": "The presentation could not be laid out for printing: no PDF was written. Run the export again; if it fails again, export it as HTML (online), which loads reveal.js from the Internet when opened.",
+      "mathNotRendered": "The formulas of the presentation are not formatted in the PDF: their renderer (KaTeX) is downloaded from the Internet, which did not respond. They appear as written. Reconnect, then run the export again to format them.",
+      "pageNotLoaded": "The presentation could not be prepared for printing: it did not load in time. A resource it requests from the Internet (a remote image, for instance) may be the cause. No PDF was written. Check the Internet connection, then run the export again.",
+      "resourceNotResponding_one": "The presentation could not be prepared for printing: the address {{resources}}, which it requests from the Internet, has sent nothing for {{seconds}} s. No PDF was written. Check the Internet connection and this address, then run the export again.",
+      "resourceNotResponding_other": "The presentation could not be prepared for printing: the addresses {{resources}}, which it requests from the Internet, have sent nothing for {{seconds}} s. No PDF was written. Check the Internet connection and these addresses, then run the export again.",
+      "pageLoadTooLong_one": "The presentation could not be prepared for printing: after {{minutes}} min, the address {{resources}}, which it requests from the Internet, is still downloading. No PDF was written. Run the export again on a faster connection.",
+      "pageLoadTooLong_other": "The presentation could not be prepared for printing: after {{minutes}} min, the addresses {{resources}}, which it requests from the Internet, are still downloading. No PDF was written. Run the export again on a faster connection.",
+      "themeFontsMissing": "The fonts of the presentation's theme could not be downloaded: the document uses a substitute font. They are downloaded once, then kept on this computer. Check the Internet connection, then run the export again.",
+      "mathNotIncludedOffline": "The formulas of the presentation are not formatted in the self-contained HTML: their renderer (KaTeX) is downloaded from the Internet, which this format does without. They appear as written. Export as HTML (online) or as PDF to format them."
     }
   }
 }

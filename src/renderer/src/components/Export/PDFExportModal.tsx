@@ -200,8 +200,10 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
           return;
         }
 
+        // Le manifeste entier, chapitres manquants compris, comme la fenêtre Word : l'assembleur
+        // les omet et le dit (`warnings`). Écartés ici, le PDF sortait sans eux, sans un mot.
         manuscript = {
-          chapters: (chapters ?? []).filter((c) => !c.missing),
+          chapters: chapters ?? [],
           liveOverrides: openRel ? { [openRel]: liveContent } : undefined,
           scope:
             bookScope === 'chapter' && openChapter
