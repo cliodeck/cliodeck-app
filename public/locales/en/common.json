@@ -2201,7 +2201,7 @@
       "bibliographyPerChapter": "Per chapter",
       "numberChapters": "Number chapters",
       "numberSections": "Number sections",
-      "exportHint": "These settings drive manuscript assembly and exports (PDF, Word)."
+      "exportHint": "These settings drive manuscript assembly and the PDF export. In Word, notes are always footnotes and the bibliography a single one at the end of the book: “Note style”, “Note numbering” and “Bibliography” make no difference there. “Number chapters” and “Number sections” apply there when the export goes through Pandoc; ClioDeck's own Word generator, used when the project has no bibliography or Pandoc is missing, numbers no headings."
     },
     "exportInProgress": "An export is running. Wait for it to finish before renumbering the footnotes."
   },
