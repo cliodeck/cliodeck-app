@@ -1200,6 +1200,8 @@
     "outputPlaceholder": "/path/to/file.html",
     "noProjectOpen": "No project open",
     "enterTitle": "Please enter a title",
+    "bookNotSupported": "A book cannot be exported as a presentation: its chapters do not form a slide deck. Export it as PDF or Word.",
+    "emptyDeck": "{{file}} is empty: there are no slides to export.",
     "unknownError": "Unknown error during export",
     "exportError": "Export error",
     "exportSuccess": "Export successful! Presentation created at:",

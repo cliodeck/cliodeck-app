@@ -5,6 +5,10 @@ import { FileDown, X, AlertCircle, CheckCircle, WifiOff, FileType, Lightbulb } f
 type ExportMode = 'online' | 'offline' | 'pdf';
 import { useProjectStore } from '../../stores/projectStore';
 import { useEditorStore } from '../../stores/editorStore';
+import {
+  manuscriptFileName,
+  resolveManuscriptContent,
+} from '../../services/export-manuscript-content';
 import './PresentationExportModal.css';
 
 import { exportErrorMessage, exportThrownMessage } from './export-error';
@@ -20,7 +24,7 @@ interface PresentationExportModalProps {
 export const PresentationExportModal: React.FC<PresentationExportModalProps> = ({ isOpen, onClose }) => {
   const { t } = useTranslation('common');
   const { currentProject } = useProjectStore();
-  const { content } = useEditorStore();
+  const { filePath, getLiveContent } = useEditorStore();
 
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -80,6 +84,13 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
       return;
     }
 
+    // Un livre n'a pas de document unique à découper en diapositives (Q43) : le
+    // refuser en le disant, plutôt qu'exporter le chapitre ouvert.
+    if (currentProject.type === 'book') {
+      setError(t('presentation.bookNotSupported'));
+      return;
+    }
+
     if (!title) {
       setError(t('presentation.enterTitle'));
       return;
@@ -90,15 +101,34 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
     setSuccess(false);
 
     try {
+      // Le manuscrit, pas le fichier ouvert : une note de lecture ouverte depuis la
+      // bibliographie partait en diaporama sous le titre du projet, et « Nouveau
+      // fichier » envoyait une chaîne vide. slides.md pour une présentation,
+      // document.md pour un article ; le texte vivant quand c'est lui qui est ouvert.
+      const readLimit = startExportReadLimit();
+      const resolved = await readLimit(
+        resolveManuscriptContent(currentProject.path, currentProject.type, filePath, getLiveContent)
+      );
+      if (!resolved.ok) {
+        setError(t('export.manuscriptUnreadable', { file: resolved.missingFile }));
+        setIsExporting(false);
+        return;
+      }
+      if (resolved.content.trim() === '') {
+        setError(t('presentation.emptyDeck', { file: manuscriptFileName(currentProject.type) }));
+        setIsExporting(false);
+        return;
+      }
+
       // Load reveal.js config if it exists
       const config =
-        (await startExportReadLimit()(
+        (await readLimit(
           readOptionalConfig<Record<string, unknown>>(`${currentProject.path}/reveal-config.json`)
         )) ?? {};
 
       const exportOptions = {
         projectPath: currentProject.path,
-        content: content,
+        content: resolved.content,
         outputPath: outputPath,
         metadata: {
           title,
@@ -122,6 +152,9 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
         result = await window.electron.revealJsExport.export(exportOptions);
       }
 
+      // Le main résout un chemin relatif contre le projet : le champ, et le message
+      // de succès qui le reprend, disent où le fichier est écrit.
+      if (result.success && typeof result.outputPath === 'string') setOutputPath(result.outputPath);
       if (result.success) {
         setSuccess(true);
         afterSuccess(() => {

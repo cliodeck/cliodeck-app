@@ -1200,6 +1200,8 @@
     "outputPlaceholder": "/pfad/zur/datei.html",
     "noProjectOpen": "Kein Projekt geöffnet",
     "enterTitle": "Bitte geben Sie einen Titel ein",
+    "bookNotSupported": "Ein Buch lässt sich nicht als Präsentation exportieren: Seine Kapitel bilden keinen Foliensatz. Exportieren Sie es als PDF oder Word.",
+    "emptyDeck": "{{file}} ist leer: Es gibt keine Folien zu exportieren.",
     "unknownError": "Unbekannter Fehler beim Export",
     "exportError": "Exportfehler",
     "exportSuccess": "Export erfolgreich! Präsentation erstellt unter:",

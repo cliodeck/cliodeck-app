@@ -1200,6 +1200,8 @@
     "outputPlaceholder": "/chemin/vers/fichier.html",
     "noProjectOpen": "Aucun projet ouvert",
     "enterTitle": "Veuillez entrer un titre",
+    "bookNotSupported": "Un livre ne s'exporte pas en présentation : ses chapitres ne forment pas un diaporama. Exportez-le en PDF ou en Word.",
+    "emptyDeck": "{{file}} est vide : aucune diapositive à exporter.",
     "unknownError": "Erreur inconnue lors de l'export",
     "exportError": "Erreur lors de l'export",
     "exportSuccess": "Export réussi! Présentation créée à:",
