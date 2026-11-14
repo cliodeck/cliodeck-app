@@ -155,7 +155,11 @@ Réglages consommés :
 **Word** ([`word-export.ts`](../src/main/services/word-export.ts)) : une
 section docx par chapitre (saut de page), table des matières, liminaires.
 Les notes manuelles de l'auteur ont leur propre espace d'identifiants,
-disjoint de celui du moteur de citations.
+disjoint de celui du moteur de citations. Sans pandoc, la bibliographie
+du moteur est la dernière section, titrée au niveau 1 pour la table des
+matières (L10-6). Par pandoc comme sans lui, le Word n'a qu'une
+bibliographie, en fin d'ouvrage : `bibliography: per-chapter` ne vaut
+que pour le PDF.
 
 **Recettes** : le step `export` assemble le livre entier à défaut de
 `document_id`, et transmet le vrai type de projet.

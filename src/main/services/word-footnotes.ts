@@ -1,4 +1,6 @@
-import { collectFootnotes } from '../../editor/footnote-tools.js';
+import { parser as markdownParser, GFM } from '@lezer/markdown';
+import { collectFootnoteDefinitions } from '../../editor/footnote-tools.js';
+import { Footnotes, PandocCitations } from '../../editor/lezer-extensions/index.js';
 
 /**
  * Notes de bas de page manuelles pour l'export Word.
@@ -14,8 +16,12 @@ import { collectFootnotes } from '../../editor/footnote-tools.js';
  * 2. Hors pipeline moteur, `marked` n'a aucune extension de notes : les
  *    `[^1]` sortaient en texte littéral dans le .docx.
  *
- * La détection passe par l'arbre Lezer (`collectFootnotes`) : un `[^99]`
- * dans un bloc de code n'est pas une note et reste intact.
+ * La détection passe par l'arbre Lezer : un `[^99]` dans un bloc de code
+ * n'est pas une note et reste intact. La réécriture aussi, aux positions
+ * (S12-1-16) : définitions prises par `collectFootnoteDefinitions`, appels
+ * hors code (`footnoteCalls`). Une regex globale changeait les appels
+ * jusque dans le code, et le retrait ligne à ligne ôtait une ligne
+ * `[^1]: …` d'un bloc de code, dont le texte écrasait la vraie note.
  */
 
 export interface ManualFootnote {
@@ -23,7 +29,7 @@ export interface ManualFootnote {
   label: string;
   /** Identifiant numérique attribué dans le document docx. */
   id: number;
-  /** Texte de la définition, markdown brut. */
+  /** Texte de la définition, markdown brut, ses paragraphes séparés par `\n\n`. */
   text: string;
 }
 
@@ -33,8 +39,53 @@ export interface ExtractedFootnotes {
   footnotes: ManualFootnote[];
 }
 
-/** Début d'un bloc de définition `[^label]: …` en tête de ligne. */
-const DEFINITION_LINE = /^\[\^([^\]\s]+)\]:[ \t]?(.*)$/;
+const literalParser = markdownParser.configure([GFM, Footnotes, PandocCitations]);
+
+/** Là où un `[^…]` n'est pas un appel : code (bloc ou extrait) et crochet échappé. */
+const LITERAL_NODES = new Set(['FencedCode', 'CodeBlock', 'InlineCode', 'Escape']);
+
+/**
+ * Appels de notes `[^label]` dont l'étiquette est retenue, positions du marqueur entier, ordre du
+ * document : hors code et hors crochet échappé, d'après l'arbre Lezer. Les nœuds d'appel de
+ * l'arbre ne suffisent pas : Lezer lit `![^1]` comme un début d'image, pandoc comme « ! » suivi
+ * d'un appel (mesuré, pandoc 3.13). Avec eux seuls, l'appel posé après un point d'exclamation, à
+ * la française, sortirait en clair.
+ */
+function footnoteCalls(
+  markdown: string,
+  wanted: (label: string) => boolean
+): Array<{ label: string; from: number; to: number }> {
+  const literal: Array<{ from: number; to: number }> = [];
+  literalParser.parse(markdown).iterate({
+    enter: (node) => {
+      if (!LITERAL_NODES.has(node.name)) return;
+      literal.push({ from: node.from, to: node.to });
+      return false;
+    },
+  });
+  const calls: Array<{ label: string; from: number; to: number }> = [];
+  for (const m of markdown.matchAll(/\[\^([^\]\s[]+)\]/g)) {
+    const from = m.index;
+    if (!wanted(m[1]) || literal.some((r) => from >= r.from && from < r.to)) continue;
+    calls.push({ label: m[1], from, to: from + m[0].length });
+  }
+  return calls;
+}
+
+/**
+ * Texte d'une note : le corps de sa définition, retrait de continuation ôté. Ses paragraphes
+ * restent séparés par une ligne vide (S12-2-6 : ils étaient joints par une espace, en un seul) ;
+ * les lignes d'un même paragraphe se joignent par une espace. Le découpage reconnaît aussi le
+ * CRLF, que l'éditeur garde d'un fichier écrit ainsi (`detectLineSeparator`) : sans quoi la note
+ * d'un tel fichier sortait en un seul paragraphe.
+ */
+function noteText(body: string): string {
+  return body
+    .split(/\r?\n[ \t]*\r?\n/)
+    .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
+    .filter((paragraph) => paragraph !== '')
+    .join('\n\n');
+}
 
 /**
  * Extrait les notes manuelles d'un markdown : retire leurs définitions du
@@ -47,44 +98,17 @@ export function extractManualFootnotes(
   markdown: string,
   reservedIds: number[] = []
 ): ExtractedFootnotes {
-  const occurrences = collectFootnotes(markdown);
-  if (occurrences.length === 0) return { markdown, footnotes: [] };
+  const definitions = collectFootnoteDefinitions(markdown);
+  if (definitions.length === 0) return { markdown, footnotes: [] };
 
-  const definedLabels = new Set(
-    occurrences.filter((o) => o.kind === 'definition').map((o) => o.label)
-  );
-  if (definedLabels.size === 0) return { markdown, footnotes: [] };
+  // La dernière définition d'une étiquette l'emporte, comme chez pandoc.
+  const texts = new Map<string, string>();
+  for (const def of definitions) texts.set(def.label, noteText(markdown.slice(def.bodyFrom, def.to)));
 
-  // Les définitions vivent en tête de ligne : on les retire ligne à ligne,
-  // en emportant leurs lignes de continuation indentées.
-  const lines = markdown.split('\n');
-  const bodyLines: string[] = [];
-  const texts = new Map<string, string[]>();
-  let current: string | null = null;
-
-  for (const line of lines) {
-    const m = line.match(DEFINITION_LINE);
-    if (m && definedLabels.has(m[1])) {
-      current = m[1];
-      texts.set(current, [m[2] ?? '']);
-      continue;
-    }
-    if (current !== null) {
-      // Continuation : ligne indentée, ou ligne vide suivie d'une indentation.
-      if (/^\s+\S/.test(line)) {
-        texts.get(current)!.push(line.trim());
-        continue;
-      }
-      if (line.trim() === '') {
-        // Une ligne vide ne clôt pas forcément la note ; on la garde en
-        // attente et la prochaine ligne tranche.
-        texts.get(current)!.push('');
-        continue;
-      }
-      current = null;
-    }
-    bodyLines.push(line);
-  }
+  // Seuls les appels hors définition deviennent des notes : celui qu'une
+  // note contient reste dans son texte, qui part avec elle.
+  const inDefinition = (pos: number): boolean => definitions.some((d) => pos >= d.from && pos < d.to);
+  const calls = footnoteCalls(markdown, (label) => texts.has(label)).filter((c) => !inDefinition(c.from));
 
   // Attribution des identifiants docx : on préfère l'étiquette numérique de
   // l'auteur (le lecteur retrouve ses numéros) et on complète pour les
@@ -107,28 +131,42 @@ export function extractManualFootnotes(
 
   const idByLabel = new Map<string, number>();
   // Ordre d'apparition des APPELS : c'est l'ordre de lecture.
-  for (const occ of occurrences) {
-    if (occ.kind !== 'reference' || !definedLabels.has(occ.label)) continue;
-    if (idByLabel.has(occ.label)) continue;
-    idByLabel.set(occ.label, takeId(occ.label));
+  for (const call of calls) {
+    if (!idByLabel.has(call.label)) idByLabel.set(call.label, takeId(call.label));
   }
   // Définitions jamais appelées : elles gardent une place, sans appel.
-  for (const label of definedLabels) {
+  for (const label of texts.keys()) {
     if (!idByLabel.has(label)) idByLabel.set(label, takeId(label));
   }
 
   for (const [label, id] of idByLabel) {
-    const text = (texts.get(label) ?? []).join(' ').replace(/\s+/g, ' ').trim();
-    footnotes.push({ label, id, text });
+    footnotes.push({ label, id, text: texts.get(label) ?? '' });
   }
   footnotes.sort((a, b) => a.id - b.id);
 
-  // Remplacement des appels dans le corps restant.
-  let body = bodyLines.join('\n');
-  for (const [label, id] of idByLabel) {
-    const escaped = label.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
-    body = body.replace(new RegExp(`\\[\\^${escaped}\\]`, 'g'), `{{FN:${id}}}`);
-  }
+  // Définitions retirées, appels remplacés, de la fin vers le début : les
+  // positions restent valides.
+  const edits = [
+    ...definitions.map((d) => ({ from: d.from, to: d.to, insert: '' })),
+    ...calls.map((c) => ({ from: c.from, to: c.to, insert: `{{FN:${idByLabel.get(c.label)}}}` })),
+  ].sort((a, b) => b.from - a.from);
+  let body = markdown;
+  for (const edit of edits) body = body.slice(0, edit.from) + edit.insert + body.slice(edit.to);
 
   return { markdown: body, footnotes };
+}
+
+/**
+ * Appels de notes produits par le moteur de citations (`[^n]`, n dans `numbers`) → `{{FN:n}}`,
+ * hors code. Une regex globale frappait aussi un `[^n]` de bloc ou d'extrait de code, que la
+ * numérotation des notes ne compte pas : le moteur avait pu produire une note n.
+ */
+export function placeEngineFootnoteCalls(markdown: string, numbers: number[]): string {
+  const wanted = new Set(numbers.map(String));
+  const calls = footnoteCalls(markdown, (label) => wanted.has(label));
+  let out = markdown;
+  for (let i = calls.length - 1; i >= 0; i--) {
+    out = out.slice(0, calls[i].from) + `{{FN:${calls[i].label}}}` + out.slice(calls[i].to);
+  }
+  return out;
 }

@@ -19,7 +19,7 @@ import {
   MarkdownToWordParser,
   inlineMarkdownRuns,
   markdownImages,
-  ORDERED_LIST_NUMBERING,
+  orderedListNumbering,
   type BlockChild,
 } from './word-markdown.js';
 import { CitationEngine, type StyleProblem } from '../../../backend/core/citation/CitationEngine.js';
@@ -28,7 +28,7 @@ import {
   processMarkdownCitations,
   type ProcessedFootnote,
 } from './citation-pipeline.js';
-import { extractManualFootnotes } from './word-footnotes.js';
+import { extractManualFootnotes, placeEngineFootnoteCalls } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
 import { assembleManuscript } from './manuscript-assembler.js';
 import { refuseMarkdownOutput } from './export-output-path.js';
@@ -208,8 +208,6 @@ export async function templateDeclaresContent(templatePath: string): Promise<boo
 // MARK: - Service
 
 export class WordExportService {
-  private parser = new MarkdownToWordParser();
-
   /**
    * PATH des outils d'export : voir `backend/core/tools/external-tools.ts` (emplacements ajoutés
    * hors Windows, où le PATH part tel quel).
@@ -647,10 +645,11 @@ export class WordExportService {
           // Seuls les marqueurs PRODUITS par le moteur deviennent des
           // placeholders : les notes de l'auteur sont traitées plus bas, avec
           // leurs définitions. Auparavant, un `[^1]` manuel était converti ici
-          // et pointait vers la note d'une citation.
-          const engineNumbers = new Set(processed.footnotes.map((f) => f.n));
-          sourceMarkdown = processed.md.replace(/\[\^(\d+)\]/g, (marker, n: string) =>
-            engineNumbers.has(parseInt(n, 10)) ? `{{FN:${n}}}` : marker
+          // et pointait vers la note d'une citation. Aux positions de l'arbre :
+          // un `[^1]` de bloc de code reste du code.
+          sourceMarkdown = placeEngineFootnoteCalls(
+            processed.md,
+            processed.footnotes.map((f) => f.n)
           );
           engineFootnotes = processed.footnotes;
           engineBibliography = processed.bibliography;
@@ -701,23 +700,29 @@ export class WordExportService {
       const chapterChunks: string[] = isBook
         ? splitIntoChapters(sourceMarkdown)
         : [sourceMarkdown];
+      // Un parseur par export : il relève les départs des listes numérotées (résumé compris), que
+      // le document déclare. Celui du service vivait autant que l'app, et ses comptes passaient
+      // d'un export à l'autre.
+      const parser = new MarkdownToWordParser();
       const chapterParagraphs: BlockChild[][] = [];
       for (const chunk of chapterChunks) {
-        chapterParagraphs.push(this.parser.parse(chunk));
+        chapterParagraphs.push(parser.parse(chunk));
       }
-      const contentParagraphs = chapterParagraphs.flat();
 
-      // Append bibliography section if we have entries.
+      // La bibliographie à part : à la suite du texte d'un article ; en dernière section d'un
+      // livre, au premier niveau de titre, que sa table des matières reprend. Ajoutée aux seuls
+      // paragraphes de l'article, elle se perdait dans un livre, construit par chapitres (S12-1-23).
+      const bibliographyParagraphs: BlockChild[] = [];
       if (engineBibliography.length > 0) {
-        contentParagraphs.push(
+        bibliographyParagraphs.push(
           new Paragraph({
             text: sectionTitle,
-            heading: HeadingLevel.HEADING_2,
+            heading: isBook ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2,
             spacing: { before: 400, after: 200 },
           })
         );
         for (const entry of engineBibliography) {
-          contentParagraphs.push(
+          bibliographyParagraphs.push(
             new Paragraph({
               children: inlineMarkdownRuns(entry),
               spacing: { after: 120 },
@@ -725,6 +730,7 @@ export class WordExportService {
           );
         }
       }
+      const contentParagraphs = [...chapterParagraphs.flat(), ...bibliographyParagraphs];
 
       onProgress?.({
         stage: 'generating',
@@ -803,7 +809,7 @@ export class WordExportService {
             })
           );
 
-          titlePageChildren.push(...this.parser.parse(abstract, { size: 24 }));
+          titlePageChildren.push(...parser.parse(abstract, { size: 24 }));
         }
 
         if (isBook) {
@@ -821,7 +827,7 @@ export class WordExportService {
               new TableOfContents('Sommaire', { hyperlink: true, headingStyleRange: '1-3' }),
             ],
           });
-          for (const paragraphs of chapterParagraphs) {
+          for (const paragraphs of [...chapterParagraphs, bibliographyParagraphs]) {
             if (paragraphs.length === 0) continue;
             sections.push({
               properties: { page: { pageNumbers: { start: undefined } } },
@@ -905,10 +911,11 @@ export class WordExportService {
           children: [new Paragraph({ children: inlineMarkdownRuns(fn.text) })],
         };
       }
-      // Notes de l'auteur : identifiants disjoints de ceux du moteur.
+      // Notes de l'auteur : identifiants disjoints de ceux du moteur. Un paragraphe docx par
+      // paragraphe de la note (S12-2-6) ; docx ne pose l'appel que sur le premier.
       for (const fn of manual.footnotes) {
         docxFootnotes[String(fn.id)] = {
-          children: [new Paragraph({ children: inlineMarkdownRuns(fn.text) })],
+          children: fn.text.split('\n\n').map((text) => new Paragraph({ children: inlineMarkdownRuns(text) })),
         };
       }
 
@@ -920,7 +927,8 @@ export class WordExportService {
         title: title || 'Document',
         description: abstract || '',
         sections,
-        numbering: ORDERED_LIST_NUMBERING,
+        // Après le résumé : ses listes comptent aussi.
+        numbering: orderedListNumbering(parser.usedListStarts()),
         ...(Object.keys(docxFootnotes).length > 0 ? { footnotes: docxFootnotes } : {}),
       });
 

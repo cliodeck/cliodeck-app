@@ -46,30 +46,55 @@ export interface InlineStyle {
   link?: boolean;
 }
 
-/** Référence de la numérotation des listes ordonnées, à déclarer au document. */
+/** Préfixe des références de numérotation des listes ordonnées, à déclarer au document. */
 export const ORDERED_LIST_REFERENCE = 'cliodeck-ordered';
 
-export const ORDERED_LIST_NUMBERING: INumberingOptions = {
-  config: [
-    {
-      reference: ORDERED_LIST_REFERENCE,
-      levels: [0, 1, 2, 3, 4, 5].map((level) => ({
-        level,
-        format: LevelFormat.DECIMAL,
-        text: `%${level + 1}.`,
-        alignment: AlignmentType.START,
-        style: {
-          paragraph: {
-            indent: {
-              left: convertInchesToTwip(0.5 * (level + 1)),
-              hanging: convertInchesToTwip(0.25),
-            },
-          },
-        },
-      })),
-    },
-  ],
-};
+/** Niveaux d'imbrication déclarés pour les listes ordonnées ; au-delà, le dernier sert. */
+const ORDERED_LIST_DEPTH = 6;
+
+/**
+ * Référence de numérotation d'une liste ordonnée qui commence à `start`, imbriquée au niveau
+ * `level`. Une par départ : docx reprend le départ du niveau 0 de la référence dans la surcharge
+ * (`startOverride`) de chaque liste. Une seule référence, déclarée à 1, faisait commencer à 1 la
+ * liste « 3. », « 4. » (S12-2-5).
+ *
+ * Une par niveau aussi, et toute liste se numérote au niveau 0 de la sienne : docx ne pose la
+ * surcharge de départ qu'au niveau 0 (`createConcreteNumberingInstance`, docx 9). Une sous-liste
+ * numérotée au niveau 1 n'en avait pas, et ses sous-points continuaient d'une sous-liste à
+ * l'autre : sous « 4. », le premier sortait « 3. » (revue de L10-6).
+ */
+export function orderedListReference(start: number, level = 0): string {
+  const depth = Math.min(Math.max(level, 0), ORDERED_LIST_DEPTH - 1);
+  return depth === 0 ? `${ORDERED_LIST_REFERENCE}-${start}` : `${ORDERED_LIST_REFERENCE}-${start}-L${depth}`;
+}
+
+/**
+ * Numérotation à déclarer au document : pour chaque départ relevé (`usedListStarts`), une référence
+ * par niveau d'imbrication. Chaque liste, imbriquée ou non, a sa propre instance, au niveau 0 de la
+ * référence de son départ et de son niveau : elle commence à son départ, et son retrait est celui
+ * de son niveau. Les niveaux suivants de chaque référence suivent, pour la touche Tab de Word.
+ */
+export function orderedListNumbering(starts: Iterable<number>): INumberingOptions {
+  const indent = (depth: number) => ({
+    left: convertInchesToTwip(0.5 * (depth + 1)),
+    hanging: convertInchesToTwip(0.25),
+  });
+  return {
+    config: [...new Set(starts)].flatMap((start) =>
+      Array.from({ length: ORDERED_LIST_DEPTH }, (_, listLevel) => ({
+        reference: orderedListReference(start, listLevel),
+        levels: Array.from({ length: ORDERED_LIST_DEPTH - listLevel }, (_, level) => ({
+          level,
+          format: LevelFormat.DECIMAL,
+          text: `%${level + 1}.`,
+          alignment: AlignmentType.START,
+          start,
+          style: { paragraph: { indent: indent(listLevel + level) } },
+        })),
+      }))
+    ),
+  };
+}
 
 /** Appel de note posé par les étapes amont : `{{FN:12}}`. */
 const FOOTNOTE_PLACEHOLDER = /(\{\{FN:\d+\}\})/;
@@ -226,6 +251,9 @@ export function inlineRuns(tokens: Token[], base: InlineStyle = {}): InlineChild
   return out;
 }
 
+/** Appel de note, ou deux, collés à un « ! » : `![^2]`, `![^1][^2]`. */
+const FOOTNOTE_CALL_AFTER_BANG = /^!(?:\[\^[^\]\s[]+\])+$/;
+
 /**
  * Les images d'un markdown, par leur chemin, sans doublon : le générateur interne ne sait pas les
  * insérer et les remplace par leur légende (`inlineRuns`), ce que l'export doit dire.
@@ -233,10 +261,14 @@ export function inlineRuns(tokens: Token[], base: InlineStyle = {}): InlineChild
 export function markdownImages(markdown: string): string[] {
   const files = new Set<string>();
   marked.walkTokens(marked.lexer(markdown), (token) => {
-    if (token.type === 'image') files.add(decodeEntities((token as Tokens.Image).href));
+    // `![^2]` avec `[^2]: Ibid.` : marked y lit une image par référence, pandoc « ! » et un appel.
+    if (token.type === 'image' && !FOOTNOTE_CALL_AFTER_BANG.test(token.raw)) {
+      files.add(decodeEntities((token as Tokens.Image).href));
+    }
   });
   return [...files];
 }
+
 
 /** Texte en ligne (markdown, ou HTML léger de citeproc) → enfants de paragraphe. */
 export function inlineMarkdownRuns(text: string, base: InlineStyle = {}): InlineChild[] {
@@ -260,16 +292,25 @@ const HEADING_LEVELS: Record<number, (typeof HeadingLevel)[keyof typeof HeadingL
 };
 
 /**
- * Parse markdown to Word document elements
+ * Parse markdown to Word document elements.
+ *
+ * Un parseur par document : il compte ses listes ordonnées et relève leurs départs, que le
+ * document déclare ensuite (`orderedListNumbering(parser.usedListStarts())`).
  */
 export class MarkdownToWordParser {
   private blocks: BlockChild[] = [];
   private orderedLists = 0;
+  private listStarts = new Set<number>();
 
   parse(markdownContent: string, style: InlineStyle = {}): BlockChild[] {
     this.blocks = [];
     this.processTokens(marked.lexer(markdownContent), { quoteDepth: 0, style });
     return this.blocks;
+  }
+
+  /** Les départs des listes ordonnées rencontrées depuis la création du parseur. */
+  usedListStarts(): number[] {
+    return [...this.listStarts];
   }
 
   private processTokens(tokens: Token[], ctx: BlockContext): void {
@@ -352,6 +393,8 @@ export class MarkdownToWordParser {
 
   private addList(list: Tokens.List, level: number, ctx: BlockContext): void {
     const instance = list.ordered ? ++this.orderedLists : 0;
+    const start = list.ordered && typeof list.start === 'number' ? list.start : 1;
+    if (list.ordered) this.listStarts.add(start);
     for (const item of list.items) {
       let first = true;
       for (const child of item.tokens) {
@@ -374,7 +417,7 @@ export class MarkdownToWordParser {
             // suivants s'alignent sur son texte.
             ...(first
               ? list.ordered
-                ? { numbering: { reference: ORDERED_LIST_REFERENCE, level, instance } }
+                ? { numbering: { reference: orderedListReference(start, level), level: 0, instance } }
                 : { bullet: { level } }
               : { indent: { left: convertInchesToTwip(0.5 * (level + 1)) } }),
             spacing: { after: 100 },

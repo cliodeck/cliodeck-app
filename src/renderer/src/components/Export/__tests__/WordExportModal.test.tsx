@@ -2,8 +2,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 
-vi.mock('../../../stores/projectStore', () => ({
-  useProjectStore: () => ({
+// Un article par défaut ; le test du livre remplace le projet et le fichier ouvert.
+const stores = vi.hoisted(() => {
+  const article = {
     currentProject: {
       name: 'demo',
       path: '/tmp/demo',
@@ -11,16 +12,22 @@ vi.mock('../../../stores/projectStore', () => ({
       bibliography: '/tmp/demo/biblio.bib',
       cslPath: '',
     },
-  }),
-}));
-// Le manuscrit de l'article est le fichier ouvert : l'export doit alors
-// prendre le texte VIVANT de l'éditeur, pas relire le disque.
-vi.mock('../../../stores/editorStore', () => ({
-  useEditorStore: () => ({
+  } as Record<string, unknown>;
+  // Le manuscrit de l'article est le fichier ouvert : l'export doit alors
+  // prendre le texte VIVANT de l'éditeur, pas relire le disque.
+  const editor = {
     content: 'Some body [@smith2020]',
     filePath: '/tmp/demo/document.md',
     getLiveContent: () => 'Some body [@smith2020]',
-  }),
+  };
+  return { article, project: article, editor };
+});
+
+vi.mock('../../../stores/projectStore', () => ({
+  useProjectStore: Object.assign(() => stores.project, { getState: () => stores.project }),
+}));
+vi.mock('../../../stores/editorStore', () => ({
+  useEditorStore: Object.assign(() => stores.editor, { getState: () => stores.editor }),
 }));
 
 import { WordExportModal } from '../WordExportModal';
@@ -139,5 +146,65 @@ describe('WordExportModal : métadonnées', () => {
   it('auteur saisi : il part tel quel', async () => {
     const payload = await exportPayload('Frédéric Clavert');
     expect(payload.metadata?.author).toBe('Frédéric Clavert');
+  });
+});
+
+/**
+ * S12-2-4 : livre, portée « Chapitre courant », et le fichier ouvert n'est pas un chapitre
+ * (`abstract.md`, une note de lecture). La fenêtre Word retombait sans un mot sur tout l'ouvrage,
+ * sous le nom et avec le message d'un tirage de travail. La fenêtre PDF refuse : même garde.
+ */
+describe('WordExportModal : livre, chapitre courant sans chapitre ouvert', () => {
+  afterEach(() => {
+    cleanup();
+    stores.project = stores.article;
+    stores.editor = {
+      content: 'Some body [@smith2020]',
+      filePath: '/tmp/demo/document.md',
+      getLiveContent: () => 'Some body [@smith2020]',
+    };
+  });
+
+  function openBook(openFile: string): ReturnType<typeof vi.fn> {
+    stores.project = {
+      currentProject: { name: 'livre', path: '/tmp/livre', type: 'book', bibliography: '', cslPath: '' },
+      chapters: [
+        { id: 'a', title: 'Ouverture', filePath: 'chapters/01.md', order: 0 },
+        { id: 'b', title: 'Suite', filePath: 'chapters/02.md', order: 1 },
+      ],
+      bookSettings: {},
+    };
+    stores.editor = { content: 'Résumé.', filePath: openFile, getLiveContent: () => 'Résumé.' };
+    const exportSpy = vi.fn().mockResolvedValue({ success: true });
+    installElectron(exportSpy);
+    render(<WordExportModal isOpen onClose={() => undefined} />);
+    fireEvent.change(screen.getByLabelText('export.scope.label'), { target: { value: 'chapter' } });
+    return exportSpy;
+  }
+
+  it('abstract.md ouvert : l’erreur est dite, et rien ne part au main', async () => {
+    const exportSpy = openBook('/tmp/livre/abstract.md');
+    const exportBtn = await screen.findByRole('button', { name: 'export.word.export' });
+    await waitFor(() => expect(exportBtn).not.toBeDisabled());
+    fireEvent.click(exportBtn);
+
+    expect(await screen.findByText('export.pdf.noChapterOpen')).toBeInTheDocument();
+    expect(exportSpy).not.toHaveBeenCalled();
+    // La fenêtre reste utilisable : l'auteur ouvre un chapitre ou choisit tout l'ouvrage.
+    expect(exportBtn).not.toBeDisabled();
+  });
+
+  it('un chapitre ouvert : seul lui part, avec son texte vivant', async () => {
+    const exportSpy = openBook('/tmp/livre/chapters/02.md');
+    const exportBtn = await screen.findByRole('button', { name: 'export.word.export' });
+    await waitFor(() => expect(exportBtn).not.toBeDisabled());
+    fireEvent.click(exportBtn);
+
+    await waitFor(() => expect(exportSpy).toHaveBeenCalledTimes(1));
+    const payload = exportSpy.mock.calls[0][0] as {
+      manuscript?: { scope?: unknown; liveOverrides?: Record<string, string> };
+    };
+    expect(payload.manuscript?.scope).toEqual({ chapterId: 'b' });
+    expect(payload.manuscript?.liveOverrides).toEqual({ 'chapters/02.md': 'Résumé.' });
   });
 });

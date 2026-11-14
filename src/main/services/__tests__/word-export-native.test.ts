@@ -30,6 +30,47 @@ let dir: string;
 /** Texte seul d'une partie du docx, balises retirées. */
 const plain = (xml: string): string => xml.replace(/<[^>]+>/g, '');
 
+/** Le XML d'une note de bas de page, par son identifiant. */
+function footnoteXml(footnotes: string, id: number): string {
+  return footnotes.match(new RegExp(`<w:footnote\\b[^>]*w:id="${id}"[^>]*>.*?</w:footnote>`, 's'))?.[0] ?? '';
+}
+
+/** La numérotation d'un paragraphe de liste : son instance (`numId`) et le niveau qu'il emploie (`ilvl`). */
+function listParagraph(document: string, numbering: string, text: string): { num: string; ilvl: string } | undefined {
+  const paragraph = document.split('</w:p>').find((p) => plain(p).includes(text));
+  const numId = paragraph?.match(/<w:numId w:val="(\d+)"\/>/)?.[1];
+  const ilvl = paragraph?.match(/<w:ilvl w:val="(\d+)"\/>/)?.[1];
+  if (!numId || !ilvl) return undefined;
+  const num = numbering.match(new RegExp(`<w:num w:numId="${numId}"[^>]*>.*?</w:num>`, 's'))?.[0];
+  return num ? { num, ilvl } : undefined;
+}
+
+/**
+ * Le numéro par lequel commence la liste d'un paragraphe : la surcharge de départ (`startOverride`)
+ * de sa numérotation dans `numbering.xml`, au niveau que le paragraphe emploie. docx ne la pose
+ * qu'au niveau 0 : un paragraphe d'un autre niveau n'en a pas, et son compteur ne repart pas.
+ */
+function listStartOf(document: string, numbering: string, text: string): number | undefined {
+  const list = listParagraph(document, numbering, text);
+  const start = list?.num.match(
+    new RegExp(`<w:lvlOverride w:ilvl="${list.ilvl}"><w:startOverride w:val="(\\d+)"\\/>`)
+  )?.[1];
+  return start === undefined ? undefined : Number(start);
+}
+
+/** Le retrait gauche (twips) du niveau qu'emploie un paragraphe de liste. */
+function listIndentOf(document: string, numbering: string, text: string): number | undefined {
+  const list = listParagraph(document, numbering, text);
+  const abstractId = list?.num.match(/<w:abstractNumId w:val="(\d+)"\/>/)?.[1];
+  if (!list || !abstractId) return undefined;
+  const abstract = numbering.match(
+    new RegExp(`<w:abstractNum w:abstractNumId="${abstractId}"[^>]*>.*?</w:abstractNum>`, 's')
+  )?.[0];
+  const level = abstract?.match(new RegExp(`<w:lvl w:ilvl="${list.ilvl}"[^>]*>.*?</w:lvl>`, 's'))?.[0];
+  const left = level?.match(/<w:ind w:left="(\d+)"/)?.[1];
+  return left === undefined ? undefined : Number(left);
+}
+
 async function exportNative(
   content: string,
   extra: {
@@ -49,6 +90,7 @@ async function exportNative(
   contentTypes: string;
   /** Propriétés du document (`docProps/core.xml`) : auteur, dernier modificateur. */
   core: string;
+  numbering: string;
   unresolved?: string[];
   warnings?: OutcomeIssue[];
 }> {
@@ -80,6 +122,7 @@ async function exportNative(
     rels: read('word/_rels/footnotes.xml.rels') + read('word/_rels/document.xml.rels'),
     contentTypes: read('[Content_Types].xml'),
     core: read('docProps/core.xml'),
+    numbering: read('word/numbering.xml'),
     unresolved: result.unresolvedCitations,
     warnings: result.warnings,
   };
@@ -231,6 +274,57 @@ describe('générateur docx interne : citations par le moteur', () => {
     // Pas de note dans la note : aucun appel littéral.
     expect(plain(footnotes)).not.toMatch(/\[\^\d+\]/);
     expect(plain(document)).toContain('repris par Farge,');
+  });
+
+  /**
+   * Même famille que S12-1-16 : les appels du moteur devenaient `{{FN:n}}` par une regex globale.
+   * Un `[^1]` dans un bloc de code, que la numérotation des notes ne compte pas, était frappé dès
+   * que le moteur produisait une note 1, et le code affichait `{{FN:1}}`.
+   */
+  it('un `[^1]` dans un bloc de code reste intact quand le moteur produit une note 1', async () => {
+    const { document, footnotes } = await exportNative(
+      'Texte cité [@Farge_2013].\n\n```\nexemple[^1]\n```\n\nUn `[^1]` en ligne.\n',
+      { citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' } }
+    );
+    expect(plain(document)).toContain('exemple[^1]');
+    expect(plain(document)).toContain('Un [^1] en ligne.');
+    expect(plain(document)).not.toContain('{{FN');
+    expect(plain(footnoteXml(footnotes, 1))).toContain('Allure of the Archives');
+  });
+
+  it('une citation après « ! » garde son appel de note', async () => {
+    const { document, footnotes } = await exportNative('C’est faux ! [@Farge_2013] dit-il.\n', {
+      citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+    });
+    expect(plain(document)).toContain('C’est faux ! dit-il.');
+    expect(plain(document)).not.toContain('[^');
+    expect(document).toMatch(/<w:footnoteReference w:id="1"\/>/);
+    expect(plain(footnoteXml(footnotes, 1))).toContain('Allure of the Archives');
+  });
+
+  /**
+   * Revue de L10-6 : la note de l'auteur se lit dans l'arbre, et le moteur décidait ligne à ligne.
+   * Une citation sur une ligne que l'arbre range dans la note (ligne collée sans retrait,
+   * définition en retrait, dans une citation ou un élément de liste) devenait un appel du moteur,
+   * emporté dans le texte de la note : un `<w:footnoteReference>` dans `footnotes.xml`, que
+   * LibreOffice refuse d'ouvrir. pandoc la rend en place, dans la note.
+   */
+  it.each([
+    ['ligne collée sans retrait', 'Texte[^a].\n\n[^a]: Voir à ce sujet\n[@Farge_2013], p. 12.\n\nCorps final.\n'],
+    ['définition en retrait de deux espaces', 'Texte[^a].\n\n  [^a]: Voir [@Farge_2013], p. 12.\n'],
+    ['définition dans une citation en retrait', 'Texte[^a].\n\n> [^a]: Voir [@Farge_2013], p. 12.\n'],
+    ['définition dans un élément de liste', 'Texte[^a].\n\n1. item\n\n   [^a]: Voir [@Farge_2013], p. 12.\n'],
+  ])('une citation dans la note de l’auteur y reste, sans note dans la note : %s', async (_case, content) => {
+    const { document, footnotes } = await exportNative(content, {
+      citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+    });
+    expect(footnotes).not.toContain('<w:footnoteReference');
+    expect(document.match(/<w:footnoteReference /g)).toHaveLength(1);
+    const note = plain(footnoteXml(footnotes, Number(document.match(/<w:footnoteReference w:id="(\d+)"/)?.[1])));
+    expect(note).toContain('Voir');
+    expect(note).toContain('Allure of the Archives');
+    expect(note).toContain('p. 12');
+    expect(plain(document)).not.toContain('p. 12');
   });
 
   it('signale les clés introuvables au lieu de réussir en silence', async () => {
@@ -460,10 +554,137 @@ describe('images sur le chemin interne', () => {
     });
   });
 
+  /**
+   * Un appel posé après « ! » (`![^2]`), sa note d'un seul mot (`[^2]: Ibid.`) : marked y lit une
+   * image par référence, dont la source est le texte de la note. Pandoc y lit un appel, et le
+   * document aussi : la réserve nommait une image qui n'existe pas.
+   */
+  it('un appel de note après « ! » n’est pas une image', async () => {
+    const { footnotes, warnings } = await exportNative('C’est faux ![^2] dit-il.\n\n[^2]: Ibid.\n');
+
+    expect(plain(footnoteXml(footnotes, 2))).toContain('Ibid.');
+    expect(warnings).toBeUndefined();
+  });
+
   it('sans image, aucune réserve', async () => {
     const { warnings } = await exportNative('Un texte sans image.\n');
 
     expect(warnings).toBeUndefined();
+  });
+});
+
+/**
+ * S12-2-6 : une note à plusieurs paragraphes sortait en un seul, ses paragraphes joints par une
+ * espace. Le PDF, lui, les garde.
+ */
+describe('notes de l’auteur à plusieurs paragraphes', () => {
+  it('deux paragraphes dans la note, l’appel posé sur le premier seulement', async () => {
+    const { document, footnotes } = await exportNative(
+      'Texte[^1].\n\n[^1]: Premier paragraphe.\n\n    Second *paragraphe*.\n\nSuite du corps.\n'
+    );
+    const note = footnoteXml(footnotes, 1);
+    const paragraphs = note.match(/<w:p>|<w:p [^>]*>/g) ?? [];
+
+    expect(paragraphs).toHaveLength(2);
+    expect(plain(note)).toContain('Premier paragraphe.');
+    expect(plain(note)).toContain('Second paragraphe.');
+    expect(note).toMatch(/<w:i\/>.*paragraphe/s);
+    expect(note.match(/<w:footnoteRef\/>/g)).toHaveLength(1);
+    expect(plain(document)).toContain('Suite du corps.');
+    expect(plain(document)).not.toContain('Premier paragraphe.');
+  });
+
+  /** Même note dans un fichier en CRLF, que l'éditeur garde tel quel : deux paragraphes aussi. */
+  it('deux paragraphes dans la note, en fins de ligne CRLF', async () => {
+    const { document, footnotes } = await exportNative(
+      'Texte[^1].\r\n\r\n[^1]: Premier paragraphe.\r\n\r\n    Second *paragraphe*.\r\n\r\nSuite du corps.\r\n'
+    );
+    const note = footnoteXml(footnotes, 1);
+    const paragraphs = note.match(/<w:p>|<w:p [^>]*>/g) ?? [];
+
+    expect(paragraphs).toHaveLength(2);
+    expect(plain(note)).toContain('Premier paragraphe.');
+    expect(plain(note)).toContain('Second paragraphe.');
+    expect(note.match(/<w:footnoteRef\/>/g)).toHaveLength(1);
+    expect(plain(document)).toContain('Suite du corps.');
+    expect(plain(document)).not.toContain('Premier paragraphe.');
+  });
+});
+
+/**
+ * S12-2-5 : `list.start` n'était pas lu. Chaque liste numérotée repartait à 1, celle qui reprend
+ * après un paragraphe (« 3. », « 4. ») comme les autres. Le PDF et le Word par pandoc la respectent.
+ */
+describe('listes numérotées qui ne commencent pas à 1', () => {
+  it('`3.` et `4.` commencent à 3, et une liste suivante repart à 1', async () => {
+    const { document, numbering } = await exportNative(
+      'Intro.\n\n3. troisième point\n4. quatrième point\n\nUn paragraphe.\n\n1. premier\n2. deuxième\n'
+    );
+
+    expect(listStartOf(document, numbering, 'troisième point')).toBe(3);
+    expect(listStartOf(document, numbering, 'quatrième point')).toBe(3);
+    expect(listStartOf(document, numbering, 'premier')).toBe(1);
+  });
+
+  /**
+   * Revue de L10-6 : une référence par départ séparait la sous-liste de sa liste parente, et docx
+   * ne pose la surcharge de départ qu'au niveau 0. Les sous-points numérotés au niveau 1
+   * continuaient d'une sous-liste à l'autre : sous « 4. », le premier sous-point sortait « 3. ».
+   */
+  it('une sous-liste numérotée repart à son départ sous chaque item, en retrait de sa liste', async () => {
+    const { document, numbering } = await exportNative(
+      '3. parent trois\n   1. sous-a premier\n   2. sous-a second\n4. parent quatre\n   1. sous-b premier\n\n' +
+        'Paragraphe.\n\n1. autre parent\n   3. sous-c trois\n   4. sous-c quatre\n2. autre suite\n   3. sous-d trois\n'
+    );
+
+    expect(listStartOf(document, numbering, 'parent trois')).toBe(3);
+    expect(listStartOf(document, numbering, 'parent quatre')).toBe(3);
+    expect(listStartOf(document, numbering, 'sous-a premier')).toBe(1);
+    expect(listStartOf(document, numbering, 'sous-b premier')).toBe(1);
+    expect(listStartOf(document, numbering, 'sous-c trois')).toBe(3);
+    expect(listStartOf(document, numbering, 'sous-d trois')).toBe(3);
+    // Deux sous-listes, deux instances : chacune a son compteur.
+    expect(listParagraph(document, numbering, 'sous-a premier')?.num).not.toBe(
+      listParagraph(document, numbering, 'sous-b premier')?.num
+    );
+    expect(listIndentOf(document, numbering, 'sous-a premier')).toBeGreaterThan(
+      listIndentOf(document, numbering, 'parent trois') ?? Infinity
+    );
+  });
+
+  it('une liste du résumé garde son départ, comme celles du corps', async () => {
+    const { document, numbering } = await exportNative('Corps.\n\n5. cinquième\n', {
+      abstract: '# Résumé\n\nDeux points :\n\n2. deuxième du résumé\n3. troisième du résumé\n',
+    });
+
+    expect(listStartOf(document, numbering, 'deuxième du résumé')).toBe(2);
+    expect(listStartOf(document, numbering, 'cinquième')).toBe(5);
+  });
+
+  it('un parseur par export : ce qu’un export a numéroté ne passe pas au suivant', async () => {
+    const projectPath = mkdtempSync(join(dir, 'projet-'));
+    const service = new WordExportService();
+    vi.spyOn(
+      service as unknown as { checkPandoc: () => Promise<boolean> },
+      'checkPandoc'
+    ).mockResolvedValue(false);
+    const numberingOf = async (content: string, file: string): Promise<string> => {
+      const outputPath = join(projectPath, file);
+      const result = await service.exportToWord({
+        projectPath,
+        projectType: 'article',
+        content,
+        outputPath,
+        metadata: { title: 'Titre' },
+      });
+      expect(result.success).toBe(true);
+      return new PizZip(readFileSync(outputPath)).file('word/numbering.xml')?.asText() ?? '';
+    };
+
+    expect(await numberingOf('7. septième\n', 'un.docx')).toContain('<w:start w:val="7"/>');
+    const second = await numberingOf('1. premier\n', 'deux.docx');
+    expect(second).not.toContain('<w:start w:val="7"/>');
+    expect(second).toContain('<w:startOverride w:val="1"/>');
   });
 });
 
