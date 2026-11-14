@@ -127,7 +127,8 @@ function installElectron(): (outcome: ExportOutcome) => void {
     },
     dialog: { saveFile: vi.fn().mockResolvedValue({ canceled: true }) },
     fs: {
-      readFile: vi.fn(),
+      // Du texte, comme le vrai disque : la modale de présentation refuse un manuscrit vide.
+      readFile: vi.fn().mockResolvedValue('# Le manuscrit sur le disque\n'),
       exists: vi.fn().mockResolvedValue(false),
     },
     citation: {

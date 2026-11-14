@@ -1200,6 +1200,8 @@
     "outputPlaceholder": "/path/to/file.html",
     "noProjectOpen": "No project open",
     "enterTitle": "Please enter a title",
+    "bookNotSupported": "A book cannot be exported as a presentation: its chapters do not form a slide deck. Export it as PDF or Word.",
+    "emptyDeck": "{{file}} is empty: there are no slides to export.",
     "unknownError": "Unknown error during export",
     "exportError": "Export error",
     "exportSuccess": "Export successful! Presentation created at:",
@@ -1220,7 +1222,7 @@
       "pdf": "Exports directly to PDF via the presentation rendering engine."
     },
     "addSection": "Add section (# --- )",
-    "frontmatterPrecedence": "The YAML frontmatter of slides.md (title, author, theme, transition) overrides reveal-config.json; the title and author typed here take precedence."
+    "frontmatterPrecedence": "The YAML frontmatter of {{file}} (title, author, theme, transition) overrides reveal-config.json; the title and author typed here take precedence."
   },
   "revealjs": {
     "theme": "Theme",
@@ -2691,7 +2693,8 @@
       "imageNeedsRsvgConvert": "The SVG image {{file}} cannot go into the PDF without the rsvg-convert tool, which is not installed. Install it (on macOS: brew install librsvg), or save the image as PNG, then run the export again.",
       "imageNotConverted": "The PDF export cannot read the format of the image {{file}}. Save it as PNG or JPEG, then run the export again.",
       "beamerImageNotFound": "Image from the Beamer configuration not found or unreadable: {{file}}. The presentation is exported without it. Put it in the project folder, or correct its path in the Beamer configuration.",
-      "imageFolderUnreachable": "The images in the folder {{dir}} could not be looked up: its path contains “{{char}}”, which the export tool reads as a separator. They are replaced by their captions. Rename the project folder without this character, then run the export again."
+      "imageFolderUnreachable": "The images in the folder {{dir}} could not be looked up: its path contains “{{char}}”, which the export tool reads as a separator. They are replaced by their captions. Rename the project folder without this character, then run the export again.",
+      "outputIsMarkdown": "“{{file}}” is a Markdown file: the export does not write to it, so as not to replace your text. Give the output file another name, then run the export again."
     }
   }
 }

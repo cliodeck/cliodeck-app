@@ -26,6 +26,7 @@ import { processMarkdownCitations, type ProcessedFootnote } from './citation-pip
 import { extractManualFootnotes } from './word-footnotes.js';
 import { parseOutline } from '../../editor/outline.js';
 import { assembleManuscript } from './manuscript-assembler.js';
+import { refuseMarkdownOutput } from './export-output-path.js';
 import { isInsideAsync } from '../../../backend/core/vector-store/file-identity.js';
 import {
   pathExists,
@@ -408,6 +409,9 @@ export class WordExportService {
     onProgress?: (progress: WordExportProgress) => void,
     limits?: ExportLimits
   ): Promise<WordExportResult> {
+    // Jamais un fichier Markdown pour sortie : ce serait un texte de l'auteur (`export-output-path.ts`).
+    const refused = refuseMarkdownOutput(options.projectPath, options.outputPath);
+    if (refused) return refused;
     return withExportTimeLimit(limits, (clock) => this.runExport(options, onProgress, clock));
   }
 

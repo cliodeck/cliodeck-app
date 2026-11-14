@@ -281,6 +281,30 @@ describe('RevealJSExportSchema', () => {
     });
     expect(result.config?.theme).toBe('moon');
   });
+
+  // Le chemin proposé par défaut est `<projet>/<nom>.html` : une apostrophe dès que le
+  // dossier ou le nom du projet en a une, ce qui est courant en français (S12-1-3).
+  it("accepte un chemin de sortie avec apostrophe et esperluette", () => {
+    const result = RevealJSExportSchema.safeParse({
+      projectPath: "/p/Séminaire d'histoire",
+      content: '# Diapo',
+      outputPath: "/p/Séminaire d'histoire/S&P.html",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it.each([
+    ['un retour à la ligne', '/p/diapos\n.html'],
+    ['un retour chariot', '/p/diapos\r.html'],
+    ['un octet nul', '/p/diapos\0.html'],
+  ])('refuse un chemin de sortie contenant %s', (_label, outputPath) => {
+    const result = RevealJSExportSchema.safeParse({
+      projectPath: '/p',
+      content: '# Diapo',
+      outputPath,
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('HistoryExportReportSchema', () => {

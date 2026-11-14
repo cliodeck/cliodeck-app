@@ -1,10 +1,11 @@
 import { writeFile, readFile, mkdir, access, rm } from 'fs/promises';
-import { join, dirname } from 'path';
+import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { app, BrowserWindow, shell } from 'electron';
 import { load as loadYaml } from 'js-yaml';
 import { marked } from 'marked';
 import { parseSlides as parseDeck, type DeckInfo } from '../../editor/slides.js';
+import { refuseMarkdownOutput } from './export-output-path.js';
 import {
   withExportTimeLimit,
   type ExportClock,
@@ -504,6 +505,16 @@ ${jsTags}
 
 // MARK: - Service
 
+/**
+ * Chemin où écrire l'export : celui de la fenêtre, résolu contre le projet (un chemin
+ * absolu reste tel quel), sinon le titre à côté du projet.
+ */
+function outputPathIn(options: RevealJsExportOptions, suffix: string): string {
+  return options.outputPath
+    ? resolvePath(options.projectPath, options.outputPath)
+    : join(dirname(options.projectPath), `${options.metadata?.title || 'presentation'}${suffix}`);
+}
+
 export class RevealJsExportService {
   /**
    * Export markdown to reveal.js HTML presentation
@@ -513,6 +524,9 @@ export class RevealJsExportService {
     onProgress?: (progress: RevealJsProgress) => void,
     limits?: ExportLimits
   ): Promise<ExportResult> {
+    // Jamais un fichier Markdown pour sortie : ce serait un texte de l'auteur (`export-output-path.ts`).
+    const refused = refuseMarkdownOutput(options.projectPath, options.outputPath);
+    if (refused) return refused;
     return withExportTimeLimit(limits, (clock) => this.runHtmlExport(options, onProgress, clock));
   }
 
@@ -524,8 +538,10 @@ export class RevealJsExportService {
     try {
       onProgress?.({ stage: 'preparing', message: 'Préparation de la présentation...', progress: 20 });
 
-      // Determine output path
-      const outputPath = options.outputPath || join(dirname(options.projectPath), `${options.metadata?.title || 'presentation'}.html`);
+      // Chemin de sortie résolu contre le projet, comme en PDF et en Word : un nom nu
+      // (« diapos.html ») s'écrivait contre le dossier courant du processus, `/` pour
+      // l'app lancée du Finder.
+      const outputPath = outputPathIn(options, '.html');
 
       onProgress?.({ stage: 'converting', message: 'Génération HTML reveal.js...', progress: 50 });
 
@@ -611,6 +627,9 @@ export class RevealJsExportService {
     onProgress?: (progress: RevealJsProgress) => void,
     limits?: ExportLimits
   ): Promise<ExportResult> {
+    // Jamais un fichier Markdown pour sortie : ce serait un texte de l'auteur (`export-output-path.ts`).
+    const refused = refuseMarkdownOutput(options.projectPath, options.outputPath);
+    if (refused) return refused;
     return withExportTimeLimit(limits, (clock) => this.runOfflineExport(options, onProgress, clock));
   }
 
@@ -640,10 +659,7 @@ export class RevealJsExportService {
       onProgress?.({ stage: 'converting', message: 'Génération HTML offline...', progress: 70 });
 
       const html = getRevealJsHTML(options.content, options, inlinedAssets);
-      const outputPath = options.outputPath || join(
-        dirname(options.projectPath),
-        `${options.metadata?.title || 'presentation'}-offline.html`
-      );
+      const outputPath = outputPathIn(options, '-offline.html');
 
       await mkdir(dirname(outputPath), { recursive: true });
       clock.throwIfExpired();
@@ -668,6 +684,9 @@ export class RevealJsExportService {
     onProgress?: (progress: RevealJsProgress) => void,
     limits?: ExportLimits
   ): Promise<ExportResult> {
+    // Jamais un fichier Markdown pour sortie : ce serait un texte de l'auteur (`export-output-path.ts`).
+    const refused = refuseMarkdownOutput(options.projectPath, options.outputPath);
+    if (refused) return refused;
     return withExportTimeLimit(limits, (clock) => this.runPdfExport(options, onProgress, clock));
   }
 
@@ -719,10 +738,7 @@ export class RevealJsExportService {
         preferCSSPageSize: true,
       }));
 
-      const outputPath = options.outputPath || join(
-        dirname(options.projectPath),
-        `${options.metadata?.title || 'presentation'}.pdf`
-      );
+      const outputPath = outputPathIn(options, '.pdf');
 
       await mkdir(dirname(outputPath), { recursive: true });
       clock.throwIfExpired();

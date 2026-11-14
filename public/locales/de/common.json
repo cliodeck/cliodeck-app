@@ -1200,6 +1200,8 @@
     "outputPlaceholder": "/pfad/zur/datei.html",
     "noProjectOpen": "Kein Projekt geöffnet",
     "enterTitle": "Bitte geben Sie einen Titel ein",
+    "bookNotSupported": "Ein Buch lässt sich nicht als Präsentation exportieren: Seine Kapitel bilden keinen Foliensatz. Exportieren Sie es als PDF oder Word.",
+    "emptyDeck": "{{file}} ist leer: Es gibt keine Folien zu exportieren.",
     "unknownError": "Unbekannter Fehler beim Export",
     "exportError": "Exportfehler",
     "exportSuccess": "Export erfolgreich! Präsentation erstellt unter:",
@@ -1220,7 +1222,7 @@
       "pdf": "Exportiert direkt als PDF über die Präsentations-Rendering-Engine."
     },
     "addSection": "Abschnitt hinzufügen (# --- )",
-    "frontmatterPrecedence": "Das YAML-Frontmatter von slides.md (title, author, theme, transition) überschreibt reveal-config.json; hier eingegebener Titel und Autor haben Vorrang."
+    "frontmatterPrecedence": "Das YAML-Frontmatter von {{file}} (title, author, theme, transition) überschreibt reveal-config.json; hier eingegebener Titel und Autor haben Vorrang."
   },
   "revealjs": {
     "theme": "Thema",
@@ -2691,7 +2693,8 @@
       "imageNeedsRsvgConvert": "Das SVG-Bild {{file}} kann ohne das Werkzeug rsvg-convert, das nicht installiert ist, nicht in das PDF aufgenommen werden. Installieren Sie es (unter macOS: brew install librsvg) oder speichern Sie das Bild als PNG, und starten Sie den Export erneut.",
       "imageNotConverted": "Der PDF-Export kann das Format des Bildes {{file}} nicht lesen. Speichern Sie es als PNG oder JPEG, und starten Sie den Export erneut.",
       "beamerImageNotFound": "Bild aus der Beamer-Konfiguration nicht gefunden oder nicht lesbar: {{file}}. Die Präsentation wird ohne das Bild exportiert. Legen Sie es in den Projektordner, oder korrigieren Sie seinen Pfad in der Beamer-Konfiguration.",
-      "imageFolderUnreachable": "Die Bilder im Ordner {{dir}} konnten nicht gesucht werden: Sein Pfad enthält „{{char}}“, das das Exportwerkzeug als Trennzeichen liest. Sie werden durch ihre Bildunterschriften ersetzt. Benennen Sie den Projektordner ohne dieses Zeichen um, und starten Sie den Export erneut."
+      "imageFolderUnreachable": "Die Bilder im Ordner {{dir}} konnten nicht gesucht werden: Sein Pfad enthält „{{char}}“, das das Exportwerkzeug als Trennzeichen liest. Sie werden durch ihre Bildunterschriften ersetzt. Benennen Sie den Projektordner ohne dieses Zeichen um, und starten Sie den Export erneut.",
+      "outputIsMarkdown": "„{{file}}“ ist eine Markdown-Datei: Der Export schreibt nicht hinein, damit Ihr Text nicht ersetzt wird. Geben Sie der Ausgabedatei einen anderen Namen, und starten Sie den Export erneut."
     }
   }
 }

@@ -209,18 +209,20 @@ export const PDFExportSchema = z.object({
   });
 
 /**
- * Chemin de sortie d'un export.
+ * Chemin de sortie d'un export de présentation.
  *
- * Refuse les caractères qui n'ont rien à faire dans un nom de fichier et
- * qui servaient à s'échapper d'une commande shell (guillemets, `$`, backtick,
- * `;`, `|`, `&`, retour à la ligne). L'ouverture passe désormais par
- * `shell.openPath`, donc sans shell — cette contrainte est une seconde
- * barrière, pas la seule.
+ * Aucun shell ne reçoit plus ce chemin : il ne va qu'à `mkdir`, `writeFile` et
+ * `shell.openPath` (`revealjs-export.ts`), qui le passent à l'OS tel quel. Refuser
+ * les guillemets, `&` ou `;`, reste de l'ancien `open "${outputPath}"`, rendait
+ * l'export impossible dès que le dossier ou le nom du projet avait une apostrophe
+ * (« Séminaire d'histoire »), le chemin proposé par défaut compris (S12-1-3). Seuls
+ * restent refusés le retour à la ligne, le retour chariot et l'octet nul, qui n'ont
+ * rien à faire dans un chemin saisi ou choisi dans un dialogue.
  */
 export const OutputPathSchema = z
   .string()
   .min(1)
-  .refine((p) => !/["'`$;|&\n\r]/.test(p), {
+  .refine((p) => !/[\n\r\0]/.test(p), {
     message: 'Le chemin de sortie contient des caractères non autorisés.',
   });
 
