@@ -75,11 +75,13 @@ function footnoteCalls(
 /**
  * Texte d'une note : le corps de sa définition, retrait de continuation ôté. Ses paragraphes
  * restent séparés par une ligne vide (S12-2-6 : ils étaient joints par une espace, en un seul) ;
- * les lignes d'un même paragraphe se joignent par une espace.
+ * les lignes d'un même paragraphe se joignent par une espace. Le découpage reconnaît aussi le
+ * CRLF, que l'éditeur garde d'un fichier écrit ainsi (`detectLineSeparator`) : sans quoi la note
+ * d'un tel fichier sortait en un seul paragraphe.
  */
 function noteText(body: string): string {
   return body
-    .split(/\n[ \t]*\n/)
+    .split(/\r?\n[ \t]*\r?\n/)
     .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
     .filter((paragraph) => paragraph !== '')
     .join('\n\n');

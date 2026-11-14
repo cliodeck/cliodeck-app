@@ -545,6 +545,22 @@ describe('notes de l’auteur à plusieurs paragraphes', () => {
     expect(plain(document)).toContain('Suite du corps.');
     expect(plain(document)).not.toContain('Premier paragraphe.');
   });
+
+  /** Même note dans un fichier en CRLF, que l'éditeur garde tel quel : deux paragraphes aussi. */
+  it('deux paragraphes dans la note, en fins de ligne CRLF', async () => {
+    const { document, footnotes } = await exportNative(
+      'Texte[^1].\r\n\r\n[^1]: Premier paragraphe.\r\n\r\n    Second *paragraphe*.\r\n\r\nSuite du corps.\r\n'
+    );
+    const note = footnoteXml(footnotes, 1);
+    const paragraphs = note.match(/<w:p>|<w:p [^>]*>/g) ?? [];
+
+    expect(paragraphs).toHaveLength(2);
+    expect(plain(note)).toContain('Premier paragraphe.');
+    expect(plain(note)).toContain('Second paragraphe.');
+    expect(note.match(/<w:footnoteRef\/>/g)).toHaveLength(1);
+    expect(plain(document)).toContain('Suite du corps.');
+    expect(plain(document)).not.toContain('Premier paragraphe.');
+  });
 });
 
 /**

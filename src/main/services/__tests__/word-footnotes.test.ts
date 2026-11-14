@@ -108,6 +108,20 @@ describe('extractManualFootnotes', () => {
     expect(res.markdown).not.toContain('paragraphe.');
   });
 
+  /**
+   * Même note en fins de ligne CRLF : l'éditeur garde celles du fichier (`detectLineSeparator`).
+   * Le découpage par `\n[ \t]*\n` ne voyait pas `\r\n\r\n` et fondait les deux paragraphes.
+   */
+  it('garde les paragraphes d’une note en fins de ligne CRLF', () => {
+    const src = 'Texte[^1].\r\n\r\n[^1]: Premier paragraphe.\r\n\r\n    Second paragraphe.\r\n\r\nSuite du corps.\r\n';
+    const res = extractManualFootnotes(src);
+
+    expect(res.footnotes[0].text).toBe('Premier paragraphe.\n\nSecond paragraphe.');
+    expect(res.markdown).toContain('Texte{{FN:1}}.');
+    expect(res.markdown).toContain('Suite du corps.');
+    expect(res.markdown).not.toContain('paragraphe.');
+  });
+
   it('la dernière définition d’une étiquette l’emporte, comme chez pandoc', () => {
     const src = 'X[^1].\n\n[^1]: Première.\n\n[^1]: Seconde.\n';
     const res = extractManualFootnotes(src);
