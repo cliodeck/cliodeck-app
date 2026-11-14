@@ -362,11 +362,13 @@ function bibliographyArgs(input: {
   if (input.cslPath && input.cslAvailable) {
     args.push('--csl', input.cslPath);
   } else {
-    // Titre de section écrit DANS le document exporté : il doit suivre la
-    // langue de l'interface, sinon un germanophone reçoit « Références ».
-    args.push('--metadata', `reference-section-title=${referenceSectionTitle()}`);
     args.push('--metadata', 'suppress-bibliography=false');
   }
+  // Titre de section écrit DANS le document exporté : il doit suivre la
+  // langue de l'interface, sinon un germanophone reçoit « Références ». Avec
+  // ou sans style : pandoc n'en écrit aucun sans cette métadonnée, et la
+  // bibliographie suivait le dernier paragraphe sans intitulé (S12-1-11).
+  args.push('--metadata', `reference-section-title=${referenceSectionTitle()}`);
   return args;
 }
 
@@ -437,7 +439,26 @@ export function referenceSectionTitle(): string {
   return titles[getLanguage()] ?? titles.fr;
 }
 
+/**
+ * Le titre de la bibliographie d'un chapitre (bibliographie par chapitre), descendu d'un niveau.
+ * Citeproc l'écrit en titre de niveau 1, `# Références {#bibliography .unnumbered}` (pandoc
+ * 3.13) : dans le livre assemblé, ce `#` ouvrait un chapitre de plus après chaque chapitre. Il
+ * devient une section du chapitre qu'il clôt, sans l'identifiant `bibliography`, que chaque
+ * chapitre répéterait. Une autre forme, d'une autre version de pandoc, passe telle quelle : le
+ * faux chapitre revient, sans rien perdre (`pdf-export-real.test.ts` le voit).
+ */
+export function demoteChapterBibliographyHeading(markdown: string): string {
+  return markdown.replace(/^# (.+) \{#bibliography \.unnumbered\}$/gm, '## $1 {.unnumbered}');
+}
+
 // MARK: - Sortie d'erreur de pandoc
+
+/** Clés que citeproc (pandoc) signale introuvables sur sa sortie d'erreur. */
+export function pandocUnresolvedCitations(stderr: string): string[] {
+  const keys = new Set<string>();
+  for (const m of stderr.matchAll(/citation (\S+) not found/g)) keys.add(m[1]);
+  return [...keys];
+}
 
 /**
  * Les ressources que pandoc n'a pas trouvées (« Could not fetch resource X: replacing image with

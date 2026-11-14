@@ -190,8 +190,24 @@ describe('générateur docx interne : markdown en ligne', () => {
 describe('générateur docx interne : citations par le moteur', () => {
   beforeAll(async () => {
     await bibliographyService.parseContent(
-      '@book{Farge_2013,\n  author = {Farge, Arlette},\n  title = {The Allure of the Archives},\n  publisher = {Yale University Press},\n  year = {2013}\n}\n'
+      '@book{Farge_2013,\n  author = {Farge, Arlette},\n  title = {The Allure of the Archives},\n  publisher = {Yale University Press},\n  year = {2013}\n}\n' +
+        '@article{Url_2019,\n  author = {Durand, Marie},\n  title = {Recherche},\n  journal = {Revue},\n  year = {2019},\n' +
+        '  url = {https://gallica.bnf.fr/sru?operation=searchRetrieve&query=x&page=2}\n}\n'
     );
+  });
+
+  /**
+   * Revue de L10-5 : la citation rendue en place dans une note de l'auteur passe par
+   * `cslHtmlToMarkdown`. Un `&` d'adresse échappé en `\&` restait dans le texte et dans la cible
+   * du lien : `marked` ne retire pas l'antislash d'une adresse nue.
+   */
+  it('une adresse citée dans une note de l’auteur garde ses `&`, en texte comme en lien', async () => {
+    const { footnotes, rels } = await exportNative('Texte.[^f]\n\n[^f]: Voir [@Url_2019].\n', {
+      citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+    });
+    expect(plain(footnotes)).toContain('sru?operation=searchRetrieve&amp;query=x&amp;page=2');
+    expect(footnotes).not.toContain('\\&amp;');
+    expect(rels).toContain('Target="https://gallica.bnf.fr/sru?operation=searchRetrieve&amp;query=x&amp;page=2"');
   });
 
   it('remplace les clés, y compris dans une note de l’auteur et sous forme nue', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { citationKeysIn, processMarkdownCitations } from '../citation-pipeline';
+import { appendEngineCitations, citationKeysIn, processMarkdownCitations } from '../citation-pipeline';
 
 // Ces tests exercent le VRAI moteur citeproc : chaque appel construit un
 // `CSL.Engine` et parse la feuille de style CSL (CitationEngine.ts:95).
@@ -209,5 +209,222 @@ describe('citationKeysIn — les clés qu’un export laisse brutes', () => {
 
   it('avec `narrative`, aussi les `@clé` nues, hors code et hors adresse', () => {
     expect(citationKeysIn(md, { narrative: true })).toEqual(['alice2020', 'bob2019', 'carol2021']);
+  });
+});
+
+/**
+ * S12-1-7 : l'export PDF recopiait tels quels les notes et la bibliographie du moteur, que citeproc
+ * rend en HTML (`<i>Titre</i>`, `<div class="csl-entry">`). Pandoc lisait des balises brutes, que
+ * l'écrivain LaTeX supprime : aucun titre d'ouvrage en italique, ni en note ni en bibliographie,
+ * sous un titre « Bibliographie » figé en français, en liste à puces.
+ */
+describe('appendEngineCitations — notes et bibliographie du moteur, en markdown', () => {
+  const farge = makeCitation({
+    id: 'Farge_2013',
+    author: 'Farge, Arlette',
+    year: '2013',
+    title: 'The Allure of the Archives',
+    publisher: 'Yale University Press',
+  });
+
+  it('rend les italiques de citeproc en markdown, sans balise ni puce, sous le titre fourni', async () => {
+    const processed = await processMarkdownCitations('Texte [@Farge_2013].\n', {
+      resolve: resolveMap({ Farge_2013: farge }),
+      style: 'chicago-note-bibliography',
+      locale: 'en-US',
+    });
+    // Ce que citeproc rend vraiment : du HTML.
+    expect(processed.footnotes[0].text).toContain('<i>The Allure of the Archives</i>');
+    expect(processed.bibliography[0]).toContain('<div class="csl-entry">');
+
+    const md = appendEngineCitations(processed.md, processed, 'References');
+
+    const [body, references] = md.split(/^# References \{\.unnumbered\}$/m);
+    expect(references, md).toBeDefined();
+    expect(body).toMatch(/^\[\^1\]: Arlette Farge, \*The Allure of the Archives\* \(Yale University Press, 2013\)\.$/m);
+    expect(references.trim()).toBe('Farge, Arlette. *The Allure of the Archives*. Yale University Press, 2013.');
+    expect(md).not.toMatch(/<\/?(?:i|div)\b/);
+    expect(md).not.toMatch(/^- /m);
+    expect(md).not.toContain('Bibliographie');
+  });
+
+  it('une référence par paragraphe, entités décodées', () => {
+    const md = appendEngineCitations(
+      'Texte.',
+      {
+        footnotes: [],
+        bibliography: [
+          '<div class="csl-entry">Dupont, Jean. <i>Archives &#38; pouvoirs</i>. 2020.</div>',
+          '<div class="csl-entry">Martin, Paul. <i>Autre</i>. 2021.</div>',
+        ],
+      },
+      'Literatur'
+    );
+    expect(md).toBe(
+      'Texte.\n\n# Literatur {.unnumbered}\n\n' +
+        'Dupont, Jean. *Archives & pouvoirs*. 2020.\n\nMartin, Paul. *Autre*. 2021.\n'
+    );
+  });
+
+  it('sans citation rendue, le markdown reste tel quel : ni titre ni note', () => {
+    expect(appendEngineCitations('Texte.', { footnotes: [], bibliography: [] }, 'Références')).toBe('Texte.');
+  });
+
+  /**
+   * Revue de L10-5 : citeproc écrit un chevron du titre en entité (`&#60;`). Décodé en `<` nu, il
+   * rendait au markdown un `<persName>` que pandoc lit comme une balise HTML brute, et que
+   * l'écrivain LaTeX supprime : « Encoder les personnes avec <persName> dans la TEI » sortait
+   * « Encoder les personnes avec dans la TEI ». Échappé (`\<`), il reste du texte, pour pandoc
+   * comme pour `marked` (Word interne). Même chose pour `&` : `&#38;lt;` décodé en `&lt;`, pandoc
+   * l'aurait décodé une seconde fois.
+   */
+  const tei = makeCitation({
+    id: 'Durand_2019',
+    type: 'article',
+    author: 'Durand, Marie',
+    year: '2019',
+    title: 'Encoder les personnes avec <persName> dans la TEI',
+    journal: 'Revue',
+  });
+
+  it('un chevron du titre reste du texte, en note comme en bibliographie', async () => {
+    const processed = await processMarkdownCitations('Texte [@Durand_2019].\n', {
+      resolve: resolveMap({ Durand_2019: tei }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+    // Ce que citeproc rend vraiment : l'entité, pas la balise.
+    expect(processed.footnotes[0].text).toContain('&#60;persName&#62;');
+
+    const md = appendEngineCitations(processed.md, processed, 'Références');
+
+    expect(md).toMatch(/^\[\^1\]: Marie Durand, «\u00a0Encoder les personnes avec \\<persName> dans la TEI\u00a0»/m);
+    expect(md).toMatch(/^Durand, Marie\. «\u00a0Encoder les personnes avec \\<persName> dans la TEI\u00a0»/m);
+    expect(md).not.toMatch(/(?<!\\)<persName>/);
+  });
+
+  it('en place (style auteur-date, ou note de l’auteur), le chevron reste du texte aussi', async () => {
+    const processed = await processMarkdownCitations('Texte.[^1]\n\n[^1]: Voir [@Durand_2019].\n', {
+      resolve: resolveMap({ Durand_2019: tei }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+    expect(processed.md).toContain('\\<persName> dans la TEI');
+    expect(processed.md).not.toMatch(/(?<!\\)<persName>/);
+  });
+
+  /**
+   * citeproc pose en français des espaces insécables autour des guillemets (U+00A0) et devant
+   * `:` ou `?` (U+202F). Réduits à une espace ordinaire avec les autres blancs, ils laissaient la
+   * ligne se couper entre « et le titre ; recopiés tels quels, pandoc les rend en `~` et `\,`.
+   */
+  it('les espaces insécables de citeproc restent, en note comme en bibliographie', async () => {
+    const processed = await processMarkdownCitations('Texte [@Durand_2019].\n', {
+      resolve: resolveMap({ Durand_2019: makeCitation({ ...tei, title: 'Encoder : qui ?' }) }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+
+    const md = appendEngineCitations(processed.md, processed, 'Références');
+
+    expect(md).toMatch(/^\[\^1\]: Marie Durand, «\u00a0Encoder\u202f: qui\u202f\?\u00a0»/m);
+    expect(md).toMatch(/^Durand, Marie\. «\u00a0Encoder\u202f: qui\u202f\?\u00a0»/m);
+  });
+
+  it('une entité n’est décodée qu’une fois : `&` et `<` sortent échappés devant une entité ou une balise', () => {
+    const md = appendEngineCitations(
+      'Texte.',
+      {
+        footnotes: [],
+        bibliography: [
+          '<div class="csl-entry">Dupont, Jean. <i>Le &#38;lt;br&#38;gt; et &#60;teiHeader&#62;</i>. 2020.</div>',
+        ],
+      },
+      'Références'
+    );
+    expect(md).toContain('*Le \\&lt;br\\&gt; et \\<teiHeader>*. 2020.');
+  });
+
+  it('ailleurs, `&` et `<` restent nus : pandoc et `marked` les impriment tels quels', () => {
+    const md = appendEngineCitations(
+      'Texte.',
+      {
+        footnotes: [],
+        bibliography: ['<div class="csl-entry">Dupont, Jean. <i>Archives &#38; pouvoirs, 3 &#60; 4</i>. 2020.</div>'],
+      },
+      'Références'
+    );
+    expect(md).toContain('*Archives & pouvoirs, 3 < 4*. 2020.');
+  });
+
+  /**
+   * Revue de L10-5, seconde passe : échapper tout `&` et tout `<` cassait les adresses que citeproc
+   * imprime en clair. Pandoc lit une adresse nue comme un lien (`autolink_bare_uris`), y garde la
+   * barre oblique inverse et la change en `/` : `searchRetrieve/&query=x/&page=2`, dans le texte
+   * comme dans la cible du lien, en note comme en bibliographie. Un DOI à chevrons (revues de
+   * l'AMS, DOI SICI de Wiley) était coupé à son `\<`. Dans une adresse, `&` reste nu, et `<`, `>`
+   * s'encodent `%3C`, `%3E`, comme pandoc le faisait lui-même sur `main`.
+   */
+  const gallica = makeCitation({
+    id: 'Url_2019',
+    type: 'article',
+    author: 'Durand, Marie',
+    year: '2019',
+    title: 'Recherche',
+    journal: 'Revue',
+    customFields: { url: 'https://gallica.bnf.fr/sru?operation=searchRetrieve&query=x&page=2' },
+  });
+  const sici = makeCitation({
+    id: 'Doi_1996',
+    type: 'article',
+    author: 'Martin, Paul',
+    year: '1996',
+    title: 'Nouvelle',
+    journal: 'Bulletin',
+    customFields: { doi: '10.1175/1520-0477(1996)077<0437:TNYRP>2.0.CO;2' },
+  });
+  const GALLICA = /https:\/\/gallica\.bnf\.fr\/sru\?operation=searchRetrieve&query=x&page=2/g;
+  const SICI = /https:\/\/doi\.org\/10\.1175\/1520-0477\(1996\)077%3C0437:TNYRP%3E2\.0\.CO;2/g;
+
+  it('une adresse de référence garde ses `&` et encode ses chevrons, en note comme en bibliographie', async () => {
+    const processed = await processMarkdownCitations('Texte [@Url_2019] et [@Doi_1996].\n', {
+      resolve: resolveMap({ Url_2019: gallica, Doi_1996: sici }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+    // Ce que citeproc rend vraiment : des entités dans l'adresse.
+    expect(processed.footnotes[0].text).toContain('searchRetrieve&#38;query=x&#38;page=2');
+    expect(processed.footnotes[1].text).toContain('077&#60;0437:TNYRP&#62;2.0.CO;2');
+
+    const md = appendEngineCitations(processed.md, processed, 'Références');
+
+    expect(md.match(GALLICA) ?? [], md).toHaveLength(2);
+    expect(md.match(SICI) ?? [], md).toHaveLength(2);
+    expect(md).not.toContain('\\&');
+    expect(md).not.toContain('\\<');
+  });
+
+  it('en place (note de l’auteur), l’adresse garde ses `&` aussi', async () => {
+    const processed = await processMarkdownCitations('Texte.[^1]\n\n[^1]: Voir [@Url_2019] et [@Doi_1996].\n', {
+      resolve: resolveMap({ Url_2019: gallica, Doi_1996: sici }),
+      style: 'chicago-note-bibliography',
+      locale: 'fr-FR',
+    });
+    expect(processed.md.match(GALLICA) ?? [], processed.md).toHaveLength(1);
+    expect(processed.md.match(SICI) ?? [], processed.md).toHaveLength(1);
+    expect(processed.md).not.toContain('\\&');
+  });
+
+  it('dans une adresse, une suite qui ressemble à une entité reste littérale', () => {
+    const md = appendEngineCitations(
+      'Texte.',
+      {
+        footnotes: [],
+        bibliography: ['<div class="csl-entry">Dupont, Jean. 2020. https://x.org/a?b=1&#38;lt;c=2&#38;d=&#60;e&#62;.</div>'],
+      },
+      'Références'
+    );
+    // pandoc et `marked` décodent `&amp;` une fois dans le lien : il reste `&lt;c=2`.
+    expect(md).toContain('2020. https://x.org/a?b=1&amp;lt;c=2&d=%3Ce%3E.');
   });
 });

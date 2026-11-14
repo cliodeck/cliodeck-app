@@ -150,7 +150,7 @@ Réglages consommés :
 | `noteStyle: endnote-chapter` \| `endnote-book` | paquet `endnotes`, `\theendnotes` après chaque chapitre ou avant `\backmatter` |
 | `noteNumbering: per-chapter` | compteur remis à zéro à chaque chapitre |
 | `bibliography: single` | une bibliographie de fin (natif citeproc) |
-| `bibliography: per-chapter` | citeproc exécuté **par pièce** (~0,85 s/chapitre) ; repli documenté sur `single` si inapplicable |
+| `bibliography: per-chapter` | citeproc exécuté **par pièce** (~0,85 s/chapitre) ; repli documenté sur `single` si inapplicable. Chaque bibliographie a le titre de la bibliographie unique (`referenceSectionTitle()`), descendu en section de son chapitre (`demoteChapterBibliographyHeading`) : citeproc l'écrit en `#`, qui ouvrait un faux chapitre « Références » après chaque chapitre (L10-5) |
 
 **Word** ([`word-export.ts`](../src/main/services/word-export.ts)) : une
 section docx par chapitre (saut de page), table des matières, liminaires.

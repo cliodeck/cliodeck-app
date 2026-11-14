@@ -116,23 +116,102 @@ export function citationKeysIn(markdown: string, options: { narrative?: boolean 
   return [...keys];
 }
 
+/** Entités nommées que citeproc écrit ; les autres sont numériques (`&#60;`, `&#38;`). */
+const NAMED_ENTITIES = new Map([
+  ['lt', '<'],
+  ['gt', '>'],
+  ['quot', '"'],
+  ['amp', '&'],
+  ['apos', "'"],
+]);
+
+/**
+ * Une adresse que pandoc (`autolink_bare_uris`) et `marked` (GFM) lient d'eux-mêmes : un schéma
+ * suivi de `//`, jusqu'au premier blanc (`\s` compte U+00A0 et U+202F).
+ */
+const BARE_URL_RE = /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/\S+/g;
+/** Un `&` que pandoc et `marked` liraient comme le début d'une entité. */
+const AMP_BEFORE_ENTITY = /&(?=#?[A-Za-z0-9]+;)/g;
+/** Un `<` qu'ils liraient comme le début d'une balise, d'un commentaire ou d'un lien `<…:…>`. */
+const LT_BEFORE_TAG = /<(?=[A-Za-z/!?])/g;
+
+/**
+ * Un `<` ou un `&` décodé qu'il faut garder pour du texte. Seuls ceux que pandoc et `marked`
+ * réinterpréteraient sont échappés : un `<persName>` nu est une balise HTML brute, que l'écrivain
+ * LaTeX supprime avec son contenu apparent, et un `&lt;` nu serait décodé une seconde fois. `\<` et
+ * `\&` sont des échappements de pandoc comme de `marked` (Word interne).
+ *
+ * Jamais dans une adresse : pandoc y garde la barre oblique inverse et la change en `/`
+ * (`searchRetrieve/&query=x`), `marked` la laisse dans le lien. Là, `&` reste nu (`&amp;` devant
+ * une suite qui ressemble à une entité, que pandoc et `marked` décodent une fois), et `<`, `>`
+ * s'encodent `%3C`, `%3E`, comme pandoc le fait d'un DOI à chevrons qu'il reçoit en entités.
+ */
+function escapeDecodedText(text: string): string {
+  const escapeOutside = (s: string): string => s.replace(AMP_BEFORE_ENTITY, '\\&').replace(LT_BEFORE_TAG, '\\<');
+  let out = '';
+  let last = 0;
+  for (const m of text.matchAll(BARE_URL_RE)) {
+    const url = m[0].replace(AMP_BEFORE_ENTITY, '&amp;').replace(/</g, '%3C').replace(/>/g, '%3E');
+    out += escapeOutside(text.slice(last, m.index)) + url;
+    last = m.index + m[0].length;
+  }
+  return out + escapeOutside(text.slice(last));
+}
+
 /**
  * citeproc rend du HTML (`<i>Titre</i>`, entités). Quand la citation est
  * recopiée DANS le markdown (note de l'auteur, style auteur-date), elle doit
  * redevenir du markdown, sinon l'italique des titres est perdu en route.
+ * Les entités sont décodées en une seule passe, puis un chevron ou une esperluette du titre
+ * reste du texte, et une adresse reste un lien juste (`escapeDecodedText`). Seuls les blancs
+ * ASCII se réduisent : les espaces insécables que citeproc pose autour des guillemets et devant
+ * `:` ou `?` en français (U+00A0, U+202F) restent, et pandoc les rend en `~` et `\,`.
  */
 export function cslHtmlToMarkdown(html: string): string {
-  return html
+  const decoded = html
     .replace(/<\/?(?:i|em)>/g, '*')
     .replace(/<\/?(?:b|strong)>/g, '**')
     .replace(/<[^>]+>/g, '')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(parseInt(code, 10)))
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ')
+    .replace(
+      /&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi,
+      (entity: string, dec: string | undefined, hex: string | undefined, name: string | undefined) => {
+        const code = dec !== undefined ? parseInt(dec, 10) : hex !== undefined ? parseInt(hex, 16) : undefined;
+        const char =
+          code === undefined
+            ? NAMED_ENTITIES.get((name ?? '').toLowerCase())
+            : code <= 0x10ffff
+              ? String.fromCodePoint(code)
+              : undefined;
+        return char ?? entity;
+      }
+    )
+    .replace(/[ \t\r\n\f\v]+/g, ' ')
     .trim();
+  return escapeDecodedText(decoded);
+}
+
+/**
+ * Les notes et la bibliographie du moteur, ajoutées en fin de markdown pour pandoc. citeproc les
+ * rend en HTML (`<i>Titre</i>`, `<div class="csl-entry">`) : recopiées telles quelles, pandoc les
+ * lisait comme des balises brutes, que l'écrivain LaTeX supprime, et aucun titre d'ouvrage ne
+ * sortait en italique (S12-1-7). La bibliographie prend le titre donné, sans numéro comme celle
+ * que pandoc titre lui-même, une référence par paragraphe.
+ */
+export function appendEngineCitations(
+  md: string,
+  processed: Pick<ProcessedCitations, 'footnotes' | 'bibliography'>,
+  sectionTitle: string
+): string {
+  let out = md;
+  if (processed.footnotes.length > 0) {
+    out +=
+      '\n\n' + processed.footnotes.map((fn) => `[^${fn.n}]: ${cslHtmlToMarkdown(fn.text)}`).join('\n\n') + '\n';
+  }
+  if (processed.bibliography.length > 0) {
+    out +=
+      `\n\n# ${sectionTitle} {.unnumbered}\n\n` + processed.bibliography.map(cslHtmlToMarkdown).join('\n\n') + '\n';
+  }
+  return out;
 }
 
 /** Nom d'auteur pour une citation narrative (« Farge[^1] »). */
