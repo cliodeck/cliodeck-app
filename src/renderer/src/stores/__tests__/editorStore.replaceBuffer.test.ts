@@ -851,3 +851,95 @@ describe('detach : hors de tout document, le temps d’un changement de projet',
     expect(store().bufferDetached).toBe(false);
   });
 });
+
+/**
+ * L01-6 : réécrire le document ouvert sans en changer. La renumérotation des notes et le renommage
+ * du chapitre ouvert écrivaient par `facade.setValue` ou `setContent`, chacun avec ses gardes. Ils
+ * passent par `edit`, qui refuse si le document n'est plus celui qu'ils visent.
+ */
+describe('edit : réécrire le document ouvert', () => {
+  const editTo = (text: string, extra: { ifFilePath?: string; cursor?: number } = {}) =>
+    store().replaceBuffer({ kind: 'edit', text, ...extra }, 'rename-chapter');
+
+  it('ifFilePath périmé : rejet BufferChangedError, la façade et le miroir restent intacts', async () => {
+    openOn(B, '# B\n');
+    const version = store().documentVersion;
+
+    await expect(editTo('# A bis\n', { ifFilePath: A })).rejects.toMatchObject({ name: 'BufferChangedError' });
+
+    expect(setValue).not.toHaveBeenCalled();
+    expect(store().getLiveContent()).toBe('# B\n');
+    expect(store().content).toBe('# B\n');
+    expect(store().filePath).toBe(B);
+    expect(store().isDirty).toBe(false);
+    expect(store().documentVersion).toBe(version);
+    expect(writes).toEqual([]);
+  });
+
+  it('façade montée : setValue reçoit le texte et le curseur, isDirty, et le document reste le même', async () => {
+    openOn(A, '# A\n');
+    const version = store().documentVersion;
+
+    const outcome = await editTo('# A bis\n', { ifFilePath: A, cursor: 3 });
+
+    expect(outcome).toEqual({ status: 'replaced' });
+    expect(setValue).toHaveBeenCalledTimes(1);
+    expect(setValue.mock.calls[0].slice(0, 2)).toEqual(['# A bis\n', 3]);
+    expect(store().isDirty).toBe(true);
+    expect(store().filePath).toBe(A);
+    expect(store().documentVersion).toBe(version);
+    // Ni écriture ni relecture : ce n'est pas une bascule.
+    expect(writes).toEqual([]);
+    expect(reads).toEqual([]);
+  });
+
+  it('l’édition a lieu pendant l’appel, avant toute attente : rien ne peut s’y glisser', () => {
+    openOn(A, '# A\n');
+
+    void editTo('# A bis\n', { ifFilePath: A });
+
+    expect(setValue).toHaveBeenCalledTimes(1);
+  });
+
+  it('texte identique : unchanged, et rien ne bouge', async () => {
+    openOn(A, '# A\n');
+
+    expect(await editTo('# A\n', { ifFilePath: A })).toEqual({ status: 'unchanged' });
+    expect(setValue).not.toHaveBeenCalled();
+    expect(store().isDirty).toBe(false);
+  });
+
+  it('sans façade (l’auteur a quitté le mode Écriture) : le miroir reçoit le texte, isDirty', async () => {
+    openOn(A, '# A\n');
+    useEditorStore.setState({ editorFacade: null });
+
+    expect(await editTo('# A bis\n', { ifFilePath: A })).toEqual({ status: 'replaced' });
+    expect(store().content).toBe('# A bis\n');
+    expect(store().isDirty).toBe(true);
+  });
+
+  it('sous le verrou de la renumérotation : appliquée, ce n’est pas un changement de document', async () => {
+    openOn(A, '# A\n');
+    store().setSwitchLock(LOCK);
+
+    expect(await editTo('# A bis\n', { ifFilePath: A })).toEqual({ status: 'replaced' });
+    expect(setValue).toHaveBeenCalledTimes(1);
+  });
+
+  it('hors de tout document (détaché) : refusée, et rien n’entre dans le miroir', async () => {
+    openOn(A, '# A\n');
+    await store().replaceBuffer({ kind: 'detach' }, 'project-switch');
+    useEditorStore.setState({ editorFacade: null });
+
+    await expect(editTo('# A bis\n')).rejects.toMatchObject({ name: 'BufferChangedError' });
+    expect(store().content).toBe('');
+    expect(store().isDirty).toBe(false);
+  });
+
+  it('un tampon sans titre, sans ifFilePath : appliquée', async () => {
+    openOn(null, 'Une idée.\n');
+
+    expect(await editTo('Une idée[^1].\n')).toEqual({ status: 'replaced' });
+    expect(setValue).toHaveBeenCalledTimes(1);
+  });
+});

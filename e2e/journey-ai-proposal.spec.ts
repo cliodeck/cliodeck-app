@@ -8,11 +8,16 @@
  */
 
 import { test, expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { launchApp } from './_helpers/launch';
 import { startFakeOllama, type FakeOllama } from './_helpers/fake-ollama';
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const ANSWER = 'Réponse du modèle sur le corridor de Danzig.';
 const TEXT =
@@ -691,6 +696,117 @@ test('un fichier CRLF garde ses fins de ligne : rien n’est écrit sans décisi
     await stop(session);
   }
 });
+
+/** Une requête en lecture seule, par le Node d'Electron, sur une base que l'app a fermée. */
+function query<T>(dbPath: string, sql: string): T[] {
+  const script = `
+    const Database = require('better-sqlite3');
+    const [file, sql] = process.argv.slice(1);
+    const db = new Database(file, { readonly: true, fileMustExist: true });
+    process.stdout.write(JSON.stringify(db.prepare(sql).all()));
+    db.close();
+  `;
+  const electronPath = createRequire(import.meta.url)('electron') as string;
+  const out = execFileSync(electronPath, ['-e', script, dbPath, sql], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    stdio: 'pipe',
+  });
+  return JSON.parse(out.toString()) as T[];
+}
+
+/**
+ * L01-6 : insérer une note réécrivait le document du curseur à la fin. Une proposition en attente
+ * plus loin disparaissait, et son retrait partait aux deux journaux comme une décision
+ * (`invalidated`) que l'auteur n'avait pas prise. Au bout du document, là où attend un brouillon
+ * envoyé sans curseur posé, c'était la définition de la note qui la touchait (revue L01-6).
+ */
+const NOTED = TEXT.replace('sans histoire.', 'sans histoire.[^1]');
+const NOTED_LAST = TEXT.replace('Dernier paragraphe.', 'Dernier paragraphe.[^1]');
+const NOTE_CASES = [
+  {
+    where: 'plus loin dans le texte',
+    noteLine: 'Premier paragraphe',
+    anchor: TEXT.indexOf('Dernier paragraphe.') + 'Dernier paragraphe.'.length,
+    proposed: ' PROPOSÉ.',
+    noted: `${NOTED}\n[^1]: Texte de la note.`,
+    accepted: `${NOTED.replace('Dernier paragraphe.', 'Dernier paragraphe. PROPOSÉ.')}\n[^1]: Texte de la note.`,
+  },
+  {
+    // Après la fin de ligne finale, avec le padding de bloc d'un brouillon : elle reste devant la
+    // définition, qui vient après une ligne vide.
+    where: 'au bout du document',
+    noteLine: 'Premier paragraphe',
+    anchor: TEXT.length,
+    proposed: '\nPROPOSÉ.',
+    noted: `${NOTED}\n\n[^1]: Texte de la note.`,
+    accepted: `${NOTED}\nPROPOSÉ.\n\n[^1]: Texte de la note.`,
+  },
+  {
+    // La note au bout du dernier paragraphe, juste avant la fin de ligne finale : la proposition qui
+    // attend après elle n'est pas à l'endroit de l'appel, et reste (seconde revue L01-6).
+    where: 'au bout du document, la note au bout du dernier paragraphe,',
+    noteLine: 'Dernier paragraphe',
+    anchor: TEXT.length,
+    proposed: '\nPROPOSÉ.',
+    noted: `${NOTED_LAST}\n\n[^1]: Texte de la note.`,
+    accepted: `${NOTED_LAST}\nPROPOSÉ.\n\n[^1]: Texte de la note.`,
+  },
+];
+
+for (const { where, noteLine, anchor, proposed, noted, accepted } of NOTE_CASES) {
+  test(`une note insérée avant une proposition en attente ${where} la laisse, et seul « Accepter » va aux journaux`, async () => {
+    const session = await start();
+    if (!session) return;
+    const { app, window } = session;
+    const { projectJson, document } = makeArticle();
+    const projectDir = dirname(document);
+    const onDisk = () => readFileSync(document, 'utf8');
+
+    try {
+      await openProject(app, window, projectJson);
+      await expect(line(window, 'Dernier paragraphe')).toBeVisible({ timeout: 20_000 });
+      await window.evaluate(
+        ({ at, text }) => {
+          (window as unknown as { __cliodeckProposals: { inject(p: object): void } }).__cliodeckProposals.inject({
+            range: { from: at, to: at },
+            original: '',
+            proposed: text,
+            category: 'ai-insert',
+            source: { model: 'modele-e2e', task: 'e2e' },
+          });
+        },
+        { at: anchor, text: proposed },
+      );
+      await expect(proposal(window)).toHaveCount(1);
+
+      // La note au bout du paragraphe, par le bouton : le curseur passe dans la définition.
+      await line(window, noteLine).click();
+      await window.keyboard.press('End');
+      await window.locator('button[title^="Note de bas de page"]').first().click();
+      await window.keyboard.type('Texte de la note.');
+      await expect.poll(onDisk, { timeout: 10_000 }).toBe(noted);
+      await expect(proposal(window)).toHaveCount(1);
+
+      await acceptProposal(window);
+      await expect.poll(onDisk, { timeout: 10_000 }).toBe(accepted);
+    } finally {
+      await stop(session);
+    }
+
+    // Sur le disque, l'app fermée : la seule décision est celle de l'auteur.
+    const research = query<{ decision: string }>(
+      join(projectDir, '.cliodeck', 'brain.db'),
+      'SELECT decision FROM history_proposal_events ORDER BY rowid',
+    );
+    expect(research.map((r) => r.decision)).toEqual(['accepted']);
+    const usage = query<{ decision: string }>(
+      join(projectDir, '.cliodeck', 'journal.db'),
+      'SELECT decision FROM proposal_adjudications ORDER BY rowid',
+    );
+    expect(usage.map((r) => r.decision)).toEqual(['accepted']);
+  });
+}
 
 test('« Ouvrir la source » vers un chapitre déjà visité : le passage est à l’écran, pas l’ancienne position', async () => {
   const session = await start();

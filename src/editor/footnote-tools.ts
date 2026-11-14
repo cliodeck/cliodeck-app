@@ -161,6 +161,81 @@ export function nextFootnoteNumber(content: string): number {
   return max + 1;
 }
 
+/**
+ * Une note insérée à `position` : l'appel `[^n]` là, et la définition `[^n]: ` en fin de document,
+ * une ligne vide avant elle, à la place des blancs de fin. `cursor` est au bout de la définition,
+ * prêt pour son texte.
+ *
+ * Deux insertions localisées, et non une réécriture du curseur à la fin : une proposition IA en
+ * attente entre les deux n'est plus touchée, donc plus retirée ni journalisée comme une décision
+ * (L01-6). Le texte obtenu est celui du calcul d'avant, qui posait déjà la définition en fin de
+ * document, derrière celles qui s'y trouvaient. Positions, longueurs et texte sont ceux du
+ * document (`EditorFacade.getDocText`) : une fin de ligne y vaut 1, quel que soit le fichier.
+ *
+ * `pending` : les plages des propositions en attente. Une proposition qui finit au bout du texte ou
+ * dans les blancs de fin (un brouillon envoyé sans curseur posé y attend) garde ces blancs, et la
+ * définition s'ajoute après eux, marquée `afterProposals` : elle ne la touche pas, et un brouillon
+ * accepté reste séparé d'elle par une ligne vide. De même quand le curseur est au bout du dernier
+ * mot ou dans les blancs de fin, et que la proposition attend plus loin. Seul cas où le texte
+ * diffère de celui d'avant : des blancs de fin en plus.
+ */
+export function planFootnoteInsertion(
+  doc: string,
+  position: number,
+  pending: ReadonlyArray<{ from: number; to: number }> = []
+): {
+  changes: Array<{ from: number; to: number; insert: string; afterProposals?: boolean }>;
+  cursor: number;
+  footnoteNumber: number;
+} {
+  const footnoteNumber = nextFootnoteNumber(doc);
+  const at = Math.max(0, Math.min(position, doc.length));
+  const call = `[^${footnoteNumber}]`;
+  const definition = `\n\n[^${footnoteNumber}]: `;
+  // Les blancs de fin restent, l'appel va au curseur, et la définition s'ajoute après les blancs et
+  // les propositions qui y attendent, sans les toucher.
+  const afterPending = () => ({
+    changes: [
+      { from: at, to: at, insert: call },
+      { from: doc.length, to: doc.length, insert: definition, afterProposals: true },
+    ],
+    cursor: doc.length + call.length + definition.length,
+    footnoteNumber,
+  });
+  // Sans proposition au bout, les blancs de fin partent : la définition suit le dernier texte, comme
+  // avant.
+  const end = doc.trimEnd().length;
+  if (at >= end) {
+    // Le curseur est au bout du dernier mot ou dans les blancs de fin. Une proposition qui attend
+    // plus loin n'est pas à l'endroit de l'appel : la note la laisse, comme une frappe au même
+    // curseur (seconde revue L01-6).
+    if (pending.some((r) => r.from > at)) return afterPending();
+    // Sinon l'appel et la définition remplacent ces blancs d'un seul tenant. Une proposition posée
+    // au curseur est touchée, comme par une frappe ; une qui attend avant lui, non.
+    return {
+      changes: [{ from: at, to: doc.length, insert: call + definition }],
+      cursor: at + call.length + definition.length,
+      footnoteNumber,
+    };
+  }
+  // Ce que les blancs de fin ont déjà de la définition (sa ligne vide) reste en place.
+  let kept = 0;
+  while (end + kept < doc.length && doc[end + kept] === definition[kept]) kept++;
+  // La définition commencerait à `end + kept`. Une proposition qui finit là ou plus loin serait
+  // touchée, donc retirée ; une qui finit dans les blancs de fin verrait changer ce qui la suit, que
+  // son texte compte (accepté, un brouillon se collerait à la définition, que pandoc imprimerait en
+  // clair). Les blancs restent alors, et la définition vient après eux.
+  if (pending.some((r) => r.to >= end + kept || r.to > end)) return afterPending();
+  return {
+    changes: [
+      { from: at, to: at, insert: call },
+      { from: end + kept, to: doc.length, insert: definition.slice(kept) },
+    ],
+    cursor: end + call.length + definition.length,
+    footnoteNumber,
+  };
+}
+
 /** Ce que la renumérotation n'a pas pu lier, sous le numéro qu'elle lui a donné. */
 export interface UnlinkedFootnote {
   /**

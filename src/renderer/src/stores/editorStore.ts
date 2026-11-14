@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import i18n from '../i18n';
+import type { ChangeOrigin } from '@/editor/cm/change-origin';
 import { detectLineSeparator } from '@/editor/cm/fidelity';
 import { computeSelectionWrap, type SnippetTemplates } from '@/editor/cm/inline-formatting';
 import type { EditorFacade } from '@/editor/facade';
-import { nextFootnoteNumber } from '@/editor/footnote-tools';
+import { planFootnoteInsertion } from '@/editor/footnote-tools';
 import { logger } from '../utils/logger';
 import { useDialogStore } from './dialogStore';
 import { insertDraftAtOffset } from '../components/Brainstorm/messageToDraft';
@@ -31,11 +32,17 @@ export type EditorSwitchLock = 'book.renumberInProgress';
  * après un accord explicite de l'auteur. `text` rend à un tampon sans titre le texte
  * qu'un détachement lui a pris (`detachedText`), si le changement de projet n'a rien
  * mis à sa place.
+ *
+ * `edit` réécrit le document ouvert sans en changer (renumérotation des notes,
+ * renommage du chapitre ouvert) : `text` est son texte entier, fins de ligne du
+ * fichier comprises, et seul ce qui diffère change dans la vue. `ifFilePath` : le
+ * fichier que l'édition vise, refusée (`BufferChangedError`) si ce n'est plus lui.
  */
 export type BufferTarget =
   | { kind: 'open'; filePath: string }
   | { kind: 'untitled'; discardOutgoing?: true; text?: string }
-  | { kind: 'detach'; discardOutgoing?: true };
+  | { kind: 'detach'; discardOutgoing?: true }
+  | { kind: 'edit'; text: string; cursor?: number; origin?: ChangeOrigin; ifFilePath?: string };
 
 /**
  * Pourquoi le document change : pour le journal et, hors de tout document, pour
@@ -47,7 +54,9 @@ export type BufferReason =
   | 'project-switch'
   | 'project-open'
   | 'project-restore'
-  | 'project-close';
+  | 'project-close'
+  | 'renumber-footnotes'
+  | 'rename-chapter';
 
 /**
  * `unchanged` : le fichier demandé est déjà là, rien n'a bougé. `superseded` : une
@@ -88,6 +97,22 @@ export class OutgoingSaveError extends Error {
   constructor(cause: unknown) {
     super(cause instanceof Error ? cause.message : String(cause));
     this.name = 'OutgoingSaveError';
+  }
+}
+
+/**
+ * Une édition visait un document qui n'est plus ouvert (un autre fichier, ou plus aucun,
+ * le temps d'un changement de projet) : rien n'a été écrit, ni dans la vue ni dans le miroir.
+ */
+export class BufferChangedError extends Error {
+  readonly expected: string | null;
+  readonly actual: string | null;
+
+  constructor(expected: string | null, actual: string | null) {
+    super(`Le document ouvert n’est plus ${expected ?? 'celui que visait l’édition'} (${actual ?? 'aucun'}).`);
+    this.name = 'BufferChangedError';
+    this.expected = expected;
+    this.actual = actual;
   }
 }
 
@@ -166,12 +191,15 @@ interface EditorState {
   setSwitchLock: (lock: EditorSwitchLock | null) => void;
 
   // Actions
-  setContent: (content: string) => void;
   /**
    * La seule porte pour remplacer le document ouvert : elle écrit le sortant,
    * demande avant d'abandonner un tampon sans titre, laisse gagner la dernière
    * demande et refuse sous le verrou. Rejette si le sortant ne peut pas être écrit
    * ou si le fichier demandé ne peut pas être lu : rien n'a alors changé.
+   *
+   * `edit` n'est pas une bascule : ni écriture, ni lecture, ni verrou. Il a lieu
+   * pendant l'appel, avant toute attente, et rejette `BufferChangedError` si le
+   * document n'est plus celui qu'il vise.
    */
   replaceBuffer: (next: BufferTarget, reason: BufferReason) => Promise<BufferOutcome>;
   loadFile: (filePath: string) => Promise<BufferOutcome>;
@@ -363,6 +391,28 @@ async function readDocumentFromDisk(filePath: string): Promise<string> {
   );
 }
 
+/**
+ * Réécrit le document ouvert sans en changer, et tout de suite : appelée sans attente, aucune
+ * frappe ni bascule ne se glisse entre la vérification et l'écriture. Ce n'est pas une bascule :
+ * ni écriture du sortant, ni lecture, ni verrou à respecter (la renumérotation l'a posé pour
+ * elle-même). Hors de tout document, ou sur un autre fichier que celui visé, rien ne s'écrit.
+ */
+function editOpenDocument(next: Extract<BufferTarget, { kind: 'edit' }>, reason: BufferReason): BufferOutcome {
+  const { filePath, bufferDetached, editorFacade, getLiveContent } = useEditorStore.getState();
+  if (bufferDetached || (next.ifFilePath !== undefined && next.ifFilePath !== filePath)) {
+    throw new BufferChangedError(next.ifFilePath ?? null, bufferDetached ? null : filePath);
+  }
+  if (getLiveContent() === next.text) return { status: 'unchanged' };
+  logger.store('Editor', 'Open document edited', { reason, contentLength: next.text.length });
+  // La vue ne change que ce qui diffère : le curseur et les propositions en attente restent là
+  // où rien ne change. Sans vue (l'auteur a quitté le mode Écriture), le miroir porte le texte,
+  // et la prochaine vue se crée sur lui.
+  if (editorFacade) editorFacade.setValue(next.text, next.cursor, next.origin);
+  else useEditorStore.setState({ content: next.text });
+  useEditorStore.setState({ isDirty: true });
+  return { status: 'replaced' };
+}
+
 // MARK: - Store
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -384,14 +434,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ switchLock: lock });
   },
 
-  setContent: (content: string) => {
-    set({
-      content,
-      isDirty: true,
-    });
-  },
-
   replaceBuffer: trackBufferRequest(async (next: BufferTarget, reason: BufferReason): Promise<BufferOutcome> => {
+    if (next.kind === 'edit') return editOpenDocument(next, reason);
     logger.store('Editor', 'replaceBuffer called', { next, reason });
     const openPath = next.kind === 'open' ? next.filePath : null;
 
@@ -695,54 +739,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { editorFacade } = get();
     if (!editorFacade) return null;
 
-    let inserted: { definitionPosition: number; footnoteNumber: number } | null = null;
-    // L'éditeur reçoit l'édition directement, curseur dans la définition. Le miroir suit par la vue, et
-    // une vue en lecture seule refuse. `content` et la position sont en offsets du document : le texte
-    // d'un fichier CRLF ne s'y lit pas, et la définition tomberait hors du document.
-    const applied = editorFacade.editSelection((content) => {
-      // Prochain numéro par parse Lezer : un `[^99]` dans un bloc de code
-      // n'est pas une note (l'ancienne regex comptait tout le contenu).
-      const footnoteNumber = nextFootnoteNumber(content);
-
-      const refText = `[^${footnoteNumber}]`;
-      const defText = `[^${footnoteNumber}]: `;
-
-      // Insert reference at the specified position
-      const afterRef = content.slice(markdownPosition);
-
-      // Check if there are existing footnote definitions at the end
-      // and insert the new definition before them
-      const defRegex = /\n\n(\[\^\d+\]:[\s\S]*)$/;
-      const defMatch = afterRef.match(defRegex);
-
-      let insert: string;
-      if (defMatch) {
-        // There are existing definitions - insert new def after them (at the end)
-        const afterRefWithoutDefs = afterRef.slice(0, defMatch.index);
-        const existingDefs = defMatch[1].trimEnd();
-        insert = refText + afterRefWithoutDefs + '\n\n' + existingDefs + '\n\n' + defText;
-      } else {
-        // No existing definitions - add at the end
-        insert = refText + afterRef.trimEnd() + '\n\n' + defText;
-      }
-
-      // Definition position is at the very end, after the defText marker
-      const definitionPosition = markdownPosition + insert.length;
-      inserted = { definitionPosition, footnoteNumber };
-      logger.store('Editor', 'Footnote inserted at position', {
-        number: footnoteNumber,
-        position: markdownPosition,
-        definitionPosition,
-      });
-      return {
-        from: markdownPosition,
-        to: content.length,
-        insert,
-        selFrom: definitionPosition,
-        selTo: definitionPosition,
-      };
+    // Deux insertions localisées, l'appel au curseur et la définition en fin de document : réécrire
+    // du curseur à la fin retirait les propositions IA en attente plus loin, et chaque retrait partait
+    // aux journaux comme une décision (L01-6). Une proposition qui attend au bout du document reste
+    // devant la définition. L'éditeur reçoit l'édition directement, curseur dans la définition. Le
+    // miroir suit par la vue, et une vue en lecture seule refuse. Le texte et la position sont en
+    // offsets du document : une fin de ligne y vaut 1, même dans un fichier CRLF.
+    const plan = planFootnoteInsertion(
+      editorFacade.getDocText(),
+      markdownPosition,
+      editorFacade.getProposalRanges()
+    );
+    if (!editorFacade.applyChanges(plan.changes, plan.cursor)) return null;
+    editorFacade.focus();
+    logger.store('Editor', 'Footnote inserted at position', {
+      number: plan.footnoteNumber,
+      position: markdownPosition,
+      definitionPosition: plan.cursor,
     });
-
-    return applied ? inserted : null;
+    return { definitionPosition: plan.cursor, footnoteNumber: plan.footnoteNumber };
   },
 }));
+

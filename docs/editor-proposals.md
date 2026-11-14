@@ -67,7 +67,18 @@ Cycle de vie :
   (`changes.mapPos`). Toute édition qui **touche** un range en attente —
   humaine, collage, ou programmatique (ex. renumérotation) — retire la
   proposition avec un événement `invalidated` : un range dont le contenu a
-  changé n'est plus adjudicable tel quel.
+  changé n'est plus adjudicable tel quel. Une seule exception : la définition
+  d'une note, que l'app ajoute au bout du document après les propositions en
+  attente (`afterProposalsEffect`). Elle ne retire pas celle qui finit là, qui
+  reste devant elle, et Cmd+Z, qui la retire, non plus. Une proposition posée
+  après elle (le curseur laissé dans la définition) s'appuie sur elle : Cmd+Z la
+  retire, comme toute édition qui la touche. Quand une proposition attend au
+  bout du texte ou dans les blancs de fin (un brouillon envoyé sans curseur
+  posé), ces blancs restent, et la définition vient après eux, précédée d'une
+  ligne vide : accepté, le brouillon ne s'y colle pas. C'est vrai aussi quand la
+  note est posée au bout du dernier paragraphe, ou dans les blancs de fin avant
+  la proposition. L'appel de la note, lui, retire une proposition posée à son
+  endroit, comme une frappe.
 - **Expiration** (arbitrage 5) : à la fermeture du document (destruction de
   la vue), les propositions en attente émettent `expired` — pas de
   persistance, pas de restauration. Changer de mode détruit la vue comme

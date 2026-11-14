@@ -404,7 +404,7 @@ describe('là où l’autosave ne doit pas écrire', () => {
 });
 
 // L'autosave survit au panneau : l'auteur qui quitte le mode Écriture en pleine renumérotation laisse
-// un chapitre ouvert sans vue, dont le texte passe par le miroir (`setContent`).
+// un chapitre ouvert sans vue, dont le texte passe par le miroir (`replaceBuffer`, cas `edit`).
 describe('l’auteur quitte le mode Écriture en pleine renumérotation', () => {
   const chapterPath = (name: string) => `${PROJECT}/chapters/${name}.md`;
   const A = chapterPath('a');

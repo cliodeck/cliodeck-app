@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Compartment, EditorSelection, EditorState, type Extension } from '@codemirror/state';
+import { Compartment, EditorSelection, EditorState, Text, type Extension } from '@codemirror/state';
 import {
   EditorView,
   drawSelection,
@@ -8,7 +8,7 @@ import {
   lineNumbers,
   placeholder,
 } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, isolateHistory } from '@codemirror/commands';
 import {
   highlightSelectionMatches,
   search,
@@ -31,14 +31,17 @@ import {
 } from '@/editor/cm/live-render';
 import { scholarly, type CitationCandidate } from '@/editor/cm/scholarly';
 import { scholarlyMarkdown } from '@/editor/lezer-extensions';
-import { changeOrigin, changeOriginGuard } from '@/editor/cm/change-origin';
+import { changeOrigin, changeOriginGuard, type ChangeOrigin } from '@/editor/cm/change-origin';
+import { minimalChanges } from '@/editor/cm/minimal-changes';
 import { editSelection, toggleInlineMark } from '@/editor/cm/inline-formatting';
 import {
+  afterProposalsEffect,
+  appendsAfterProposals,
   proposals,
   type Proposal,
   type ProposalsInstance,
 } from '@/editor/proposals';
-import type { EditorFacade } from '@/editor/facade';
+import type { DocChange, EditorFacade } from '@/editor/facade';
 import { editorStateKey, editorStates } from './editor-state-memory';
 import { recordAdjudication } from './proposals-ipc';
 import { normalizeInsertPayload } from './insert-payload';
@@ -240,6 +243,37 @@ function focusIsFree(): boolean {
   return !active || active === document.body || active.closest('.workspace-mode-bar') !== null;
 }
 
+/**
+ * Des changements localisés en une seule étape de Cmd+Z : sans `isolateHistory`, une transaction
+ * sans `userEvent` se fondrait dans la frappe voisine, et Cmd+Z emporterait les deux. Chaque texte
+ * inséré est coupé sur `\n` : dans un fichier CRLF, une chaîne passée telle quelle ne l'est que sur
+ * le séparateur déclaré. Le curseur demandé est borné par la longueur d'arrivée, en offsets du
+ * document : celle du texte reçu compte deux unités par fin de ligne CRLF. Un ajout au bout du
+ * document marqué `afterProposals` (la définition d'une note) ne touche pas la proposition qui
+ * finit là.
+ */
+function applyChanges(
+  view: EditorView,
+  changes: ReadonlyArray<DocChange>,
+  cursorOffset: number | undefined,
+  origin: ChangeOrigin | undefined
+): boolean {
+  if (view.state.readOnly || changes.length === 0) return false;
+  const set = view.state.changes(
+    changes.map(({ from, to, insert }) => ({ from, to, insert: Text.of(insert.split('\n')) }))
+  );
+  const end = view.state.doc.length;
+  view.dispatch({
+    changes: set,
+    ...(cursorOffset !== undefined
+      ? { selection: EditorSelection.cursor(Math.max(0, Math.min(cursorOffset, set.newLength))) }
+      : {}),
+    ...(appendsAfterProposals(changes, end) ? { effects: afterProposalsEffect.of({ from: end, to: end }) } : {}),
+    annotations: [changeOrigin.of(origin ?? 'programmatic'), isolateHistory.of('full')],
+  });
+  return true;
+}
+
 function createFacade(
   view: EditorView,
   changeListeners: Set<(content: string) => void>,
@@ -253,6 +287,7 @@ function createFacade(
     engine: 'cm6',
     isSlideDeck,
     getValue: () => readDocText(view.state),
+    getDocText: () => view.state.doc.toString(),
     getCursorOffset: () => view.state.selection.main.head,
     hasKnownCursor,
     getSelectionText: () => {
@@ -273,21 +308,20 @@ function createFacade(
       view.focus();
     },
     setValue: (text, cursorOffset, origin) => {
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: text },
-        selection:
-          cursorOffset !== undefined
-            ? EditorSelection.cursor(Math.max(0, Math.min(cursorOffset, text.length)))
-            : undefined,
-        annotations: changeOrigin.of(origin ?? 'programmatic'),
-      });
+      // Remplacer tout le document ramenait le curseur en tête et retirait toutes les propositions
+      // en attente (L01-6) : seul ce qui diffère change. Le texte reçu est celui de `getValue` : dans
+      // un fichier CRLF, ses `\r\n` sont une fin de ligne du document.
+      const next = view.state.lineBreak === '\r\n' ? text.replace(/\r\n/g, '\n') : text;
+      applyChanges(view, minimalChanges(view.state.doc.toString(), next), cursorOffset, origin);
     },
+    applyChanges: (changes, cursorOffset, origin) => applyChanges(view, changes, cursorOffset, origin),
     appendText: (text, origin) => {
       view.dispatch({
         changes: { from: view.state.doc.length, insert: text },
         annotations: changeOrigin.of(origin ?? 'programmatic'),
       });
     },
+    getProposalRanges: () => view.state.field(proposalsInstance.field).map((p) => p.range),
     propose: (partial) => {
       // L'effet passerait, pas le texte : accepter journaliserait une décision sans rien écrire.
       if (view.state.readOnly) return false;

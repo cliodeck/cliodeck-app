@@ -237,14 +237,15 @@ export const ChapterNavigator: React.FC = () => {
     // Le `#` fait foi à l'export : on l'aligne quand le chapitre est sous
     // les yeux de l'auteur (édition annulable d'un simple Cmd+Z). Le chemin le dit, pas
     // `currentChapterId` : un chapitre annoncé n'est pas forcément celui qu'affiche
-    // l'éditeur, et son titre s'écrirait alors dans un autre texte.
+    // l'éditeur, et son titre s'écrirait alors dans un autre texte. Par la porte : seul
+    // le titre change, le curseur reste où l'auteur écrivait.
     if (chapter.filePath === currentRelativePath()) {
-      const editor = useEditorStore.getState();
-      const facade = editor.editorFacade;
-      if (facade) {
-        const updated = replaceLeadingHeading(facade.getValue(), title);
-        if (updated !== facade.getValue()) facade.setValue(updated);
-      }
+      const { filePath, getLiveContent, replaceBuffer } = useEditorStore.getState();
+      const updated = replaceLeadingHeading(getLiveContent(), title);
+      await replaceBuffer(
+        { kind: 'edit', text: updated, ...(filePath ? { ifFilePath: filePath } : {}) },
+        'rename-chapter'
+      );
     }
   };
 

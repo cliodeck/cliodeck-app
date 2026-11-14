@@ -38,6 +38,7 @@ function fakeFacade(
   const facade: EditorFacade = {
     engine: 'cm6',
     getValue: () => current,
+    getDocText: () => current,
     getCursorOffset: () => cursor,
     hasKnownCursor: () => cursorKnown,
     getSelectionText: () => null,
@@ -49,6 +50,7 @@ function fakeFacade(
       current = text;
       calls.setValue.push({ text, cursor: cursorOffset });
     },
+    applyChanges: () => false,
     appendText: (text) => {
       current += text;
     },
@@ -56,6 +58,7 @@ function fakeFacade(
       calls.proposals.push(p);
       return accepts;
     },
+    getProposalRanges: () => [],
     revealLine: () => undefined,
     focus: () => undefined,
     onContentChange: () => () => undefined,

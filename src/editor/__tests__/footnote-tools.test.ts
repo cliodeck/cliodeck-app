@@ -3,10 +3,16 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { EditorState, Text } from '@codemirror/state';
 import { pandocAvailable } from '../../../backend/__tests__/helpers/native-guards';
+import { insertDraftAtOffset } from '../../renderer/src/components/Brainstorm/messageToDraft';
+import { createDocState, readDocText } from '../cm/fidelity';
+import { proposals, type ProposalAdjudicationEvent } from '../proposals';
+import { addProposalEffect, afterProposalsEffect, appendsAfterProposals } from '../proposals/state';
 import {
   collectFootnoteDefinitions,
   collectFootnotes,
+  planFootnoteInsertion,
   prefixFootnoteLabels,
   nextFootnoteNumber,
   renumberFootnotes,
@@ -364,5 +370,269 @@ describe('prefixFootnoteLabels — blocs HTML', () => {
     expect(out).toContain('[^ch1-1] ici.');
     expect(out).toContain('[^ch1-1]: note.');
     expect(out).not.toContain('[^1]');
+  });
+});
+
+/** Générateur reproductible : une graine, toujours les mêmes cas. */
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const PROPOSAL_LABELS = {
+  heading: 'proposition IA',
+  accept: 'accepter',
+  reject: 'rejeter',
+  modify: 'modifier',
+  acceptShort: 'accepter',
+  rejectShort: 'rejeter',
+  modifyShort: 'modifier',
+  rejectionPrompt: 'pourquoi ?',
+  apply: 'appliquer',
+  cancel: 'annuler',
+};
+
+/**
+ * L01-6 : insérer une note réécrivait tout le document, du curseur à la fin, et invalidait les
+ * propositions IA en attente plus loin (S14-1-8). Le plan est fait de deux insertions localisées,
+ * l'appel au curseur et la définition en fin de document, et rend le même texte qu'avant.
+ */
+describe('planFootnoteInsertion', () => {
+  /** L'ancien calcul d'`insertFootnoteAtPosition`, recopié tel quel : la référence. */
+  function previousComputation(content: string, position: number): { text: string; cursor: number } {
+    const footnoteNumber = nextFootnoteNumber(content);
+    const refText = `[^${footnoteNumber}]`;
+    const defText = `[^${footnoteNumber}]: `;
+    const afterRef = content.slice(position);
+    const defRegex = /\n\n(\[\^\d+\]:[\s\S]*)$/;
+    const defMatch = afterRef.match(defRegex);
+    let insert: string;
+    if (defMatch) {
+      const afterRefWithoutDefs = afterRef.slice(0, defMatch.index);
+      const existingDefs = defMatch[1].trimEnd();
+      insert = refText + afterRefWithoutDefs + '\n\n' + existingDefs + '\n\n' + defText;
+    } else {
+      insert = refText + afterRef.trimEnd() + '\n\n' + defText;
+    }
+    return { text: content.slice(0, position) + insert, cursor: position + insert.length };
+  }
+
+  function applied(doc: string, changes: ReadonlyArray<{ from: number; to: number; insert: string }>): string {
+    let out = doc;
+    for (let i = changes.length - 1; i >= 0; i--) {
+      out = out.slice(0, changes[i].from) + changes[i].insert + out.slice(changes[i].to);
+    }
+    return out;
+  }
+
+  const DOC = 'Un mot ici.\n\nDeuxième paragraphe.\n\nTroisième paragraphe.\n';
+  const WITH_DEFS = 'Un[^1] mot[^2].\n\nSuite.\n\n[^1]: Un.\n[^2]: Deux.\n';
+
+  it.each([
+    ['sans définition, au milieu', DOC, DOC.indexOf(' ici')],
+    ['sans définition, au début', DOC, 0],
+    ['sans définition, au bout du dernier mot', DOC, DOC.trimEnd().length],
+    ['curseur dans les blancs de fin', DOC, DOC.length],
+    ['curseur entre deux fins de ligne finales', 'Texte.\n\n\n', 'Texte.\n\n'.length],
+    ['définitions groupées en fin de document', WITH_DEFS, WITH_DEFS.indexOf(' mot')],
+    ['curseur dans une définition', WITH_DEFS, WITH_DEFS.indexOf('Deux.')],
+    ['identifiant libre', 'A[^lester].\n\n[^lester]: libre.\n', 1],
+    ['numéro suivant après un [^99] de code', '```\n[^99]\n```\n\nTexte[^4].\n\n[^4]: q.\n', 0],
+    ['document vide', '', 0],
+    ['sans fin de ligne finale', 'Une phrase.', 3],
+    ['blancs de fin variés', 'Une phrase.  \n \n', 3],
+    ['liste imbriquée', '- un[^1]\n  - deux\n\n[^1]: n.\n', '- un[^1]\n  - de'.length],
+    ['hors BMP', 'Le 𝔄 et 😀.\n', 'Le 𝔄'.length],
+  ])('%s : même texte que l’ancien calcul', (_label, doc, position) => {
+    const plan = planFootnoteInsertion(doc, position);
+    const reference = previousComputation(doc, position);
+
+    expect(applied(doc, plan.changes)).toBe(reference.text);
+    expect(plan.cursor).toBe(reference.cursor);
+    expect(plan.footnoteNumber).toBe(nextFootnoteNumber(doc));
+  });
+
+  it('deux insertions : l’appel au curseur, la définition en fin de document, rien entre elles', () => {
+    const at = DOC.indexOf(' ici');
+    const plan = planFootnoteInsertion(DOC, at);
+
+    expect(plan.changes).toHaveLength(2);
+    expect(plan.changes[0]).toEqual({ from: at, to: at, insert: '[^1]' });
+    // Ce qui suit le curseur reste en place : seul le bout du document reçoit la définition.
+    expect(plan.changes[1].from).toBeGreaterThanOrEqual(DOC.trimEnd().length);
+    expect(plan.changes[1].to).toBe(DOC.length);
+    expect(plan.footnoteNumber).toBe(1);
+  });
+
+  it('le numéro suit le plus grand des numéros réels', () => {
+    expect(planFootnoteInsertion(WITH_DEFS, 0).footnoteNumber).toBe(3);
+  });
+
+  it('document CRLF : la note entre sans RangeError, et le fichier reste CRLF uniforme', () => {
+    const crlf = 'Les archives.\r\n\r\nUn paragraphe.\r\nUne suite.\r\n';
+    const state = createDocState(crlf);
+    // Les offsets du document : une fin de ligne y vaut 1, comme sous le curseur.
+    const doc = state.doc.toString();
+    const at = doc.indexOf(' paragraphe');
+    const plan = planFootnoteInsertion(doc, at);
+
+    const next = state.update({
+      changes: plan.changes.map(({ from, to, insert }) => ({ from, to, insert: Text.of(insert.split('\n')) })),
+      selection: { anchor: plan.cursor },
+    }).state;
+    const written = readDocText(next);
+
+    expect(written).toBe('Les archives.\r\n\r\nUn[^1] paragraphe.\r\nUne suite.\r\n\r\n[^1]: ');
+    expect(written.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(next.selection.main.head).toBe(next.doc.length);
+  });
+
+  /**
+   * Revue L01-6 : la définition va au bout du document, là même où attend un brouillon envoyé sans
+   * curseur posé. Une proposition qui finit au bout du texte ou dans les blancs de fin les garde, et
+   * la définition s'ajoute après eux, marquée `afterProposals`.
+   */
+  describe('une proposition en attente au bout du document', () => {
+    const appended = (doc: string, at: number) => `${doc.slice(0, at)}[^1]${doc.slice(at)}\n\n[^1]: `;
+
+    it.each([
+      ['après la fin de ligne finale', DOC, DOC.length],
+      ['dans les blancs de fin', 'Texte.\n\n\n', 'Texte.\n'.length],
+      ['au bout d’un texte sans fin de ligne finale', 'Une phrase.', 'Une phrase.'.length],
+      ['au bout du texte, suivi d’espaces', 'Une phrase.  \n', 'Une phrase.'.length],
+    ])('%s : les blancs restent, la définition vient après eux', (_label, doc, anchor) => {
+      const at = 2;
+      const plan = planFootnoteInsertion(doc, at, [{ from: anchor, to: anchor }]);
+
+      expect(plan.changes).toEqual([
+        { from: at, to: at, insert: '[^1]' },
+        { from: doc.length, to: doc.length, insert: '\n\n[^1]: ', afterProposals: true },
+      ]);
+      expect(applied(doc, plan.changes)).toBe(appended(doc, at));
+      expect(plan.cursor).toBe(appended(doc, at).length);
+    });
+
+    it.each([
+      ['plus haut dans le texte', DOC, 0],
+      ['au bout du dernier mot, avant la fin de ligne finale', DOC, DOC.trimEnd().length],
+      ['au bout du dernier mot, avant deux fins de ligne', 'Texte.\n\n', 'Texte.'.length],
+    ])('%s : la définition ne la touche pas, le texte est celui d’avant', (_label, doc, anchor) => {
+      const at = 2;
+      const plan = planFootnoteInsertion(doc, at, [{ from: anchor, to: anchor }]);
+
+      expect(plan.changes.some((c) => c.afterProposals)).toBe(false);
+      expect(applied(doc, plan.changes)).toBe(previousComputation(doc, at).text);
+    });
+
+    it('curseur dans les blancs de fin : l’appel et la définition y vont, comme avant', () => {
+      const plan = planFootnoteInsertion(DOC, DOC.length, [{ from: DOC.length, to: DOC.length }]);
+      expect(plan.changes).toEqual([{ from: DOC.length, to: DOC.length, insert: '[^1]\n\n[^1]: ' }]);
+    });
+
+    /**
+     * Seconde revue L01-6 : la note posée au bout du dernier paragraphe, ou dans les blancs de fin,
+     * avant un brouillon qui attend plus loin. Un seul changement du curseur à la fin le touchait,
+     * alors qu'une frappe au même curseur le laisse.
+     */
+    it.each([
+      ['curseur au bout du dernier mot, brouillon après la fin de ligne finale', DOC, DOC.trimEnd().length, DOC.length],
+      ['curseur au bout du dernier mot, brouillon dans les blancs de fin', 'Texte.\n\n\n', 'Texte.'.length, 'Texte.\n'.length],
+      ['curseur dans les blancs de fin, brouillon plus loin', 'Texte.\n\n\n', 'Texte.\n'.length, 'Texte.\n\n\n'.length],
+      ['curseur au bout du texte, suivi d’espaces', 'Une phrase.  \n', 'Une phrase.'.length, 'Une phrase.  \n'.length],
+    ])('%s : l’appel au curseur, les blancs restent, la définition vient après eux', (_label, doc, at, anchor) => {
+      const plan = planFootnoteInsertion(doc, at, [{ from: anchor, to: anchor }]);
+
+      expect(plan.changes).toEqual([
+        { from: at, to: at, insert: '[^1]' },
+        { from: doc.length, to: doc.length, insert: '\n\n[^1]: ', afterProposals: true },
+      ]);
+      expect(applied(doc, plan.changes)).toBe(appended(doc, at));
+      expect(plan.cursor).toBe(appended(doc, at).length);
+    });
+
+    it('témoin : un brouillon avant le curseur, dans les blancs de fin, ne change rien au calcul d’avant', () => {
+      const doc = 'Texte.\n\n\n';
+      const at = doc.length;
+      const plan = planFootnoteInsertion(doc, at, [{ from: 'Texte.\n'.length, to: 'Texte.\n'.length }]);
+      expect(plan.changes).toEqual([{ from: at, to: at, insert: '[^1]\n\n[^1]: ' }]);
+      expect(applied(doc, plan.changes)).toBe(previousComputation(doc, at).text);
+    });
+  });
+
+  /**
+   * Cas générés, sur un vrai état CM6 avec le vrai champ des propositions : un brouillon posé comme
+   * le pose `insertDraftAtCursor` (padding d'`insertDraftAtOffset`), une note insérée ailleurs comme
+   * le fait la façade, puis le brouillon accepté.
+   */
+  it('cas générés : la note ne retire que la proposition qu’elle touche, et la définition reste un bloc à part', () => {
+    const rand = mulberry32(20261114);
+    const pick = <T>(items: readonly T[]): T => items[Math.floor(rand() * items.length)];
+    const PARAGRAPHS = ['Les archives de Danzig.', 'Un appel[^1] ici.', '- un\n  - deux', '𝔄 et 😀.', '> citée'];
+    const TAILS = ['', '\n', '\n\n', '\n\n\n', '  \n', ' ', '\n \n', '\n\n[^1]: Déjà là.\n'];
+    const DRAFT = 'Brouillon.';
+    let checked = 0;
+
+    for (let i = 0; i < 400; i++) {
+      const count = 1 + Math.floor(rand() * 4);
+      const doc = Array.from({ length: count }, () => pick(PARAGRAPHS)).join(pick(['\n\n', '\n'])) + pick(TAILS);
+      const end = doc.trimEnd().length;
+      if (end === 0) continue;
+      // Ni au milieu d'un caractère hors BMP, ni dans une plage où CM6 ne poserait pas de curseur.
+      const positions = Array.from({ length: doc.length + 1 }, (_, k) => k).filter(
+        (k) => !(k > 0 && k < doc.length && /[\uDC00-\uDFFF]/.test(doc[k]))
+      );
+      const at = pick(positions);
+      const anchor = pick(positions);
+
+      const events: ProposalAdjudicationEvent[] = [];
+      const instance = proposals({ onEvent: (e) => events.push(e), labels: PROPOSAL_LABELS });
+      // Ce que `insertDraftAtCursor` propose : le brouillon et son padding de bloc.
+      const padded = insertDraftAtOffset(doc, anchor, DRAFT);
+      const insert = padded.slice(anchor, anchor + (padded.length - doc.length));
+      let state = EditorState.create({ doc, extensions: instance.extension }).update({
+        effects: addProposalEffect.of({
+          id: 'p',
+          range: { from: anchor, to: anchor },
+          category: 'brainstorm-draft',
+          original: '',
+          proposed: insert,
+          source: { model: 'm', task: 't' },
+          createdAt: new Date().toISOString(),
+        }),
+      }).state;
+
+      const plan = planFootnoteInsertion(doc, at, state.field(instance.field).map((p) => p.range));
+      state = state.update({
+        changes: plan.changes.map(({ from, to, insert: text }) => ({ from, to, insert: text })),
+        // Comme la façade (`applyChanges`) : l'ajout marqué `afterProposals` porte l'effet.
+        effects: appendsAfterProposals(plan.changes, doc.length)
+          ? afterProposalsEffect.of({ from: doc.length, to: doc.length })
+          : [],
+      }).state;
+      const label = JSON.stringify({ doc, at, anchor });
+      const n = plan.footnoteNumber;
+
+      // Seule la note posée sur la proposition la retire : l'appel au même endroit, comme une frappe.
+      // Un curseur dans les blancs de fin, avant elle, la laisse aussi (seconde revue L01-6).
+      const touched = anchor === at;
+      expect(events.map((e) => e.decision), label).toEqual(touched ? ['invalidated'] : []);
+      const text = state.doc.toString();
+      expect(text.endsWith(`[^${n}]: `), label).toBe(true);
+      if (touched) continue;
+
+      const [pending] = state.field(instance.field);
+      state = state.update({ changes: { from: pending.range.from, to: pending.range.to, insert: pending.proposed } }).state;
+      const accepted = state.doc.toString();
+      expect(accepted.split(DRAFT), label).toHaveLength(2);
+      // La définition reste un bloc à part : une ligne vide devant elle.
+      expect(accepted.endsWith(`\n\n[^${n}]: `), label).toBe(true);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(200);
   });
 });

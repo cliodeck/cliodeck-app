@@ -1,10 +1,12 @@
 import { EditorSelection, type Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
+import { invertedEffects } from '@codemirror/commands';
 import { changeOrigin } from '../cm/change-origin';
 import { toDocText } from '../cm/fidelity';
 import {
   addProposalEffect,
   createProposalsField,
+  invertAfterProposals,
   makeAdjudicationEvent,
   resolveProposalEffect,
   setProposalUiEffect,
@@ -33,6 +35,7 @@ export type {
 } from './types';
 export { createRejectionSampler } from './types';
 export type { PendingProposal } from './state';
+export { afterProposalsEffect, appendsAfterProposals } from './state';
 
 let idCounter = 0;
 function generateId(): string {
@@ -159,6 +162,7 @@ export function proposals(config: ProposalsConfig): ProposalsInstance {
   return {
     extension: [
       field,
+      invertedEffects.of(invertAfterProposals),
       proposalDecorations(field, config.labels, handlers),
       proposalKeymap(field, handlers),
       proposalExpiry(field, (p) =>

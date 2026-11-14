@@ -14,6 +14,19 @@ import type { ChangeOrigin } from './cm/change-origin';
 import type { SelectionEdit } from './cm/inline-formatting';
 import type { Proposal } from './proposals';
 
+/** Un changement en offsets de `EditorFacade.getDocText`. */
+export interface DocChange {
+  from: number;
+  to: number;
+  insert: string;
+  /**
+   * Une insertion pure au bout du document qui vient après les propositions en attente (la
+   * définition d'une note) : elle ne touche pas celle qui finit là, qui reste devant elle. Sans
+   * effet sur un autre changement, ou si un autre changement atteint aussi le bout du document.
+   */
+  afterProposals?: boolean;
+}
+
 export interface EditorFacade {
   /** Le moteur qui implémente cette façade. */
   readonly engine: 'cm6';
@@ -23,6 +36,13 @@ export interface EditorFacade {
 
   /** Contenu réel de l'éditeur (source de vérité pour la sauvegarde). */
   getValue(): string;
+
+  /**
+   * Le texte du document tel que le comptent ses offsets (curseur, `applyChanges`) : une fin de
+   * ligne y vaut un `\n`, quel que soit le fichier. Pour calculer une édition, jamais pour l'écrire :
+   * dans un fichier CRLF, il diffère de `getValue`.
+   */
+  getDocText(): string;
 
   /** Offset du curseur (tête de sélection). */
   getCursorOffset(): number;
@@ -67,10 +87,20 @@ export interface EditorFacade {
   editSelection(edit: SelectionEdit, origin?: ChangeOrigin): boolean;
 
   /**
-   * Remplace tout le document en une seule édition (annulable d'un coup),
-   * en plaçant le curseur à `cursorOffset` si fourni.
+   * Donne au document le texte `text` (celui de `getValue`, fins de ligne du fichier comprises), en
+   * une seule étape de Cmd+Z, mais ne change que ce qui diffère (`minimalChanges`) : le curseur et
+   * les propositions en attente restent là où rien ne change. Curseur à `cursorOffset` si fourni,
+   * en offsets du document d'arrivée. Réservé à la porte (`editorStore.replaceBuffer`).
    */
   setValue(text: string, cursorOffset?: number, origin?: ChangeOrigin): void;
+
+  /**
+   * Applique des changements calculés sur `getDocText` (positions de ce texte, triées, sans
+   * chevauchement ; une fin de ligne y vaut un `\n`), en une seule étape de Cmd+Z. Curseur à
+   * `cursorOffset` si fourni, en offsets du document d'arrivée ; sinon CM6 le reporte à travers
+   * les changements. Rend faux si rien n'a changé : vue en lecture seule, ou aucun changement.
+   */
+  applyChanges(changes: ReadonlyArray<DocChange>, cursorOffset?: number, origin?: ChangeOrigin): boolean;
 
   /** Ajoute du texte en fin de document. */
   appendText(text: string, origin?: ChangeOrigin): void;
@@ -83,6 +113,9 @@ export interface EditorFacade {
    * texte, sans jamais retomber sur une insertion directe.
    */
   propose(proposal: Partial<Proposal>): boolean;
+
+  /** Les plages des propositions en attente, en offsets du document. */
+  getProposalRanges(): ReadonlyArray<{ from: number; to: number }>;
 
   /**
    * Fait défiler jusqu'à la ligne (1-indexée), y place le curseur, focus. Sans le focus si
