@@ -92,6 +92,20 @@ describe.each(['fr', 'en', 'de'] as const)('échec d’une image, en %s', (lng) 
     expect(message).toContain('images/logo.png');
     expect(message).not.toBe('messages.export.beamerImageNotFound');
   });
+
+  it('un dossier d’images que pandoc ne peut pas lire : nommé, avec le caractère en cause', async () => {
+    const t = await translator(lng);
+    const issue = {
+      code: 'export.imageFolderUnreachable',
+      params: { dir: '/Users/h/Les archives : une histoire', char: ':' },
+    };
+
+    const message = translateMessage(t, issue);
+
+    expect(message).toContain('/Users/h/Les archives : une histoire');
+    expect(message).toMatch(/[«“„]\s?:\s?[»”“]/);
+    expect(message).not.toBe('messages.export.imageFolderUnreachable');
+  });
 });
 
 describe.each(['fr', 'en', 'de'])('locale %s', (language) => {

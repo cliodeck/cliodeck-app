@@ -24,10 +24,12 @@
  *
  * Une image en chemin relatif au projet (`images/relative.png`) y est depuis L07-2 : pandoc tourne
  * dans le dossier temporaire de l'export, et sans `--resource-path` la remplaçait par sa légende,
- * export « réussi ». Le projet du banc a une espace dans son chemin ; l'image relative est sous
- * `images/` (article, présentation) ou sous `chapters/images/` (livre, relative à son chapitre),
- * et l'export ne doit rien signaler (`warnings`). Le nombre d'images du PDF est vérifié par
- * `pdf-export-paths.test.ts`.
+ * export « réussi ». Le projet du banc s'appelle « Les archives : une histoire » : une espace, et
+ * le séparateur des listes de chemins (`path.delimiter`, `:` sous macOS et Linux), sur lequel
+ * pandoc découpe `--resource-path` (le dossier passe alors par un lien, `stageResourcePaths`).
+ * L'image relative est sous `images/` (article, présentation) ou sous `chapters/images/` (livre,
+ * relative à son chapitre), et l'export ne doit rien signaler (`warnings`). Le nombre d'images du
+ * PDF est vérifié par `pdf-export-paths.test.ts`.
  *
  * Restent hors du banc, car d'autres PR les traitent :
  * - une image SVG : pandoc la convertit par `rsvg-convert`, et sans lui écrit `\includesvg`, que le
@@ -44,7 +46,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { delimiter, join } from 'path';
 import { inflateSync } from 'zlib';
 import { pdfExportService } from '../pdf-export.js';
 import type { ExportResult } from '../export-time-limit.js';
@@ -260,8 +262,9 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())(
       markdown: string | readonly string[],
       book: Partial<BookSettings> = {}
     ): Promise<{ result: ExportResult; outputPath: string }> {
-      // Une espace dans le chemin du projet : `--resource-path` le passe en un seul argument.
-      const project = join(mkdtempSync(join(root, `${projectType}-`)), 'Mon projet');
+      // Une espace dans le chemin du projet : `--resource-path` le passe en un seul argument. Le
+      // séparateur des listes de chemins : pandoc découperait la liste sur lui.
+      const project = join(mkdtempSync(join(root, `${projectType}-`)), `Les archives ${delimiter} une histoire`);
       const images = projectType === 'book' ? join(project, 'chapters', 'images') : join(project, 'images');
       mkdirSync(images, { recursive: true });
       writeFileSync(join(images, 'relative.png'), PIXEL_PNG);

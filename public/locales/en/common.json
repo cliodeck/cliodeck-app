@@ -2690,7 +2690,8 @@
       "imagesNotFound_other": "Images not found, replaced by their captions: {{files}}. Put them in the project folder (or in chapters/ for a book chapter), or correct their paths.",
       "imageNeedsRsvgConvert": "The SVG image {{file}} cannot go into the PDF without the rsvg-convert tool, which is not installed. Install it (on macOS: brew install librsvg), or save the image as PNG, then run the export again.",
       "imageNotConverted": "The PDF export cannot read the format of the image {{file}}. Save it as PNG or JPEG, then run the export again.",
-      "beamerImageNotFound": "Image from the Beamer configuration not found or unreadable: {{file}}. The presentation is exported without it. Put it in the project folder, or correct its path in the Beamer configuration."
+      "beamerImageNotFound": "Image from the Beamer configuration not found or unreadable: {{file}}. The presentation is exported without it. Put it in the project folder, or correct its path in the Beamer configuration.",
+      "imageFolderUnreachable": "The images in the folder {{dir}} could not be looked up: its path contains “{{char}}”, which the export tool reads as a separator. They are replaced by their captions. Rename the project folder without this character, then run the export again."
     }
   }
 }

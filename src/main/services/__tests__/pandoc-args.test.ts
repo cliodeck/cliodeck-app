@@ -173,15 +173,19 @@ describe('buildPandocArgs — dossiers des images', () => {
  * (« Undefined control sequence »), le `#` ou le `%` d'un nom de dossier (« Illegal parameter
  * number », « File ended while scanning »). L'export les copie dans son dossier de travail, où
  * xelatex tourne, sous un nom fixe : rien du chemin du projet n'atteint LaTeX.
+ *
+ * Le nom fixe est rangé dans un sous-dossier : pandoc extrait les images du document dans son
+ * dossier `media-…`, que xelatex lit avant son dossier courant, et un `logo.png` du document y
+ * remplaçait en silence le logo du réglage.
  */
 describe('stagedBeamerImageName', () => {
   it.each([
-    ['logo', 'C:\\Users\\Jean\\Documents\\Mon projet #2\\logo.png', 'logo.png'],
-    ['logo', '/Users/h/Taux 100% & co/images/Logo final.PNG', 'logo.PNG'],
-    ['titlegraphic', 'C:\\Users\\Jean\\Mon projet\\titre.jpeg', 'titlegraphic.jpeg'],
-    ['titlegraphic', '/Users/h/Projet/images/couverture', 'titlegraphic'],
-    ['logo', '/Users/h/Projet.v2/logo', 'logo'],
-    ['logo', '/Users/h/Projet/logo.p#g', 'logo'],
+    ['logo', 'C:\\Users\\Jean\\Documents\\Mon projet #2\\logo.png', 'cliodeck-beamer/logo.png'],
+    ['logo', '/Users/h/Taux 100% & co/images/Logo final.PNG', 'cliodeck-beamer/logo.PNG'],
+    ['titlegraphic', 'C:\\Users\\Jean\\Mon projet\\titre.jpeg', 'cliodeck-beamer/titlegraphic.jpeg'],
+    ['titlegraphic', '/Users/h/Projet/images/couverture', 'cliodeck-beamer/titlegraphic'],
+    ['logo', '/Users/h/Projet.v2/logo', 'cliodeck-beamer/logo'],
+    ['logo', '/Users/h/Projet/logo.p#g', 'cliodeck-beamer/logo'],
   ] as const)('%s depuis %s : %s', (kind, source, expected) => {
     expect(stagedBeamerImageName(kind, source)).toBe(expected);
   });

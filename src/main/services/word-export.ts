@@ -41,7 +41,12 @@ import {
   resolveBookSettings,
   referenceSectionTitle,
 } from './pandoc-args.js';
-import { resolveProjectBibliography, resolveProjectCsl } from './export-project-files.js';
+import {
+  removeResourceLinks,
+  resolveProjectBibliography,
+  resolveProjectCsl,
+  stageResourcePaths,
+} from './export-project-files.js';
 import { normalizeBookSettings, type BookSettings, type Chapter } from '../../../backend/types/book.js';
 import { bibliographyService } from './bibliography-service.js';
 // @ts-ignore - No type definitions available
@@ -210,6 +215,8 @@ export class WordExportService {
     // Un dossier propre à cet export : nommé par l'horloge, deux exports lancés dans la même
     // milliseconde le partageaient, et le premier fini l'effaçait sous l'autre.
     const tempDir = await mkdtemp(join(tmpdir(), 'cliodeck-word-export-'));
+    // Liens de `stageResourcePaths` vers les dossiers du projet : retirés avant le dossier de travail.
+    let resourceLinks: string[] = [];
 
     try {
       onProgress?.({
@@ -246,14 +253,22 @@ export class WordExportService {
 
       // Build pandoc arguments
       // `--resource-path` : pandoc tourne dans le dossier temporaire, et une image relative au
-      // projet (`images/plan.png`) y était introuvable, remplacée par sa légende (S12-1-1).
+      // projet (`images/plan.png`) y était introuvable, remplacée par sa légende (S12-1-1). Un `:`
+      // dans le nom du projet coupait la liste en deux dossiers inexistants : `stageResourcePaths`.
+      const resources = await stageResourcePaths(
+        projectResourcePaths(options.projectPath, options.projectType),
+        tempDir
+      );
+      resourceLinks = resources.links;
       const pandocArgs = [
         inputPath,
         '-o', outputPath,
         '--from', 'markdown',
         '--to', 'docx',
-        `--resource-path=${projectResourcePaths(options.projectPath, options.projectType).join(delimiter)}`,
       ];
+      if (resources.paths.length > 0) {
+        pandocArgs.push(`--resource-path=${resources.paths.join(delimiter)}`);
+      }
 
       // Réglages d'ouvrage. La modale annonce qu'ils « pilotent l'assemblage
       // du manuscrit ET les exports (PDF, Word) » — c'était vrai du seul
@@ -359,7 +374,10 @@ export class WordExportService {
       console.log('✅ Word document exported successfully with pandoc:', outputPath);
       const unresolved = pandocUnresolvedCitations(pandocStderr);
       // Une image introuvable, pandoc la remplace par sa légende et réussit : la réserve le dit.
-      const warnings = missingImagesWarnings(pandocMissingResources(pandocStderr));
+      const warnings = [
+        ...resources.warnings,
+        ...missingImagesWarnings(pandocMissingResources(pandocStderr)),
+      ];
       return {
         success: true,
         outputPath,
@@ -371,10 +389,13 @@ export class WordExportService {
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     } finally {
       // Un seul point de nettoyage : le manuscrit intermédiaire ne survit ni
-      // au succès, ni à l'échec, ni à un futur retour anticipé.
-      await rm(tempDir, { recursive: true, force: true }).catch((err) => {
-        console.warn('⚠️ Failed to clean Word export temp directory:', err);
-      });
+      // au succès, ni à l'échec, ni à un futur retour anticipé. Les liens vers le projet d'abord :
+      // si l'un d'eux reste, le dossier reste aussi, plutôt que de risquer le projet.
+      if (await removeResourceLinks(resourceLinks)) {
+        await rm(tempDir, { recursive: true, force: true }).catch((err) => {
+          console.warn('⚠️ Failed to clean Word export temp directory:', err);
+        });
+      }
     }
   }
 
