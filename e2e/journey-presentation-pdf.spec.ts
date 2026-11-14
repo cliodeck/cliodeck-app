@@ -9,6 +9,10 @@
  * de reveal.js jamais déclenché —, puis a cessé de fonctionner avec
  * Electron 43, qui refuse cette taille.
  *
+ * Le chemin de sortie a une apostrophe et une esperluette, comme celui que la fenêtre
+ * propose pour un projet nommé « Séminaire d'histoire » : la validation de l'IPC les
+ * refusait, reste d'un temps où ce chemin passait par un shell (S12-1-3).
+ *
  * reveal.js est chargé depuis son CDN : sans réseau, le test est sauté.
  */
 
@@ -55,7 +59,7 @@ test('l’export PDF d’une présentation rend une page par diapositive', async
   }
   const { app, window, userDataDir } = outcome.value;
   const outDir = mkdtempSync(join(tmpdir(), 'cliodeck-e2e-diapos-'));
-  const outputPath = join(outDir, 'presentation.pdf');
+  const outputPath = join(outDir, "Séminaire d'histoire", 'S&P présentation.pdf');
 
   try {
     const result = await window.evaluate(
