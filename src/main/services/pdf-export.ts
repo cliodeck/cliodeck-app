@@ -3,7 +3,12 @@ import { copyFile, writeFile, mkdir, mkdtemp, readFile, rm } from 'fs/promises';
 import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
-import { appendEngineCitations, citationKeysIn, processMarkdownCitations } from './citation-pipeline.js';
+import {
+  appendEngineCitations,
+  citationKeysIn,
+  citationsLeftWithoutBibliography,
+  processMarkdownCitations,
+} from './citation-pipeline.js';
 import { bibliographyService, readBibFile } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
@@ -922,11 +927,8 @@ export class PDFExportService {
       const mdPath = join(tempDir, 'input.md');
       let cleanedContent = options.content;
       // Ce que le PDF aura de moins que le manuscrit (un chapitre omis, des citations restées en
-      // clés) : le PDF est écrit quand même, la fenêtre le dit et reste ouverte (S12-1-14). Le
-      // `.bib` que nomme le projet, introuvable, d'abord : il explique les clés restées telles quelles.
-      const manuscriptWarnings: OutcomeIssue[] = bibliography.missing
-        ? [{ code: 'export.bibliographyMissing', params: { file: bibliography.missing } }]
-        : [];
+      // clés) : le PDF est écrit quand même, la fenêtre le dit et reste ouverte (S12-1-14).
+      const manuscriptWarnings: OutcomeIssue[] = [];
       // Les clés de citation que rien n'a trouvées : elles restent dans le PDF, et la fenêtre les
       // nomme, comme pour le Word (S12-1-7).
       const unresolved = new Set<string>();
@@ -1192,20 +1194,29 @@ export class PDFExportService {
 
       onProgress?.({ stage: 'complete', message: 'Export terminé!', progress: 100 });
 
+      // Quand citeproc a tourné sur tout le document, il dit sur sa sortie d'erreur les clés qu'il
+      // n'a pas trouvées, et les imprime en gras suivies d'un « ? ».
+      for (const key of pandocUnresolvedCitations(pandocStderr)) unresolved.add(key);
+      const unresolvedCitations = [...unresolved];
+      if (unresolvedCitations.length > 0) console.warn('⚠️ pdf-export: citations introuvables :', unresolvedCitations);
+
+      // Le `.bib` que nomme le projet, introuvable : en tête, car il explique les citations restées
+      // telles quelles. Sans citation, ou toutes rendues par le moteur sur les références en
+      // mémoire, le PDF sortirait identique avec lui : rien à dire, et la fenêtre se referme.
+      const bibliographyWarnings: OutcomeIssue[] =
+        bibliography.missing && citationsLeftWithoutBibliography(cleanedContent, unresolvedCitations, useEnginePipeline)
+          ? [{ code: 'export.bibliographyMissing', params: { file: bibliography.missing } }]
+          : [];
       // Une image introuvable, pandoc la remplace par sa légende et réussit : sans cette réserve,
       // le PDF partait sans elle et sans un mot (S12-1-1).
       const warnings = [
+        ...bibliographyWarnings,
         ...manuscriptWarnings,
         ...resources.warnings,
         ...beamer.warnings,
         ...missingImagesWarnings(pandocMissingResources(pandocStderr)),
       ];
       if (warnings.length > 0) console.warn('⚠️ pdf-export: réserves :', warnings);
-      // Quand citeproc a tourné sur tout le document, il dit sur sa sortie d'erreur les clés qu'il
-      // n'a pas trouvées, et les imprime en gras suivies d'un « ? ».
-      for (const key of pandocUnresolvedCitations(pandocStderr)) unresolved.add(key);
-      const unresolvedCitations = [...unresolved];
-      if (unresolvedCitations.length > 0) console.warn('⚠️ pdf-export: citations introuvables :', unresolvedCitations);
 
       console.log('✅ PDF exported successfully:', outputPath);
       return {

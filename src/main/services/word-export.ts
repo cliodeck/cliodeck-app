@@ -25,6 +25,7 @@ import {
 import { CitationEngine, type StyleProblem } from '../../../backend/core/citation/CitationEngine.js';
 import {
   citationKeysIn,
+  citationsLeftWithoutBibliography,
   processMarkdownCitations,
   type ProcessedFootnote,
 } from './citation-pipeline.js';
@@ -545,11 +546,8 @@ export class WordExportService {
 
       // Ce que le document aura de moins que le texte de l'auteur : un chapitre omis à l'assemblage,
       // un modèle laissé de côté, une citation ou une image que le générateur interne ne rend pas.
-      // Le document est écrit quand même ; la fenêtre le dit et reste ouverte (S12-1-14). Le `.bib`
-      // que nomme le projet, introuvable, d'abord : il explique les clés restées telles quelles.
-      const warnings: OutcomeIssue[] = bibliography.missing
-        ? [{ code: 'export.bibliographyMissing', params: { file: bibliography.missing } }]
-        : [];
+      // Le document est écrit quand même ; la fenêtre le dit et reste ouverte (S12-1-14).
+      const warnings: OutcomeIssue[] = [];
 
       if (options.manuscript?.chapters?.length) {
         const assembled = await assembleManuscript({
@@ -697,6 +695,17 @@ export class WordExportService {
         } else if (keys.length > 0) {
           unresolvedCitations = keys;
         }
+      }
+
+      // Le `.bib` que nomme le projet, introuvable (sans lui, l'export ne passe jamais par pandoc) :
+      // en tête, car il explique les citations restées telles quelles. Sans citation, ou toutes
+      // rendues par le moteur sur les références en mémoire, le document sortirait identique avec
+      // lui : rien à dire, et la fenêtre se referme.
+      if (
+        bibliography.missing &&
+        citationsLeftWithoutBibliography(sourceMarkdown, unresolvedCitations, citationsRendered)
+      ) {
+        warnings.unshift({ code: 'export.bibliographyMissing', params: { file: bibliography.missing } });
       }
 
       // Le générateur interne remplace une image par sa légende (relevé par L07-2).

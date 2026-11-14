@@ -114,6 +114,23 @@ export function citationKeysIn(markdown: string, options: { narrative?: boolean 
   return [...keys];
 }
 
+/**
+ * Des citations restent telles quelles dans l'export, qu'un `.bib` introuvable aurait pu mettre en
+ * forme : une clé que rien n'a trouvée (`unresolved`), ou, quand aucun moteur n'a rendu les
+ * citations (`renderedByEngine`), une `@clé` nue, que pandoc tient pour une citation narrative. Le
+ * `.bib` manquant, rien ne distingue celle-ci d'un pseudonyme : une réserve de trop plutôt qu'un
+ * silence, comme pour un `.bib` illisible. Sans citation, ou toutes rendues par le moteur sur les
+ * références en mémoire, l'export sortirait identique avec le `.bib` : rien à dire (revue de L04-8).
+ */
+export function citationsLeftWithoutBibliography(
+  markdown: string,
+  unresolved: readonly string[],
+  renderedByEngine: boolean
+): boolean {
+  if (unresolved.length > 0) return true;
+  return !renderedByEngine && citationKeysIn(markdown, { narrative: true }).length > 0;
+}
+
 /** Entités nommées que citeproc écrit ; les autres sont numériques (`&#60;`, `&#38;`). */
 const NAMED_ENTITIES = new Map([
   ['lt', '<'],

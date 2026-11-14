@@ -10,7 +10,9 @@
  * `--citeproc`.
  *
  * Un `.bib` que `project.json` nomme et qui manque (H3, J1) n'est pas remplacé par celui du
- * renderer : l'export se fait sans bibliographie, et le dit (`export.bibliographyMissing`).
+ * renderer : l'export se fait sans bibliographie, et le dit (`export.bibliographyMissing`) quand des
+ * citations en restent telles quelles. Sans citation, ou toutes rendues par le style intégré, il
+ * sortirait identique avec lui : rien à dire (revue de L04-8).
  *
  * Les vrais handlers, la vraie validation, les vrais services d'export ; seul Electron est simulé,
  * et le gestionnaire de projets, pour jouer un autre projet ouvert pendant l'export. Les exports
@@ -270,6 +272,62 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable() || !pdftotextAvailable
     );
 
     it(
+      '.bib nommé et absent, document sans citation : le PDF sortirait identique avec lui, rien à dire',
+      async () => {
+        const project = makeProject('article', { title: null });
+
+        const { response, reserves } = await call(
+          'pdf-export:export',
+          windowOptions(project, 'article.pdf', { content: 'Texte sans citation.\n' })
+        );
+
+        expect(response, response.error).toMatchObject({ success: true });
+        expect(reserves).toMatchObject({ issues: [], unresolvedCitations: [] });
+      },
+      COMPILE_MS
+    );
+
+    it(
+      '.bib nommé et absent, style intégré et références en mémoire : la citation est rendue, rien à dire',
+      async () => {
+        const project = makeProject('article', { title: null });
+        await bibliographyService.parseContent(reference(TITRE));
+
+        const { response, reserves } = await call(
+          'pdf-export:export',
+          windowOptions(project, 'article.pdf', {
+            citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+          })
+        );
+
+        expect(response, response.error).toMatchObject({ success: true });
+        expect(reserves).toMatchObject({ issues: [], unresolvedCitations: [] });
+        const text = pdfText(join(project, 'article.pdf'));
+        expect(text).not.toContain('dupont2020');
+        expect(text).toContain(TITRE);
+      },
+      COMPILE_MS
+    );
+
+    it(
+      '.bib nommé et absent, citation narrative seule (@clé nue) : le fichier est nommé (témoin)',
+      async () => {
+        const project = makeProject('article', { title: null });
+
+        const { response, reserves } = await call(
+          'pdf-export:export',
+          windowOptions(project, 'article.pdf', { content: 'Comme le montre @dupont2020, l’archive se lit.\n' })
+        );
+
+        expect(response, response.error).toMatchObject({ success: true });
+        expect(reserves.issues).toEqual([missing(project)]);
+        expect(reserves.unresolvedCitations).toEqual([]);
+        expect(pdfText(join(project, 'article.pdf'))).toContain('@dupont2020');
+      },
+      COMPILE_MS
+    );
+
+    it(
       'projet B ouvert pendant l’export de A : la bibliographie reste celle de A',
       async () => {
         const project = makeProject('article');
@@ -420,5 +478,71 @@ describe('word-export:export sans pandoc : la bibliographie du projet, relue à 
     const text = nativeText(join(project, 'article.docx'));
     expect(text).not.toContain('MARQUEUR');
     expect(text).toContain('[@dupont2020]');
+  });
+
+  /**
+   * La réserve dit que des citations restent brutes faute du `.bib` : sans citation, ou toutes
+   * rendues par le style intégré (références en mémoire), l'export sortirait identique avec lui, et
+   * la fenêtre ne doit pas rester ouverte pour inviter à le relancer (revue de L04-8).
+   */
+  it('.bib nommé et absent, document sans citation : rien à dire', async () => {
+    const project = makeProject('article', { title: null });
+
+    const { response, reserves } = await call(
+      'word-export:export',
+      windowOptions(project, 'article.docx', { content: 'Texte sans citation.\n' })
+    );
+
+    expect(response, response.error).toMatchObject({ success: true });
+    expect(reserves).toMatchObject({ issues: [], unresolvedCitations: [] });
+  });
+
+  it('.bib nommé et absent, style intégré et références en mémoire : la citation est rendue, rien à dire', async () => {
+    const project = makeProject('article', { title: null });
+
+    const { response, reserves } = await call(
+      'word-export:export',
+      windowOptions(project, 'article.docx', {
+        citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+      })
+    );
+
+    expect(response, response.error).toMatchObject({ success: true });
+    expect(reserves).toMatchObject({ issues: [], unresolvedCitations: [] });
+    const text = nativeText(join(project, 'article.docx'));
+    expect(text).not.toContain('@dupont2020');
+    expect(text.toLowerCase()).toContain(TITRE);
+  });
+
+  it('.bib nommé et absent, style intégré, une clé absente de la mémoire : le fichier et la clé sont nommés', async () => {
+    const project = makeProject('article', { title: null });
+
+    const { response, reserves } = await call(
+      'word-export:export',
+      windowOptions(project, 'article.docx', {
+        content: 'Dupont [@dupont2020] et Martin [@martin2019] le disent.\n',
+        citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+      })
+    );
+
+    expect(response, response.error).toMatchObject({ success: true });
+    expect(reserves.issues).toEqual([missing(project)]);
+    expect(reserves.unresolvedCitations).toEqual(['martin2019']);
+  });
+
+  it('.bib nommé et absent, citation narrative seule (@clé nue) : le fichier est nommé (témoin)', async () => {
+    const project = makeProject('article', { title: null });
+
+    const { response, reserves } = await call(
+      'word-export:export',
+      windowOptions(project, 'article.docx', { content: 'Comme le montre @dupont2020, l’archive se lit.\n' })
+    );
+
+    // Avec le `.bib`, pandoc l'aurait mise en forme ; sans lui, elle reste telle quelle. Rien ne la
+    // distingue d'un pseudonyme : une réserve de trop plutôt qu'un silence, comme `citationsLeftRaw`.
+    expect(response, response.error).toMatchObject({ success: true });
+    expect(reserves.issues).toEqual([missing(project)]);
+    expect(reserves.unresolvedCitations).toEqual([]);
+    expect(nativeText(join(project, 'article.docx'))).toContain('@dupont2020');
   });
 });

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { appendEngineCitations, citationKeysIn, processMarkdownCitations } from '../citation-pipeline';
+import {
+  appendEngineCitations,
+  citationKeysIn,
+  citationsLeftWithoutBibliography,
+  processMarkdownCitations,
+} from '../citation-pipeline';
 
 // Ces tests exercent le VRAI moteur citeproc : chaque appel construit un
 // `CSL.Engine` et parse la feuille de style CSL (CitationEngine.ts:95).
@@ -238,6 +243,34 @@ describe('citationKeysIn — les clés qu’un export laisse brutes', () => {
 
   it('avec `narrative`, aussi les `@clé` nues, hors code et hors adresse', () => {
     expect(citationKeysIn(md, { narrative: true })).toEqual(['alice2020', 'bob2019', 'carol2021']);
+  });
+});
+
+/**
+ * Revue de L04-8 : la réserve « `.bib` du projet introuvable » ne se dit que si des citations en
+ * restent telles quelles. Sans citation, ou toutes rendues par le moteur, l'export sortirait
+ * identique avec lui.
+ */
+describe('citationsLeftWithoutBibliography — ce qu’un `.bib` introuvable laisse brut', () => {
+  it('une clé que rien n’a trouvée : à dire, moteur ou non', () => {
+    expect(citationsLeftWithoutBibliography('Voir [@alice2020].', ['alice2020'], false)).toBe(true);
+    expect(citationsLeftWithoutBibliography('Voir [@alice2020].', ['alice2020'], true)).toBe(true);
+  });
+
+  it('sans citation : rien à dire', () => {
+    expect(citationsLeftWithoutBibliography('Texte sans citation, jean@example.org.', [], false)).toBe(false);
+  });
+
+  it('toutes rendues par le moteur : rien à dire, même une `@clé` nue restée dans le texte', () => {
+    expect(citationsLeftWithoutBibliography('Comme le montre @pseudo, rien.', [], true)).toBe(false);
+  });
+
+  it('sans moteur, une `@clé` nue : à dire, rien ne la distingue d’un pseudonyme', () => {
+    expect(citationsLeftWithoutBibliography('Comme le montre @carol2021.', [], false)).toBe(true);
+  });
+
+  it('une `@clé` dans un bloc de code ne compte pas', () => {
+    expect(citationsLeftWithoutBibliography('```\n@dansuncode [@aussi]\n```\n', [], false)).toBe(false);
   });
 });
 
