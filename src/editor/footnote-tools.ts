@@ -161,6 +161,48 @@ export function nextFootnoteNumber(content: string): number {
   return max + 1;
 }
 
+/**
+ * Une note insérée à `position` : l'appel `[^n]` là, et la définition `[^n]: ` en fin de document,
+ * une ligne vide avant elle, à la place des blancs de fin. `cursor` est au bout de la définition,
+ * prêt pour son texte.
+ *
+ * Deux insertions localisées, et non une réécriture du curseur à la fin : une proposition IA en
+ * attente entre les deux n'est plus touchée, donc plus retirée ni journalisée comme une décision
+ * (L01-6). Le texte obtenu est celui du calcul d'avant, qui posait déjà la définition en fin de
+ * document, derrière celles qui s'y trouvaient. Positions, longueurs et texte sont ceux du
+ * document (`EditorFacade.getDocText`) : une fin de ligne y vaut 1, quel que soit le fichier.
+ */
+export function planFootnoteInsertion(
+  doc: string,
+  position: number
+): { changes: Array<{ from: number; to: number; insert: string }>; cursor: number; footnoteNumber: number } {
+  const footnoteNumber = nextFootnoteNumber(doc);
+  const at = Math.max(0, Math.min(position, doc.length));
+  const call = `[^${footnoteNumber}]`;
+  const definition = `\n\n[^${footnoteNumber}]: `;
+  // Les blancs de fin partent : la définition suit le dernier texte, comme avant.
+  const end = doc.trimEnd().length;
+  if (at >= end) {
+    // Le curseur est dans ces blancs : l'appel et la définition les remplacent d'un seul tenant.
+    return {
+      changes: [{ from: at, to: doc.length, insert: call + definition }],
+      cursor: at + call.length + definition.length,
+      footnoteNumber,
+    };
+  }
+  // Ce que les blancs de fin ont déjà de la définition (sa ligne vide) reste en place.
+  let kept = 0;
+  while (end + kept < doc.length && doc[end + kept] === definition[kept]) kept++;
+  return {
+    changes: [
+      { from: at, to: at, insert: call },
+      { from: end + kept, to: doc.length, insert: definition.slice(kept) },
+    ],
+    cursor: end + call.length + definition.length,
+    footnoteNumber,
+  };
+}
+
 /** Ce que la renumérotation n'a pas pu lier, sous le numéro qu'elle lui a donné. */
 export interface UnlinkedFootnote {
   /**

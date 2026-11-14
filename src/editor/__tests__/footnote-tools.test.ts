@@ -3,10 +3,13 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { Text } from '@codemirror/state';
 import { pandocAvailable } from '../../../backend/__tests__/helpers/native-guards';
+import { createDocState, readDocText } from '../cm/fidelity';
 import {
   collectFootnoteDefinitions,
   collectFootnotes,
+  planFootnoteInsertion,
   prefixFootnoteLabels,
   nextFootnoteNumber,
   renumberFootnotes,
@@ -364,5 +367,101 @@ describe('prefixFootnoteLabels — blocs HTML', () => {
     expect(out).toContain('[^ch1-1] ici.');
     expect(out).toContain('[^ch1-1]: note.');
     expect(out).not.toContain('[^1]');
+  });
+});
+
+/**
+ * L01-6 : insérer une note réécrivait tout le document, du curseur à la fin, et invalidait les
+ * propositions IA en attente plus loin (S14-1-8). Le plan est fait de deux insertions localisées,
+ * l'appel au curseur et la définition en fin de document, et rend le même texte qu'avant.
+ */
+describe('planFootnoteInsertion', () => {
+  /** L'ancien calcul d'`insertFootnoteAtPosition`, recopié tel quel : la référence. */
+  function previousComputation(content: string, position: number): { text: string; cursor: number } {
+    const footnoteNumber = nextFootnoteNumber(content);
+    const refText = `[^${footnoteNumber}]`;
+    const defText = `[^${footnoteNumber}]: `;
+    const afterRef = content.slice(position);
+    const defRegex = /\n\n(\[\^\d+\]:[\s\S]*)$/;
+    const defMatch = afterRef.match(defRegex);
+    let insert: string;
+    if (defMatch) {
+      const afterRefWithoutDefs = afterRef.slice(0, defMatch.index);
+      const existingDefs = defMatch[1].trimEnd();
+      insert = refText + afterRefWithoutDefs + '\n\n' + existingDefs + '\n\n' + defText;
+    } else {
+      insert = refText + afterRef.trimEnd() + '\n\n' + defText;
+    }
+    return { text: content.slice(0, position) + insert, cursor: position + insert.length };
+  }
+
+  function applied(doc: string, changes: ReadonlyArray<{ from: number; to: number; insert: string }>): string {
+    let out = doc;
+    for (let i = changes.length - 1; i >= 0; i--) {
+      out = out.slice(0, changes[i].from) + changes[i].insert + out.slice(changes[i].to);
+    }
+    return out;
+  }
+
+  const DOC = 'Un mot ici.\n\nDeuxième paragraphe.\n\nTroisième paragraphe.\n';
+  const WITH_DEFS = 'Un[^1] mot[^2].\n\nSuite.\n\n[^1]: Un.\n[^2]: Deux.\n';
+
+  it.each([
+    ['sans définition, au milieu', DOC, DOC.indexOf(' ici')],
+    ['sans définition, au début', DOC, 0],
+    ['sans définition, au bout du dernier mot', DOC, DOC.trimEnd().length],
+    ['curseur dans les blancs de fin', DOC, DOC.length],
+    ['curseur entre deux fins de ligne finales', 'Texte.\n\n\n', 'Texte.\n\n'.length],
+    ['définitions groupées en fin de document', WITH_DEFS, WITH_DEFS.indexOf(' mot')],
+    ['curseur dans une définition', WITH_DEFS, WITH_DEFS.indexOf('Deux.')],
+    ['identifiant libre', 'A[^lester].\n\n[^lester]: libre.\n', 1],
+    ['numéro suivant après un [^99] de code', '```\n[^99]\n```\n\nTexte[^4].\n\n[^4]: q.\n', 0],
+    ['document vide', '', 0],
+    ['sans fin de ligne finale', 'Une phrase.', 3],
+    ['blancs de fin variés', 'Une phrase.  \n \n', 3],
+    ['liste imbriquée', '- un[^1]\n  - deux\n\n[^1]: n.\n', '- un[^1]\n  - de'.length],
+    ['hors BMP', 'Le 𝔄 et 😀.\n', 'Le 𝔄'.length],
+  ])('%s : même texte que l’ancien calcul', (_label, doc, position) => {
+    const plan = planFootnoteInsertion(doc, position);
+    const reference = previousComputation(doc, position);
+
+    expect(applied(doc, plan.changes)).toBe(reference.text);
+    expect(plan.cursor).toBe(reference.cursor);
+    expect(plan.footnoteNumber).toBe(nextFootnoteNumber(doc));
+  });
+
+  it('deux insertions : l’appel au curseur, la définition en fin de document, rien entre elles', () => {
+    const at = DOC.indexOf(' ici');
+    const plan = planFootnoteInsertion(DOC, at);
+
+    expect(plan.changes).toHaveLength(2);
+    expect(plan.changes[0]).toEqual({ from: at, to: at, insert: '[^1]' });
+    // Ce qui suit le curseur reste en place : seul le bout du document reçoit la définition.
+    expect(plan.changes[1].from).toBeGreaterThanOrEqual(DOC.trimEnd().length);
+    expect(plan.changes[1].to).toBe(DOC.length);
+    expect(plan.footnoteNumber).toBe(1);
+  });
+
+  it('le numéro suit le plus grand des numéros réels', () => {
+    expect(planFootnoteInsertion(WITH_DEFS, 0).footnoteNumber).toBe(3);
+  });
+
+  it('document CRLF : la note entre sans RangeError, et le fichier reste CRLF uniforme', () => {
+    const crlf = 'Les archives.\r\n\r\nUn paragraphe.\r\nUne suite.\r\n';
+    const state = createDocState(crlf);
+    // Les offsets du document : une fin de ligne y vaut 1, comme sous le curseur.
+    const doc = state.doc.toString();
+    const at = doc.indexOf(' paragraphe');
+    const plan = planFootnoteInsertion(doc, at);
+
+    const next = state.update({
+      changes: plan.changes.map(({ from, to, insert }) => ({ from, to, insert: Text.of(insert.split('\n')) })),
+      selection: { anchor: plan.cursor },
+    }).state;
+    const written = readDocText(next);
+
+    expect(written).toBe('Les archives.\r\n\r\nUn[^1] paragraphe.\r\nUne suite.\r\n\r\n[^1]: ');
+    expect(written.replace(/\r\n/g, '')).not.toContain('\n');
+    expect(next.selection.main.head).toBe(next.doc.length);
   });
 });
