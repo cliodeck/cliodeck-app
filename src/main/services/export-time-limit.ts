@@ -61,10 +61,14 @@ export type ExportOutputErrorCode = 'export.outputIsMarkdown';
 
 /**
  * L'export PDF ou hors ligne d'une présentation (L09-12) : les fichiers de reveal.js n'ont pu venir
- * ni du cache ni du réseau, ou la page n'a pas été mise en pages d'impression dans le délai. Codes
+ * ni du cache ni du réseau, la page d'impression ne s'est pas chargée dans le délai (une ressource
+ * demandée au réseau ne répond pas), ou elle n'a pas été mise en pages dans le délai. Codes
  * relatifs à `messages.*`.
  */
-export type ExportPresentationErrorCode = 'presentation.assetsUnavailable' | 'presentation.notRendered';
+export type ExportPresentationErrorCode =
+  | 'presentation.assetsUnavailable'
+  | 'presentation.pageNotLoaded'
+  | 'presentation.notRendered';
 
 /** Le résultat des services d'export, tel que le renderer le reçoit. */
 export interface ExportResult {

@@ -115,6 +115,60 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())('export PDF d’un li
     COMPILE_MS
   );
 
+  /**
+   * Revue de L09-12 : la réserve dit que des clés restent brutes. Un chapitre vide rend une sortie
+   * vide avec le code 0 (mesuré : pandoc 3), et un chapitre sans clé n'en laisse aucune, même quand
+   * le style fait échouer citeproc : ni l'un ni l'autre ne se nomme.
+   */
+  it(
+    'citeproc échoue : seuls les chapitres qui ont des clés sont nommés, pas un chapitre vide ou sans citation',
+    async () => {
+      writeFileSync(join(project, 'refs.bib'), BIBLIOGRAPHY);
+      writeFileSync(join(project, 'style.csl'), '<style>tronqué');
+      writeFileSync(join(project, 'chapters', '01.md'), '# Ouverture\n\nVoir [@dupont2020].\n');
+      writeFileSync(join(project, 'chapters', '02.md'), '# Sans citation\n\nUn texte, et `[@pasunecle]` en code.\n');
+      writeFileSync(join(project, 'chapters', '03.md'), '\n\n');
+
+      const result = await exportBook(
+        [
+          { id: 'a', title: 'Ouverture', filePath: 'chapters/01.md', order: 0 },
+          { id: 'b', title: 'Sans citation', filePath: 'chapters/02.md', order: 1 },
+          { id: 'c', title: 'Vide', filePath: 'chapters/03.md', order: 2 },
+        ],
+        { bibliographyPath: join(project, 'refs.bib'), cslPath: join(project, 'style.csl') },
+        { bibliography: 'per-chapter' }
+      );
+
+      expect(result, result.error).toMatchObject({ success: true });
+      expect(result.warnings).toEqual([
+        { code: 'export.chapterCitationsNotResolved', params: { title: 'Ouverture', file: 'chapters/01.md' } },
+      ]);
+    },
+    COMPILE_MS
+  );
+
+  it(
+    'un chapitre vide, style valide : citeproc rend une sortie vide, ce n’est pas un échec',
+    async () => {
+      writeFileSync(join(project, 'refs.bib'), BIBLIOGRAPHY);
+      writeFileSync(join(project, 'chapters', '01.md'), '# Ouverture\n\nVoir [@dupont2020].\n');
+      writeFileSync(join(project, 'chapters', '02.md'), '');
+
+      const result = await exportBook(
+        [
+          { id: 'a', title: 'Ouverture', filePath: 'chapters/01.md', order: 0 },
+          { id: 'b', title: 'Vide', filePath: 'chapters/02.md', order: 1 },
+        ],
+        { bibliographyPath: join(project, 'refs.bib') },
+        { bibliography: 'per-chapter' }
+      );
+
+      expect(result, result.error).toMatchObject({ success: true });
+      expect(result.warnings).toBeUndefined();
+    },
+    COMPILE_MS
+  );
+
   it(
     'citeproc réussit par chapitre : aucune réserve',
     async () => {

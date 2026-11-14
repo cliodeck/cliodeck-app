@@ -3,7 +3,7 @@ import { copyFile, writeFile, mkdir, mkdtemp, readFile, rm } from 'fs/promises';
 import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
 import { extendedToolPath, toolFinderCommand } from '../../../backend/core/tools/external-tools.js';
-import { processMarkdownCitations } from './citation-pipeline.js';
+import { citationKeysIn, processMarkdownCitations } from './citation-pipeline.js';
 import { bibliographyService } from './bibliography-service.js';
 import type { BookSettings, Chapter } from '../../../backend/types/book.js';
 import { assembleManuscript } from './manuscript-assembler.js';
@@ -740,7 +740,9 @@ export class PDFExportService {
       const stderr = collectText(proc.stderr);
       proc.on('close', (code) => {
         const resolved = stdout();
-        if (code === 0 && resolved.trim()) {
+        // Un chapitre vide, ou fait de lignes vides, rend une sortie vide avec le code 0 (mesuré,
+        // pandoc 3) : rien n'a échoué.
+        if (code === 0 && (resolved.trim() || !content.trim())) {
           resolve({ content: resolved, resolved: true });
         } else {
           // Échec isolé : le chapitre part avec ses `[@clef]` non résolues
@@ -879,8 +881,9 @@ export class PDFExportService {
                   clock,
                 });
                 // La passe globale n'aura pas de bibliographie : ses clés s'imprimeraient telles
-                // quelles, sans que rien le dise.
-                if (!cited.resolved) {
+                // quelles, sans que rien le dise. Un chapitre sans clé n'en laisse aucune, même
+                // quand le style fait échouer citeproc : rien à dire.
+                if (!cited.resolved && citationKeysIn(content).length > 0) {
                   citeprocFailures.push({
                     code: 'export.chapterCitationsNotResolved',
                     params: { title: chapter.title, file: chapter.filePath },

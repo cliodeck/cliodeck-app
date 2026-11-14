@@ -5,7 +5,7 @@
  * avec ancres de synchro data-aslide.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -17,15 +17,29 @@ import { join } from 'path';
 const browser = vi.hoisted(() => ({
   userData: '/tmp',
   loadedHtml: '',
+  /** Le HTML de chaque page chargée, dans l'ordre. */
+  loads: [] as string[],
+  /** La fin du chargement de la n-ième page (1, 2…) : `loadFile` attend l'événement `load`. */
+  load: (_n: number): Promise<void> => Promise.resolve(),
   probe: (): unknown => 'ready',
   printed: 0,
   windows: 0,
+  destroyed: 0,
+  /** Les téléchargements passés par `net.fetch` (pile réseau de Chromium, proxy du système). */
+  netCalls: 0,
 }));
 
 vi.mock('electron', () => ({
   app: { getPath: vi.fn(() => browser.userData) },
   // L'export HTML ouvre le fichier écrit dans le navigateur : rien à ouvrir sous Vitest.
   shell: { openPath: async () => '' },
+  // `net.fetch` passe au `fetch` global, que chaque test simule.
+  net: {
+    fetch: (input: string, init?: RequestInit) => {
+      browser.netCalls++;
+      return globalThis.fetch(input, init);
+    },
+  },
   BrowserWindow: class {
     constructor() {
       browser.windows++;
@@ -39,11 +53,15 @@ vi.mock('electron', () => ({
     };
     async loadFile(file: string) {
       browser.loadedHtml = readFileSync(file, 'utf-8');
+      browser.loads.push(browser.loadedHtml);
+      return browser.load(browser.loads.length);
     }
     isDestroyed() {
       return false;
     }
-    destroy() {}
+    destroy() {
+      browser.destroyed++;
+    }
     close() {}
   },
 }));
@@ -393,9 +411,13 @@ describe('export PDF : reveal.js depuis le cache, mise en page attendue (S12-1-1
     dir = mkdtempSync(join(tmpdir(), 'cliodeck-reveal-pdf-'));
     browser.userData = join(dir, 'userData');
     browser.loadedHtml = '';
+    browser.loads = [];
+    browser.load = () => Promise.resolve();
     browser.probe = () => 'ready';
     browser.printed = 0;
     browser.windows = 0;
+    browser.destroyed = 0;
+    browser.netCalls = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(SCRIPT(url), { headers: { 'content-type': 'application/javascript' } })));
   });
   afterEach(() => {
@@ -509,5 +531,235 @@ describe('export PDF : reveal.js depuis le cache, mise en page attendue (S12-1-1
 
     expect(result.warnings).toBeUndefined();
     expect(browser.loadedHtml).not.toContain('/* math.js */');
+  });
+});
+
+/**
+ * Revue de L09-12. reveal.js inclus dans la page, il fallait aussi ce que ses fichiers demandent :
+ * six thèmes sur onze importent leurs polices par un chemin relatif (`./fonts/…`), qui, recopié
+ * dans une page du dossier temporaire, ne menait plus nulle part (PDF en Helvetica), et huit
+ * importent Google Fonts, qu'une page d'impression attendait sans borne sur un réseau qui ne répond
+ * pas. Le chargement de la page est borné lui aussi : KaTeX vient du réseau.
+ */
+describe('export PDF et HTML autonome : ce que la page demande au dehors (revue de L09-12)', () => {
+  let dir = '';
+  const NEVER = () => new Promise<never>(() => undefined);
+  const CDN = 'https://cdn.jsdelivr.net/npm/reveal.js@5.0.4';
+  const THEME_CSS = [
+    '@import url(./fonts/source-sans-pro/source-sans-pro.css);',
+    '@import url(https://fonts.googleapis.com/css?family=Lato:400,700);',
+    '.reveal { font-family: "Source Sans Pro", Lato, sans-serif; }',
+    '',
+  ].join('\n');
+  const SSP_CSS = [
+    '@font-face {',
+    "    font-family: 'Source Sans Pro';",
+    "    src: url('./source-sans-pro-regular.eot');",
+    "    src: url('./source-sans-pro-regular.eot?#iefix') format('embedded-opentype'),",
+    "         url('./source-sans-pro-regular.woff') format('woff'),",
+    "         url('./source-sans-pro-regular.ttf') format('truetype');",
+    '    font-weight: normal;',
+    '}',
+    '',
+  ].join('\n');
+  const GOOGLE_CSS = [
+    '/* latin */',
+    '@font-face {',
+    "  font-family: 'Lato';",
+    '  src: url(https://fonts.gstatic.com/s/lato/v25/lato-regular.woff2) format(\'woff2\');',
+    '  unicode-range: U+0000-00FF;',
+    '}',
+    '',
+  ].join('\n');
+  const WOFF = Buffer.from('wOFF-source-sans-pro-regular');
+  const WOFF2 = Buffer.from('wOF2-lato-regular');
+  const SCRIPT = (url: string) => `/* ${url.split('/').pop()} */`;
+  let fetched: string[] = [];
+
+  /** Le CDN et Google Fonts, simulés ; `fontsDown` : les polices ne répondent pas. */
+  function network(options: { fontsDown?: boolean } = {}) {
+    return vi.fn(async (url: string) => {
+      fetched.push(url);
+      const css = (body: string) => new Response(body, { headers: { 'content-type': 'text/css' } });
+      if (options.fontsDown && /fonts|\.woff/.test(url)) throw new TypeError('fetch failed');
+      if (url.endsWith('/dist/theme/black.css')) return css(THEME_CSS);
+      if (url.endsWith('/source-sans-pro.css')) return css(SSP_CSS);
+      if (url.startsWith('https://fonts.googleapis.com/')) return css(GOOGLE_CSS);
+      if (url.endsWith('.woff')) return new Response(WOFF, { headers: { 'content-type': 'font/woff' } });
+      if (url.endsWith('.woff2')) return new Response(WOFF2, { headers: { 'content-type': 'font/woff2' } });
+      return new Response(SCRIPT(url), { headers: { 'content-type': 'application/javascript' } });
+    });
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'cliodeck-reveal-review-'));
+    browser.userData = join(dir, 'userData');
+    browser.loadedHtml = '';
+    browser.loads = [];
+    browser.load = () => Promise.resolve();
+    browser.probe = () => 'ready';
+    browser.printed = 0;
+    browser.windows = 0;
+    browser.destroyed = 0;
+    browser.netCalls = 0;
+    fetched = [];
+    vi.stubGlobal('fetch', network());
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const deck = (content = '# Une\n\n---\n\n## Deux\n', file = 'diapos.pdf') => ({
+    projectPath: join(dir, 'project.json'),
+    content,
+    outputPath: join(dir, file),
+  });
+
+  /** Ce que la page chargerait encore du dehors : rien, si tout y est inclus. */
+  const outsideReferences = (html: string) =>
+    html.match(/@import|\.\/fonts\/|\.eot|\.ttf|fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.jsdelivr\.net/g) ?? [];
+
+  it('le thème garde ses polices : relatives et Google Fonts incluses dans la page, en data:', async () => {
+    const result = await new RevealJsExportService().exportToPDF(deck());
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(result.warnings).toBeUndefined();
+    const html = browser.loadedHtml;
+    expect(html).toContain(`url(data:font/woff;base64,${WOFF.toString('base64')}) format('woff')`);
+    expect(html).toContain(`url(data:font/woff2;base64,${WOFF2.toString('base64')}) format('woff2')`);
+    expect(html).toContain('unicode-range: U+0000-00FF;');
+    expect(outsideReferences(html)).toEqual([]);
+    // Les polices précèdent les règles du thème, comme l'`@import` qu'elles remplacent.
+    expect(html.indexOf("font-family: 'Lato'")).toBeLessThan(html.indexOf('.reveal { font-family'));
+    // Une seule forme téléchargée par police : ni l'.eot ni le .ttf, que Chromium ne lirait pas.
+    expect(fetched.filter((url) => /\.(eot|ttf)/.test(url))).toEqual([]);
+    expect(fetched).toContain(`${CDN}/dist/theme/fonts/source-sans-pro/source-sans-pro-regular.woff`);
+    // Par la pile réseau de Chromium, qui suit le proxy du système, pas par le `fetch` de Node.
+    expect(browser.netCalls).toBe(fetched.length);
+  });
+
+  it('les polices du thème, une fois téléchargées, servent aussi hors ligne', async () => {
+    const service = new RevealJsExportService();
+    expect((await service.exportToPDF(deck())).success).toBe(true);
+    const offline = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    vi.stubGlobal('fetch', offline);
+
+    const result = await service.exportToPDF(deck());
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(offline).not.toHaveBeenCalled();
+    expect(browser.loadedHtml).toContain(`data:font/woff;base64,${WOFF.toString('base64')}`);
+  });
+
+  it('polices introuvables : le PDF sort en police de repli, sans rien demander au dehors, et le dit', async () => {
+    vi.stubGlobal('fetch', network({ fontsDown: true }));
+
+    const result = await new RevealJsExportService().exportToPDF(deck());
+
+    expect(result, result.error).toMatchObject({ success: true, warnings: [{ code: 'presentation.themeFontsMissing' }] });
+    expect(outsideReferences(browser.loadedHtml)).toEqual([]);
+    expect(browser.printed).toBe(1);
+  });
+
+  it('le HTML autonome inclut les polices du thème de même', async () => {
+    const output = join(dir, 'diapos.html');
+    const result = await new RevealJsExportService().exportOffline(deck(undefined, 'diapos.html'));
+
+    expect(result).toEqual({ success: true, outputPath: output });
+    const html = readFileSync(output, 'utf-8');
+    expect(html).toContain(`data:font/woff;base64,${WOFF.toString('base64')}`);
+    expect(outsideReferences(html)).toEqual([]);
+  });
+
+  it(
+    'une page qui ne finit pas de charger (KaTeX) : refaite sans formules, PDF dans le délai, avec la réserve',
+    async () => {
+      // Sans borne, le chargement ne finirait jamais : le test tomberait sur son propre délai.
+      browser.load = (n) => (n === 1 ? NEVER() : Promise.resolve());
+
+      const result = await new RevealJsExportService({ renderTimeoutMs: 300 }).exportToPDF(deck('# Loi\n\n$E = mc^2$\n'));
+
+      expect(result, result.error).toMatchObject({ success: true, warnings: [{ code: 'presentation.mathNotRendered' }] });
+      expect(browser.loads).toHaveLength(2);
+      expect(browser.loads[0]).toContain('/* math.js */');
+      expect(browser.loads[1]).not.toContain('/* math.js */');
+      expect(browser.loads[1]).not.toContain('RevealMath');
+      expect(browser.destroyed).toBeGreaterThanOrEqual(1);
+      expect(browser.printed).toBe(1);
+    },
+    20_000
+  );
+
+  it(
+    'une page sans formules qui ne finit pas de charger : échec dit dans le délai, rien d’imprimé',
+    async () => {
+      browser.load = NEVER;
+
+      const result = await new RevealJsExportService({ renderTimeoutMs: 300 }).exportToPDF(
+        deck('# Carte\n\n![](https://example.org/carte.png)\n')
+      );
+
+      expect(result).toMatchObject({ success: false, errorCode: 'presentation.pageNotLoaded' });
+      expect(browser.loads).toHaveLength(1);
+      expect(browser.printed).toBe(0);
+      expect(existsSync(join(dir, 'diapos.pdf'))).toBe(false);
+    },
+    20_000
+  );
+
+  it('HTML autonome d’un deck à formules : écrit, avec la réserve qui dit les formules brutes', async () => {
+    const output = join(dir, 'diapos.html');
+    const result = await new RevealJsExportService().exportOffline(deck('# Loi\n\n$E = mc^2$\n', 'diapos.html'));
+
+    expect(result).toEqual({
+      success: true,
+      outputPath: output,
+      warnings: [{ code: 'presentation.mathNotIncludedOffline' }],
+    });
+    expect(readFileSync(output, 'utf-8')).not.toContain('RevealMath');
+  });
+
+  it('une page de portail laissée dans le cache par une version antérieure n’est pas reprise', async () => {
+    const cacheDir = join(browser.userData, 'reveal-assets-cache');
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(join(cacheDir, 'npm__reveal.js@5.0.4__dist__reveal.js'), '<!DOCTYPE html><html>Connectez-vous</html>');
+
+    const result = await new RevealJsExportService().exportToPDF(deck());
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(fetched).toContain(`${CDN}/dist/reveal.js`);
+    expect(browser.loadedHtml).not.toContain('Connectez-vous');
+    expect(readFileSync(join(cacheDir, 'npm__reveal.js@5.0.4__dist__reveal.js'), 'utf-8')).toBe('/* reveal.js */');
+  });
+
+  it('reveal.js du cache qui ne tourne pas : cache oublié, fichiers repris du réseau une fois', async () => {
+    const service = new RevealJsExportService();
+    expect((await service.exportToPDF(deck())).success).toBe(true);
+    fetched = [];
+    let probes = 0;
+    browser.probe = () => (probes++ === 0 ? 'no-reveal' : 'ready');
+
+    const result = await service.exportToPDF(deck());
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(fetched).toContain(`${CDN}/dist/reveal.js`);
+    expect(browser.printed).toBe(2);
+  });
+
+  it('reveal.js qui ne tourne pas, même repris du réseau : échec dit, une seule reprise', async () => {
+    const service = new RevealJsExportService();
+    expect((await service.exportToPDF(deck())).success).toBe(true);
+    browser.probe = () => 'no-reveal';
+    browser.windows = 0;
+    fetched = [];
+
+    const result = await service.exportToPDF(deck());
+
+    expect(result).toMatchObject({ success: false, errorCode: 'presentation.notRendered' });
+    expect(fetched.filter((url) => url === `${CDN}/dist/reveal.js`)).toHaveLength(1);
+    expect(browser.windows).toBe(2);
   });
 });

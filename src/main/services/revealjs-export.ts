@@ -1,7 +1,8 @@
 import { writeFile, readFile, mkdir, rm } from 'fs/promises';
 import { join, dirname, resolve as resolvePath } from 'path';
 import { tmpdir } from 'os';
-import { app, BrowserWindow, shell } from 'electron';
+import { createHash } from 'crypto';
+import { app, BrowserWindow, net, shell } from 'electron';
 import { load as loadYaml } from 'js-yaml';
 import { marked } from 'marked';
 import {
@@ -74,6 +75,118 @@ const getAllCdnAssets = (theme: string, options?: { includeMath?: boolean }): Cd
  */
 function deckUsesMath(body: string): boolean {
   return /(\$\$.+?\$\$|\$[^$\n]+\$|\\\(.+?\\\)|\\\[.+?\\\])/s.test(body);
+}
+
+// MARK: - Feuilles de style autonomes (export PDF et HTML autonome)
+
+/** Un fichier qu'une feuille de style demande (feuille importée, police), du cache ou du réseau. */
+type ResourceLoader = (url: string) => Promise<Buffer>;
+
+/** Les formats de police que Chromium lit, par indice `format()` ou par extension. */
+const FONT_TYPES: Record<string, string> = {
+  woff2: 'font/woff2',
+  woff: 'font/woff',
+  truetype: 'font/ttf',
+  ttf: 'font/ttf',
+  opentype: 'font/otf',
+  otf: 'font/otf',
+};
+
+/** Les thèmes importent des feuilles de polices, qui n'importent rien : trois niveaux laissent de la marge. */
+const MAX_IMPORT_DEPTH = 3;
+
+const IMPORT_RE = /@import\s+(?:url\(\s*(['"]?)([^'")]*)\1\s*\)|(['"])([^'"]*)\3)\s*([^;]*);/g;
+const FONT_FACE_RE = /@font-face\s*\{[^}]*\}/g;
+const SRC_RE = /\bsrc\s*:\s*([^;}]*);?/g;
+const FONT_ENTRY_RE = /^url\(\s*(['"]?)([^'")]*)\1\s*\)(?:\s*format\(\s*(['"]?)([^'")]*)\3\s*\))?$/i;
+
+/** Remplace chaque correspondance de `re` par ce que rend `replace`, attendu. */
+async function replaceAsync(
+  text: string,
+  re: RegExp,
+  replace: (match: RegExpMatchArray) => Promise<string>
+): Promise<string> {
+  const matches = [...text.matchAll(re)];
+  const replacements = await Promise.all(matches.map(replace));
+  let out = '';
+  let last = 0;
+  matches.forEach((m, i) => {
+    out += text.slice(last, m.index) + replacements[i];
+    last = (m.index ?? 0) + m[0].length;
+  });
+  return out + text.slice(last);
+}
+
+/**
+ * Une liste `src` de `@font-face` réduite à ce que Chromium lira : les `local()` et la première
+ * forme qu'il sait lire (woff2, woff, TrueType, OpenType), incluse en `data:`. Les autres formes
+ * (`.eot`, ou le `.ttf` qui suit un `.woff`) ne seraient jamais demandées : elles partent, ce qui
+ * évite de télécharger et d'inclure trois fois chaque police. Une police introuvable laisse la
+ * liste sans elle (police de repli), et son adresse va dans `missing`.
+ */
+async function selfContainedFontSource(
+  declaration: RegExpMatchArray,
+  cssUrl: string,
+  load: ResourceLoader,
+  missing: Set<string>
+): Promise<string> {
+  const entries = declaration[1].split(/,(?=\s*(?:url|local)\()/i).map((e) => e.trim());
+  const locals = entries.filter((e) => /^local\(/i.test(e));
+  const keep = (extra: string[]) => {
+    const list = [...locals, ...extra];
+    return list.length > 0 ? `src: ${list.join(', ')};` : '';
+  };
+  for (const entry of entries) {
+    const m = FONT_ENTRY_RE.exec(entry);
+    if (!m) continue;
+    const [, , url, , format] = m;
+    if (url.startsWith('data:')) return keep([entry]);
+    const extension = /\.([a-z0-9]+)(?:[?#]|$)/i.exec(url)?.[1] ?? '';
+    const type = FONT_TYPES[(format || extension).toLowerCase()];
+    if (!type) continue;
+    const target = new URL(url, cssUrl).href;
+    try {
+      const bytes = await load(target);
+      return keep([`url(data:${type};base64,${bytes.toString('base64')})${format ? ` format('${format}')` : ''}`]);
+    } catch {
+      missing.add(target);
+      return keep([]);
+    }
+  }
+  return keep([]);
+}
+
+/**
+ * Une feuille de style sans rien à chercher au dehors : ses `@import` remplacés par la feuille
+ * qu'ils désignent, résolue contre l'adresse de celle-ci (les thèmes de reveal.js importent leurs
+ * polices par un chemin relatif à leur fichier du CDN, ou depuis Google Fonts), et ses polices
+ * incluses en `data:`. Recopiée telle quelle dans la page, une feuille perdait ses polices : un
+ * chemin relatif y vise le dossier de la page, et une page d'impression qui attend Google Fonts
+ * attend sans borne sur un réseau qui ne répond pas (revue de L09-12). Ce qui n'a pu venir est
+ * retiré, et son adresse notée dans `missing`.
+ */
+async function selfContainedCss(
+  css: string,
+  cssUrl: string,
+  load: ResourceLoader,
+  missing: Set<string>,
+  depth = 0
+): Promise<string> {
+  const fonts = await replaceAsync(css, FONT_FACE_RE, async (face) =>
+    replaceAsync(face[0], SRC_RE, (declaration) => selfContainedFontSource(declaration, cssUrl, load, missing))
+  );
+  return replaceAsync(fonts, IMPORT_RE, async (m) => {
+    const target = new URL(m[2] ?? m[4] ?? '', cssUrl).href;
+    const media = m[5].trim();
+    try {
+      if (depth >= MAX_IMPORT_DEPTH) throw new Error(`@import trop profond : ${target}`);
+      const imported = await selfContainedCss((await load(target)).toString('utf-8'), target, load, missing, depth + 1);
+      return media ? `@media ${media} {\n${imported}\n}` : imported;
+    } catch {
+      missing.add(target);
+      return '';
+    }
+  });
 }
 
 // MARK: - Types
@@ -401,15 +514,18 @@ const MATH_FAILED_ATTR = 'data-cliodeck-math-failed';
 
 /**
  * Le HTML d'une présentation. `inlinedAssets` : les fichiers de reveal.js, inclus dans la page au
- * lieu d'être chargés du CDN (export hors ligne et PDF). `print` : la page que l'export PDF imprime,
- * en mode impression de reveal.js, avec les marques que lit la sonde.
+ * lieu d'être chargés du CDN (export hors ligne et PDF). `page.print` : la page que l'export PDF
+ * imprime, en mode impression de reveal.js, avec les marques que lit la sonde. `page.math` : le
+ * greffon des formules, par défaut quand le deck en a et que KaTeX peut venir du réseau (HTML en
+ * ligne, PDF) ; l'export PDF le retire quand KaTeX fait attendre la page.
  */
 const getRevealJsHTML = (
   content: string,
   options: RevealJsExportOptions,
   inlinedAssets?: Map<string, string>,
-  print = false
+  page: { print?: boolean; math?: boolean } = {}
 ): string => {
+  const print = page.print ?? false;
   const config = options.config || {};
 
   const { body, deck } = extractDeck(content);
@@ -464,7 +580,7 @@ const getRevealJsHTML = (
 
   // Formules : le greffon math, qui charge KaTeX du réseau au rendu. Exclu de l'export hors ligne,
   // où KaTeX manquerait ; gardé pour le PDF, qui attend KaTeX un temps borné et dit s'il manque.
-  const usesMath = (print || !inlinedAssets) && deckUsesMath(body);
+  const usesMath = page.math ?? ((print || !inlinedAssets) && deckUsesMath(body));
 
   // Build CSS tags (for <head>)
   const theme = resolved.theme;
@@ -599,6 +715,26 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * `work`, s'il aboutit dans `ms` ; `{ settled: false }` sinon. Son échec, lui, remonte : seul le
+ * délai change d'issue. Un rejet tardif, une fois le délai passé, est lu ici et ne remonte pas.
+ */
+function within<T>(work: Promise<T>, ms: number): Promise<{ settled: true; value: T } | { settled: false }> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve({ settled: false }), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve({ settled: true, value });
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
 /** `work`, ou `fallback` s'il n'a pas répondu dans `ms` (ou s'il a échoué). */
 function settleWithin<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise((resolve) => {
@@ -637,15 +773,48 @@ function outputPathIn(options: RevealJsExportOptions, suffix: string): string {
 }
 
 /**
- * Les deux attentes bornées des exports PDF et hors ligne (L09-12). Mesurées sur un Mac M-series
+ * Les attentes bornées des exports PDF et hors ligne (L09-12). Mesurées sur un Mac M-series
  * (voir la PR) ; la marge couvre un réseau lent et un Mac ancien. Un dépassement est un échec dit,
- * jamais une attente sans sortie, et reste sous la limite de l'export (`export-time-limit.ts`).
+ * ou une réserve, jamais une attente sans sortie, et reste sous la limite de l'export
+ * (`export-time-limit.ts`).
  */
 export interface RevealJsWaits {
-  /** Le téléchargement d'un fichier de reveal.js, quand il n'est pas en cache. */
+  /** Le téléchargement d'un fichier de reveal.js ou d'une police, quand il n'est pas en cache. */
   assetTimeoutMs?: number;
-  /** La mise en pages d'impression, une fois la page chargée. */
+  /**
+   * Le chargement de la page d'impression (l'événement `load`, qu'attend reveal.js pour poser ses
+   * pages), puis, une fois la page chargée, sa mise en pages : chacun au plus ce délai.
+   */
   renderTimeoutMs?: number;
+}
+
+/** Les fichiers de reveal.js inclus dans une page, et ce qui en manque. */
+interface InlinedAssets {
+  contents: Map<string, string>;
+  /** Un fichier au moins venait du cache : à oublier si reveal.js ne tourne pas. */
+  fromCache: boolean;
+  /** Des polices du thème n'ont pu venir : la page les remplace par une police de repli. */
+  fontsMissing: boolean;
+}
+
+/**
+ * Le nom d'un fichier dans le cache. Celui des fichiers du CDN de reveal.js ne change pas, pour que
+ * les caches déjà remplis servent encore ; les autres (Google Fonts, dont l'adresse a `?`, `:` et
+ * `,`, interdits dans un nom de fichier sous Windows) prennent une empreinte de leur adresse.
+ */
+function cacheFileName(url: string): string {
+  const legacy = url.replace(/https?:\/\/[^/]+\//, '').replace(/\//g, '__');
+  if (url.startsWith(`${CDN_BASE}/`) && /^[\w.@-]+$/.test(legacy)) return legacy;
+  return `${new URL(url).hostname}__${createHash('sha256').update(url).digest('hex').slice(0, 32)}`;
+}
+
+/**
+ * Une page HTML là où on attend un script, une feuille de style ou une police : celle d'un portail
+ * Wi-Fi, qu'une version d'avant L09-12 mettait en cache sans regarder.
+ */
+function looksLikeHtml(bytes: Uint8Array): boolean {
+  const head = Buffer.from(bytes.subarray(0, 256)).toString('latin1').trimStart().slice(0, 15).toLowerCase();
+  return /^<(!doctype|html|head|body)\b/.test(head);
 }
 
 const ASSET_TIMEOUT_MS = 30_000;
@@ -741,42 +910,74 @@ export class RevealJsExportService {
 
   // ─── Offline Export ───────────────────────────────────────────────────────
 
-  /**
-   * Un fichier de reveal.js : du cache (userData), sinon du CDN, puis mis en cache. Le premier
-   * export PDF ou hors ligne demande le réseau ; les suivants s'en passent.
-   */
-  private async fetchAsset(url: string, cacheDir: string): Promise<string> {
-    // Derive a safe filename from the URL path
-    const key = url.replace(/https?:\/\/[^/]+\//, '').replace(/\//g, '__');
-    const cachePath = join(cacheDir, key);
+  private cacheDir(): string {
+    return join(app.getPath('userData'), 'reveal-assets-cache');
+  }
 
-    if (await pathExists(cachePath)) return readFile(cachePath, 'utf-8');
+  /**
+   * Un fichier de reveal.js, ou une police de son thème : du cache (userData), sinon du réseau,
+   * puis mis en cache. Le premier export PDF ou hors ligne demande le réseau ; les suivants s'en
+   * passent.
+   */
+  private async fetchAsset(url: string): Promise<{ bytes: Buffer; fromCache: boolean }> {
+    const cacheDir = this.cacheDir();
+    const cachePath = join(cacheDir, cacheFileName(url));
+
+    if (await pathExists(cachePath)) {
+      const cached = await readFile(cachePath);
+      // Vide, ou page de portail laissée par une version antérieure : reprise du réseau.
+      if (cached.length > 0 && !looksLikeHtml(cached)) return { bytes: cached, fromCache: true };
+    }
 
     // Borné : un réseau qui ne répond pas (pare-feu, connexion qui tombe) faisait attendre
-    // l'export jusqu'à sa limite.
-    const response = await fetch(url, { signal: AbortSignal.timeout(this.assetTimeoutMs) });
+    // l'export jusqu'à sa limite. `net.fetch` passe par la pile réseau de Chromium, qui suit le
+    // proxy du système, comme la fenêtre qui chargeait reveal.js avant L09-12 ; le `fetch` de
+    // Node l'ignore, et l'export échouerait derrière un proxy obligatoire.
+    const response = await net.fetch(url, { signal: AbortSignal.timeout(this.assetTimeoutMs) });
     if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
     // Un portail Wi-Fi répond 200 avec sa page de connexion : en cache, elle remplacerait
     // reveal.js pour tous les exports suivants.
     if (/text\/html/i.test(response.headers.get('content-type') ?? '')) {
       throw new Error(`Failed to fetch ${url}: page HTML reçue au lieu du fichier`);
     }
-    const text = await response.text();
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (looksLikeHtml(bytes)) throw new Error(`Failed to fetch ${url}: page HTML reçue au lieu du fichier`);
     await mkdir(cacheDir, { recursive: true });
-    await atomicWriteFile(cachePath, text);
-    return text;
+    await atomicWriteFile(cachePath, bytes);
+    return { bytes, fromCache: false };
   }
 
-  /** Les fichiers de reveal.js, à inclure dans la page ; `AssetsUnavailableError` s'il en manque un. */
-  private async inlineAssets(assets: CdnAsset[], clock: ExportClock): Promise<Map<string, string>> {
-    const cacheDir = join(app.getPath('userData'), 'reveal-assets-cache');
-    const fetched = Promise.all(assets.map((a) => this.fetchAsset(a.url, cacheDir))).catch(
-      (error: unknown) => {
+  /**
+   * Les fichiers de reveal.js, à inclure dans la page, feuilles de style rendues autonomes (polices
+   * comprises) ; `AssetsUnavailableError` s'il manque un fichier de reveal.js. Une police manquante
+   * n'arrête rien : elle est dite (`fontsMissing`).
+   */
+  private async inlineAssets(assets: CdnAsset[], clock: ExportClock): Promise<InlinedAssets> {
+    const work = async (): Promise<InlinedAssets> => {
+      const files = await Promise.all(assets.map((a) => this.fetchAsset(a.url))).catch((error: unknown) => {
         throw new AssetsUnavailableError(error);
-      }
-    );
-    const contents = await clock.run(fetched);
-    return new Map(assets.map((a, i) => [a.url, contents[i]]));
+      });
+      const missing = new Set<string>();
+      const load: ResourceLoader = async (url) => (await this.fetchAsset(url)).bytes;
+      const texts = await Promise.all(
+        assets.map((a, i) => {
+          const text = files[i].bytes.toString('utf-8');
+          return a.tag === 'style' ? selfContainedCss(text, a.url, load, missing) : text;
+        })
+      );
+      if (missing.size > 0) console.warn('⚠️ reveal.js : polices du thème indisponibles :', [...missing]);
+      return {
+        contents: new Map(assets.map((a, i) => [a.url, texts[i]])),
+        fromCache: files.some((f) => f.fromCache),
+        fontsMissing: missing.size > 0,
+      };
+    };
+    return clock.run(work());
+  }
+
+  /** Oublie ces fichiers du cache : le prochain `inlineAssets` les reprend du réseau. */
+  private async forgetCachedAssets(assets: CdnAsset[]): Promise<void> {
+    await Promise.all(assets.map((a) => rm(join(this.cacheDir(), cacheFileName(a.url)), { force: true })));
   }
 
   /**
@@ -838,11 +1039,11 @@ export class RevealJsExportService {
       // doivent correspondre au thème réellement rendu.
       const theme = resolveDeckConfig(options.content, options).theme;
       // Exclude math plugin from offline — KaTeX loads external CDN resources at runtime
-      const inlinedAssets = await this.inlineAssets(getAllCdnAssets(theme, { includeMath: false }), clock);
+      const inlined = await this.inlineAssets(getAllCdnAssets(theme, { includeMath: false }), clock);
 
       onProgress?.({ stage: 'converting', message: 'Génération HTML offline...', progress: 70 });
 
-      const html = getRevealJsHTML(options.content, options, inlinedAssets);
+      const html = getRevealJsHTML(options.content, options, inlined.contents);
       const outputPath = outputPathIn(options, '-offline.html');
 
       await mkdir(dirname(outputPath), { recursive: true });
@@ -850,8 +1051,14 @@ export class RevealJsExportService {
       await writeFile(outputPath, html, 'utf-8');
       clock.throwIfExpired();
 
+      // Le fichier ne demande rien au dehors : sans KaTeX, les formules y restent telles qu'écrites,
+      // et la fiche de L09-12 demande de le dire.
+      const warnings: OutcomeIssue[] = [];
+      if (inlined.fontsMissing) warnings.push({ code: 'presentation.themeFontsMissing' });
+      if (deckUsesMath(extractDeck(options.content).body)) warnings.push({ code: 'presentation.mathNotIncludedOffline' });
+
       onProgress?.({ stage: 'complete', message: 'Présentation offline créée!', progress: 100 });
-      return { success: true, outputPath };
+      return { success: true, outputPath, ...(warnings.length > 0 ? { warnings } : {}) };
     } catch (error: unknown) {
       console.error('❌ Offline export failed:', error);
       return failureOf(error);
@@ -893,37 +1100,78 @@ export class RevealJsExportService {
       // CDN par la fenêtre, il manquait hors ligne, et la page imprimée n'était que du markdown
       // brut ; sur un réseau qui ne répond pas, la fenêtre attendait ses scripts sans fin.
       const theme = resolveDeckConfig(options.content, options).theme;
-      const math = deckUsesMath(extractDeck(options.content).body);
-      const inlinedAssets = await this.inlineAssets(getAllCdnAssets(theme, { includeMath: math }), clock);
-      const html = getRevealJsHTML(options.content, options, inlinedAssets, true);
-
-      await writeFile(tmpHtml, html, 'utf-8');
+      const deckMath = deckUsesMath(extractDeck(options.content).body);
+      const assets = getAllCdnAssets(theme, { includeMath: deckMath });
+      let inlined = await this.inlineAssets(assets, clock);
+      let math = deckMath;
+      let mathMissing = false;
+      let cacheForgotten = false;
 
       onProgress?.({ stage: 'converting', message: 'Rendu de la présentation...', progress: 40 });
 
-      win = new BrowserWindow({
-        show: false,
-        width: 1280,
-        height: 960,
-        webPreferences: { nodeIntegration: false, contextIsolation: true },
-      });
+      // Trois pages au plus : la première ; une sans formules si KaTeX, seul fichier encore demandé
+      // au réseau, la fait attendre ; une avec reveal.js repris du réseau si celui du cache ne
+      // tourne pas. Chaque attente est bornée.
+      for (;;) {
+        const html = getRevealJsHTML(options.content, options, inlined.contents, { print: true, math });
+        await writeFile(tmpHtml, html, 'utf-8');
+        clock.throwIfExpired();
+        if (win && !win.isDestroyed()) win.destroy();
 
-      // Le mode impression de reveal.js se déclenche par l'URL, pas par une
-      // classe posée sur `.reveal` : sans `?print-pdf`, seule la diapositive
-      // courante est rendue et le PDF n'en contient qu'une.
-      await clock.run(win.loadFile(tmpHtml, { search: 'print-pdf' }));
+        win = new BrowserWindow({
+          show: false,
+          width: 1280,
+          height: 960,
+          webPreferences: { nodeIntegration: false, contextIsolation: true },
+        });
 
-      const layout = await this.waitForPrintLayout(win, math, clock);
-      if (layout === 'no-reveal' || layout === 'timed-out') {
-        const error =
-          layout === 'no-reveal'
-            ? "reveal.js absent de la page d'impression"
-            : `reveal.js n'a pas mis la présentation en pages en ${this.renderTimeoutMs} ms`;
-        console.error('❌ PDF export failed:', error);
-        return { success: false, error, errorCode: 'presentation.notRendered' };
+        // Le mode impression de reveal.js se déclenche par l'URL, pas par une
+        // classe posée sur `.reveal` : sans `?print-pdf`, seule la diapositive
+        // courante est rendue et le PDF n'en contient qu'une.
+        //
+        // `loadFile` attend l'événement `load`, qui attend tout ce que la page demande, et
+        // reveal.js n'en pose les pages qu'après lui. Un réseau qui accepte la connexion sans
+        // répondre tenait donc l'export jusqu'à sa limite (revue de L09-12) : borné.
+        const loading = await clock.run(within(win.loadFile(tmpHtml, { search: 'print-pdf' }), this.renderTimeoutMs));
+        if (!loading.settled) {
+          if (math) {
+            // La page refaite sans le greffon des formules : elles restent telles qu'écrites, et la
+            // réserve le dit.
+            console.warn(`⚠️ reveal.js : page non chargée en ${this.renderTimeoutMs} ms, refaite sans KaTeX`);
+            math = false;
+            mathMissing = true;
+            continue;
+          }
+          const error = `Page d'impression non chargée en ${this.renderTimeoutMs} ms : une ressource demandée au réseau ne répond pas`;
+          console.error('❌ PDF export failed:', error);
+          return { success: false, error, errorCode: 'presentation.pageNotLoaded' };
+        }
+
+        const layout = await this.waitForPrintLayout(win, math, clock);
+        if (layout === 'no-reveal' && inlined.fromCache && !cacheForgotten) {
+          // Un fichier du cache qui ne tourne pas (tronqué, ou page de portail d'une version
+          // antérieure) : il ferait échouer chaque export, et le HTML autonome qui l'inclut aussi.
+          console.warn('⚠️ reveal.js du cache absent de la page : fichiers repris du réseau');
+          cacheForgotten = true;
+          await clock.run(this.forgetCachedAssets(assets));
+          inlined = await this.inlineAssets(assets, clock);
+          continue;
+        }
+        if (layout === 'no-reveal' || layout === 'timed-out') {
+          const error =
+            layout === 'no-reveal'
+              ? "reveal.js absent de la page d'impression"
+              : `reveal.js n'a pas mis la présentation en pages en ${this.renderTimeoutMs} ms`;
+          console.error('❌ PDF export failed:', error);
+          return { success: false, error, errorCode: 'presentation.notRendered' };
+        }
+        if (layout === 'math-missing') mathMissing = true;
+        break;
       }
-      const warnings: OutcomeIssue[] =
-        layout === 'math-missing' ? [{ code: 'presentation.mathNotRendered' }] : [];
+
+      const warnings: OutcomeIssue[] = [];
+      if (inlined.fontsMissing) warnings.push({ code: 'presentation.themeFontsMissing' });
+      if (mathMissing) warnings.push({ code: 'presentation.mathNotRendered' });
 
       onProgress?.({ stage: 'converting', message: 'Génération du PDF...', progress: 70 });
 

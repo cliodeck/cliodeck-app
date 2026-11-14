@@ -2710,8 +2710,11 @@
     },
     "presentation": {
       "assetsUnavailable": "The reveal.js files could not be downloaded, and the presentation export needs them. They are downloaded once, at the first PDF or self-contained HTML export, then kept on this computer. Check the Internet connection, then run the export again.",
-      "notRendered": "The presentation could not be laid out for printing: no PDF was written. Run the export again; if it fails again, export it as self-contained HTML.",
-      "mathNotRendered": "The formulas of the presentation are not formatted in the PDF: their renderer (KaTeX) is downloaded from the Internet, which did not respond. They appear as written. Reconnect, then run the export again to format them."
+      "notRendered": "The presentation could not be laid out for printing: no PDF was written. Run the export again; if it fails again, export it as HTML (online), which loads reveal.js from the Internet when opened.",
+      "mathNotRendered": "The formulas of the presentation are not formatted in the PDF: their renderer (KaTeX) is downloaded from the Internet, which did not respond. They appear as written. Reconnect, then run the export again to format them.",
+      "pageNotLoaded": "The presentation could not be prepared for printing: a resource it requests from the Internet (a remote image, for instance) did not respond. No PDF was written. Check the Internet connection, then run the export again.",
+      "themeFontsMissing": "The fonts of the presentation's theme could not be downloaded: the document uses a substitute font. They are downloaded once, then kept on this computer. Check the Internet connection, then run the export again.",
+      "mathNotIncludedOffline": "The formulas of the presentation are not formatted in the self-contained HTML: their renderer (KaTeX) is downloaded from the Internet, which this format does without. They appear as written. Export as HTML (online) or as PDF to format them."
     }
   }
 }

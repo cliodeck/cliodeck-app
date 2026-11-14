@@ -27,9 +27,11 @@
  * reveal.js est inclus dans la page (L09-12), du cache de l'app ou, la première fois, de son CDN :
  * le premier export d'un userData neuf demande le réseau, et le test est sauté si l'export le dit
  * (`presentation.assetsUnavailable`). Il ne sonde plus le CDN à part : une sonde de 5 s l'a fait
- * sauter deux fois alors que le CDN répondait. Le second export se fait sans réseau, côté main
- * (`fetch` qui échoue) comme côté Chromium (fenêtre hors ligne) : le cache suffit, et la page
- * d'impression ne charge plus rien du dehors. C'est le seul test qui passe par le vrai plugin, et
+ * sauter deux fois alors que le CDN répondait. Les polices du thème (Source Sans Pro pour `black`,
+ * importée par un chemin relatif au CDN) sont incluses de même : `pdffonts` les cherche dans le PDF,
+ * qui sortait en Helvetica (revue de L09-12). Le second export se fait sans réseau : toute requête
+ * http(s) de la session est annulée et notée, téléchargements du main compris (`net.fetch` passe
+ * par la session), et aucune ne doit partir. C'est le seul test qui passe par le vrai plugin, et
  * par la vraie attente de la mise en pages (`pdf-ready`) : à relancer si `REVEAL_VERSION` change.
  */
 
@@ -100,6 +102,10 @@ test('l’export PDF d’une présentation rend une page par diapositive, hors l
     const payload = response as { metadata?: { pageCount?: number } };
     const metadata = payload.metadata ?? (payload as { pageCount?: number });
     if (pdftotextAvailable()) {
+      // pdffonts vient avec pdftotext (Poppler) : la police du thème, pas une police de repli.
+      const fonts = execFileSync('pdffonts', [outputPath], { encoding: 'utf8', env: toolEnv() });
+      expect(fonts).toMatch(/SourceSansPro/);
+      expect(fonts).not.toMatch(/Helvetica/);
       const text = execFileSync('pdftotext', [outputPath, '-'], { encoding: 'utf8', env: toolEnv() });
       // reveal.js a mis la page en forme : le titre est un titre, pas une ligne `# …` brute.
       expect(text).toMatch(/Les archives et la\s+machine/);
@@ -129,24 +135,28 @@ test('l’export PDF d’une présentation rend une page par diapositive, hors l
     expect(first.warnings).toBeUndefined();
     await expectSlides();
 
-    // Plus de réseau : le main ne télécharge plus rien, la fenêtre d'impression non plus. Toute
-    // requête http(s) de la session est annulée : `enableNetworkEmulation({ offline: true })` ne
-    // vaut que pour les pages déjà ouvertes, et la fenêtre d'impression, créée après, atteignait
-    // encore le CDN (mesuré).
+    // Plus de réseau : toute requête http(s) de la session est annulée, et notée. Les
+    // téléchargements du main passent par `net.fetch`, donc par la session ; la fenêtre
+    // d'impression aussi. `enableNetworkEmulation({ offline: true })` ne vaut que pour les pages
+    // déjà ouvertes, et la fenêtre d'impression, créée après, atteignait encore le CDN (mesuré).
     rmSync(outputPath);
     await app.evaluate(async ({ session }) => {
-      (globalThis as { fetch: typeof fetch }).fetch = async () => {
-        throw new TypeError('fetch failed (e2e : hors ligne)');
-      };
-      session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) =>
-        callback({ cancel: true }),
-      );
+      const blocked: string[] = [];
+      (globalThis as { e2eBlockedRequests?: string[] }).e2eBlockedRequests = blocked;
+      session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (details, callback) => {
+        blocked.push(details.url);
+        callback({ cancel: true });
+      });
     });
 
     const offline = await exportPdf();
     expect(offline.error).toBeUndefined();
     expect(offline).toMatchObject({ success: true });
+    expect(offline.warnings).toBeUndefined();
     await expectSlides();
+    // Rien n'est parti au dehors : ni reveal.js, ni ses polices, ni Google Fonts.
+    const blocked = await app.evaluate(() => (globalThis as { e2eBlockedRequests?: string[] }).e2eBlockedRequests ?? []);
+    expect(blocked.filter((url) => !/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(url))).toEqual([]);
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });
