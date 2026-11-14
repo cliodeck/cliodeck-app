@@ -25,6 +25,7 @@ import { pdfExportService, type ExportOptions, type PDFExportResult } from '../p
 import { ExportClock } from '../export-time-limit.js';
 import { bibliographyService } from '../bibliography-service.js';
 import { setLanguage } from '../../i18n.js';
+import { documentDate } from '../pandoc-args.js';
 import { CitationEngine } from '../../../../backend/core/citation/CitationEngine.js';
 import { DEFAULT_BOOK_SETTINGS, type Chapter } from '../../../../backend/types/book.js';
 import {
@@ -354,3 +355,127 @@ describe.skipIf(!pandocAvailable() || !xelatexAvailable())('export PDF : les cit
     COMPILE_MS
   );
 });
+
+/**
+ * L10-4 : le document fait foi.
+ *
+ * S18-1-3 : le champ Auteur laissé vide envoyait « ClioDesk », et la fenêtre imposait la date du
+ * jour, en français ; passés en `-M`, l'un et l'autre écrasaient le front matter. S12-1-6 : le
+ * résumé, passé en `-M abstract=`, était une MetaString que pandoc ne lit pas comme du markdown :
+ * `*ABSITAL*` s'imprimait tel quel. S12-1-10 : un article sans résumé imprimait « Résumé à
+ * compléter. ». Q42 : sans date dans le document, la date du jour, dans la langue de
+ * l'interface, par le fichier de métadonnées, que le `date` du front matter remplace. Le titre de
+ * la bibliographie suit la même règle (il partait en `--metadata`, qui l'emporte sur le document).
+ */
+describe.skipIf(!pandocAvailable() || !xelatexAvailable() || !pdftotextAvailable())(
+  'export PDF : le document fait foi (L10-4)',
+  () => {
+    function exportArticle(content: string, extra: Partial<ExportOptions> = {}): Promise<PDFExportResult> {
+      return pdfExportService.exportToPDF({
+        projectPath: project,
+        projectType: 'article',
+        content,
+        outputPath: join(project, 'article.pdf'),
+        metadata: { title: 'Article' },
+        ...extra,
+      });
+    }
+
+    it(
+      'sans front matter : résumé en italique, esperluette en clair, date du jour en français, aucune signature',
+      async () => {
+        writeFileSync(join(project, 'abstract.md'), '# Résumé\n\nUn *ABSITAL* soigné, chez Dupont & Fils.\n');
+
+        const before = documentDate(new Date());
+        const result = await exportArticle('Corps du texte.\n');
+        const after = documentDate(new Date());
+
+        expect(result, result.error).toMatchObject({ success: true });
+        const pdf = join(project, 'article.pdf');
+        const text = pdfText(pdf);
+        expect(text).toContain('ABSITAL');
+        expect(text).not.toContain('*ABSITAL*');
+        expect(text).toContain('Dupont & Fils');
+        expect(text).not.toContain('\\&');
+        expect([before, after].some((date) => text.includes(date))).toBe(true);
+        expect(text).not.toMatch(/ClioDes[kc]/);
+        // Une seule page, sous le style `plain` de la page de titre : seul le résumé peut amener
+        // une police italique.
+        expect(execFileSync('pdfinfo', [pdf], { encoding: 'utf8', env: toolEnv() })).toMatch(/^Pages:\s+1$/m);
+        expect(execFileSync('pdffonts', [pdf], { encoding: 'utf8', env: toolEnv() })).toMatch(/Italic/);
+      },
+      COMPILE_MS
+    );
+
+    it(
+      'front matter : son auteur, sa date et son titre de bibliographie l’emportent, interface en anglais',
+      async () => {
+        setLanguage('en');
+
+        const result = await exportArticle(
+          '---\nauthor: Frédéric Clavert\ndate: 1er mai 1968\nreference-section-title: Sources citées\n---\n\n' +
+            'Texte [@Farge_2013].\n',
+          { bibliographyPath: join(project, 'refs.bib'), cslPath: join(project, 'chicago.csl') }
+        );
+
+        expect(result, result.error).toMatchObject({ success: true });
+        const text = pdfText(join(project, 'article.pdf'));
+        expect(text).toContain('Frédéric Clavert');
+        expect(text).toContain('1er mai 1968');
+        expect(text).not.toContain(documentDate(new Date()));
+        expect(text).toMatch(/Sources citées\s+Farge, Arlette\./);
+        expect(text).not.toContain('References');
+        expect(text).not.toMatch(/ClioDes[kc]/);
+      },
+      COMPILE_MS
+    );
+
+    it(
+      'style intégré : le titre de bibliographie du front matter l’emporte aussi',
+      async () => {
+        await bibliographyService.loadFromFile(join(project, 'refs.bib'));
+
+        const result = await exportArticle('---\nreference-section-title: Sources citées\n---\n\nTexte [@Farge_2013].\n', {
+          bibliographyPath: join(project, 'refs.bib'),
+          citation: { useEngine: true, style: 'chicago-note-bibliography', locale: 'fr-FR' },
+        });
+
+        expect(result, result.error).toMatchObject({ success: true });
+        const text = pdfText(join(project, 'article.pdf'));
+        expect(text).toMatch(/Sources citées\s+Farge, Arlette\./);
+        expect(text).not.toContain('Références');
+      },
+      COMPILE_MS
+    );
+
+    it(
+      'article neuf : ni « Résumé à compléter » ni bloc de résumé',
+      async () => {
+        // Ce qu'écrit `project-manager` à la création d'un article.
+        writeFileSync(join(project, 'abstract.md'), '# Résumé\n\nRésumé à compléter...');
+
+        const result = await exportArticle('Corps du texte.\n');
+
+        expect(result, result.error).toMatchObject({ success: true });
+        const text = pdfText(join(project, 'article.pdf'));
+        expect(text).toContain('Corps du texte.');
+        expect(text).not.toContain('compléter');
+        expect(text).not.toContain('Résumé');
+      },
+      COMPILE_MS
+    );
+
+    it(
+      'article sans abstract.md : pas de bloc de résumé',
+      async () => {
+        const result = await exportArticle('Corps du texte.\n');
+
+        expect(result, result.error).toMatchObject({ success: true });
+        const text = pdfText(join(project, 'article.pdf'));
+        expect(text).not.toContain('compléter');
+        expect(text).not.toContain('Résumé');
+      },
+      COMPILE_MS
+    );
+  }
+);

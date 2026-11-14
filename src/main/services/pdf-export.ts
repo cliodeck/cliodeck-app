@@ -26,6 +26,10 @@ import {
   buildBeamerCustomizations,
   buildPandocArgs,
   demoteChapterBibliographyHeading,
+  documentDate,
+  documentFrontMatter,
+  exportableAbstract,
+  metadataYaml,
   missingImagesWarnings,
   pandocImageFailure,
   pandocMissingResources,
@@ -360,13 +364,12 @@ ${PANDOC_CITEPROC_LINKS}
 
 \\maketitle
 
-\\begin{abstract}
+% Sans resume, pas de bloc : un texte de remplissage s'imprimait sinon (S12-1-10).
 $if(abstract)$
+\\begin{abstract}
 $abstract$
-$else$
-Résumé à compléter.
-$endif$
 \\end{abstract}
+$endif$
 
 $body$
 
@@ -761,6 +764,9 @@ export class PDFExportService {
     const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const inPath = join(opts.tempDir, `chapter-${stamp}.md`);
     await writeFile(inPath, content, 'utf-8');
+    // Le titre par le fichier de métadonnées : un `reference-section-title` du chapitre l'emporte.
+    const metadataPath = join(opts.tempDir, `chapter-${stamp}.yaml`);
+    await writeFile(metadataPath, metadataYaml({ 'reference-section-title': referenceSectionTitle() }), 'utf-8');
 
     const args = [
       inPath,
@@ -768,7 +774,7 @@ export class PDFExportService {
       '--wrap=preserve',
       '--citeproc',
       '--bibliography', opts.bibliographyPath,
-      '--metadata', `reference-section-title=${referenceSectionTitle()}`,
+      '--metadata-file', metadataPath,
     ];
     if (opts.cslPath && (await pathExists(opts.cslPath))) {
       args.push('--csl', opts.cslPath);
@@ -872,8 +878,9 @@ export class PDFExportService {
           const abstractContent = await readFile(abstractPath, 'utf-8');
           // Retire le titre de tête quel qu'il soit (« # Résumé », mais
           // aussi « # Abstract » ou « # Quatrième de couverture ») : passé
-          // tel quel en métadonnée, il s'imprimerait échappé en `\#`.
-          abstract = stripLeadingHeading(abstractContent);
+          // tel quel en métadonnée, il s'imprimerait échappé en `\#`. Le texte de remplissage
+          // d'un projet neuf n'est pas un résumé.
+          abstract = exportableAbstract(stripLeadingHeading(abstractContent));
           console.log('📄 Abstract loaded from file:', abstractPath);
           console.log('📄 Abstract content preview:', abstract.substring(0, 200));
         } else {
@@ -997,7 +1004,11 @@ export class PDFExportService {
           if (processed.missingKeys.length > 0) {
             console.warn('⚠️ CitationEngine: unresolved keys:', processed.missingKeys);
           }
-          cleanedContent = appendEngineCitations(processed.md, processed, referenceSectionTitle());
+          // Le titre de la bibliographie : celui du front matter, comme pandoc le prend, sinon
+          // celui de l'interface.
+          const sectionTitle =
+            documentFrontMatter(cleanedContent).fields['reference-section-title'] || referenceSectionTitle();
+          cleanedContent = appendEngineCitations(processed.md, processed, sectionTitle);
           for (const key of processed.missingKeys) unresolved.add(key);
           useEnginePipeline = true;
           console.log(
@@ -1071,6 +1082,18 @@ export class PDFExportService {
         for (const key of citationKeysIn(cleanedContent)) unresolved.add(key);
       }
 
+      // Ce que l'export propose et que le front matter du document remplace (L10-4) : la date
+      // (celle du jour sans autre, Q42), le résumé, le titre de la bibliographie.
+      const metadataPath = join(tempDir, 'metadata.yaml');
+      await writeFile(
+        metadataPath,
+        metadataYaml({
+          date: options.metadata?.date || documentDate(new Date()),
+          abstract,
+          'reference-section-title': referenceSectionTitle(),
+        })
+      );
+
       const cslAvailable = !!options.cslPath && (await pathExists(options.cslPath));
       const pandocArgs = buildPandocArgs({
         mdPath,
@@ -1079,8 +1102,8 @@ export class PDFExportService {
         projectType: options.projectType,
         bookSettings: options.bookSettings,
         beamerConfig: beamer.config,
-        metadata: options.metadata,
-        abstract,
+        metadata: { title: options.metadata?.title, author: options.metadata?.author },
+        metadataPath,
         bibPath,
         useEnginePipeline,
         cslPath: options.cslPath,

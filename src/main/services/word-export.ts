@@ -41,6 +41,10 @@ import {
   type ExportResult,
 } from './export-time-limit.js';
 import {
+  documentDate,
+  documentFrontMatter,
+  exportableAbstract,
+  metadataYaml,
   missingImagesWarnings,
   pandocMissingResources,
   pandocUnresolvedCitations,
@@ -255,26 +259,32 @@ export class WordExportService {
 
       // Build YAML frontmatter for metadata. Les valeurs passent par
       // yamlQuote : un guillemet dans un titre cassait le frontmatter, et
-      // un retour à la ligne permettait d'y injecter des clés arbitraires
-      // (seul abstract était déjà sûr, en scalaire bloc).
+      // un retour à la ligne permettait d'y injecter des clés arbitraires.
+      // Il précède celui du document, qui l'emporte : il ne porte que le titre. L'auteur saisi
+      // part en `--metadata`, qui l'emporte sur le document, comme pour le PDF ; la date, le
+      // résumé et le titre de la bibliographie par le fichier de métadonnées (L10-4).
       let yamlFrontmatter = '---\n';
       if (options.metadata?.title) {
         yamlFrontmatter += `title: ${yamlQuote(options.metadata.title)}\n`;
-      }
-      if (options.metadata?.author) {
-        yamlFrontmatter += `author: ${yamlQuote(options.metadata.author)}\n`;
-      }
-      if (options.metadata?.date) {
-        yamlFrontmatter += `date: ${yamlQuote(options.metadata.date)}\n`;
-      }
-      if (options.metadata?.abstract) {
-        yamlFrontmatter += `abstract: |\n  ${options.metadata.abstract.replace(/\n/g, '\n  ')}\n`;
       }
       yamlFrontmatter += '---\n\n';
 
       const cleanedContent = options.content;
       const fullContent = yamlFrontmatter + cleanedContent;
       await writeFile(inputPath, fullContent);
+
+      // Ce que l'export propose et que le front matter du document remplace : la date (celle du
+      // jour sans autre, Q42), le résumé, le titre de la bibliographie. Il partait en
+      // `--metadata`, qui l'emportait sur un `reference-section-title` écrit par l'auteur.
+      const metadataPath = join(tempDir, 'metadata.yaml');
+      await writeFile(
+        metadataPath,
+        metadataYaml({
+          date: options.metadata?.date || documentDate(new Date()),
+          abstract: options.metadata?.abstract,
+          'reference-section-title': referenceSectionTitle(),
+        })
+      );
 
       // Build pandoc arguments
       // `--resource-path` : pandoc tourne dans le dossier temporaire, et une image relative au
@@ -290,7 +300,11 @@ export class WordExportService {
         '-o', outputPath,
         '--from', 'markdown',
         '--to', 'docx',
+        '--metadata-file', metadataPath,
       ];
+      if (options.metadata?.author) {
+        pandocArgs.push('--metadata', `author=${options.metadata.author}`);
+      }
       if (resources.paths.length > 0) {
         pandocArgs.push(`--resource-path=${resources.paths.join(delimiter)}`);
       }
@@ -337,11 +351,6 @@ export class WordExportService {
         if (engineCsl && options.citation?.locale) {
           pandocArgs.push('--metadata', `lang=${options.citation.locale}`);
         }
-
-        // Add reference section title
-        // Titre de section écrit DANS le document exporté : il doit suivre la
-        // langue de l'interface, sinon un germanophone reçoit « Références ».
-        pandocArgs.push('--metadata', `reference-section-title=${referenceSectionTitle()}`);
       }
 
       // Add reference doc (template) if provided
@@ -477,7 +486,8 @@ export class WordExportService {
         if ((await pathExists(abstractPath)) && (await isInsideAsync(options.projectPath, abstractPath))) {
           const abstractContent = await readFile(abstractPath, 'utf-8');
           const parts = splitAbstract(abstractContent);
-          abstract = parts.body;
+          // Le texte de remplissage d'un projet neuf n'est pas un résumé.
+          abstract = exportableAbstract(parts.body);
           if (parts.heading) abstractTitle = parts.heading;
           options.metadata = { ...options.metadata, abstract };
           console.log('📄 Abstract loaded from file:', abstractPath);
@@ -562,6 +572,21 @@ export class WordExportService {
         progress: 30,
       });
 
+      // Le front matter du document fait foi, comme chez pandoc (L10-4) : son auteur, sauf auteur
+      // saisi dans la fenêtre ; sa date, sinon celle du jour (Q42) ; son résumé, qui l'emporte
+      // sur `abstract.md` ; son titre de bibliographie. Il n'est pas du texte : marked le rendait
+      // en titre « author: … date: … ». Faute d'auteur, le document n'est signé de personne.
+      const frontMatter = documentFrontMatter(options.content);
+      const fm = frontMatter.fields;
+      const title = options.metadata?.title || fm.title;
+      const author = options.metadata?.author || fm.author || undefined;
+      const date = 'date' in fm ? fm.date : options.metadata?.date || documentDate(new Date());
+      if ('abstract' in fm) {
+        abstract = fm.abstract;
+        abstractTitle = 'Résumé';
+      }
+      const sectionTitle = fm['reference-section-title'] || referenceSectionTitle();
+
       // Run CitationEngine pipeline if requested, transforming [@key]
       // clusters into {{FN:N}} placeholders that the inline parser turns
       // into FootnoteReferenceRuns.
@@ -570,7 +595,7 @@ export class WordExportService {
       // Même choix du style que sur le chemin pandoc : case cochée, le style
       // intégré ; décochée, celui du projet. Le moteur ne tournait que case
       // cochée, et le .docx gardait les clés malgré le style du projet.
-      let sourceMarkdown = options.content;
+      let sourceMarkdown = frontMatter.body;
       let engineFootnotes: ProcessedFootnote[] = [];
       let engineBibliography: string[] = [];
       let unresolvedCitations: string[] = [];
@@ -686,7 +711,7 @@ export class WordExportService {
       if (engineBibliography.length > 0) {
         contentParagraphs.push(
           new Paragraph({
-            text: referenceSectionTitle(),
+            text: sectionTitle,
             heading: HeadingLevel.HEADING_2,
             spacing: { before: 400, after: 200 },
           })
@@ -715,12 +740,12 @@ export class WordExportService {
         const titlePageChildren: BlockChild[] = [];
 
         // Title
-        if (options.metadata?.title) {
+        if (title) {
           titlePageChildren.push(
             new Paragraph({
               children: [
                 new TextRun({
-                  text: options.metadata.title,
+                  text: title,
                   bold: true,
                   size: 48,
                 }),
@@ -732,12 +757,12 @@ export class WordExportService {
         }
 
         // Author
-        if (options.metadata?.author) {
+        if (author) {
           titlePageChildren.push(
             new Paragraph({
               children: [
                 new TextRun({
-                  text: options.metadata.author,
+                  text: author,
                   size: 28,
                 }),
               ],
@@ -748,12 +773,12 @@ export class WordExportService {
         }
 
         // Date
-        if (options.metadata?.date) {
+        if (date) {
           titlePageChildren.push(
             new Paragraph({
               children: [
                 new TextRun({
-                  text: options.metadata.date,
+                  text: date,
                   size: 24,
                 }),
               ],
@@ -805,7 +830,7 @@ export class WordExportService {
                   children: [
                     new Paragraph({
                       children: [
-                        new TextRun({ text: options.metadata?.title || '', italics: true }),
+                        new TextRun({ text: title || '', italics: true }),
                       ],
                       alignment: AlignmentType.RIGHT,
                     }),
@@ -834,7 +859,7 @@ export class WordExportService {
                 new Paragraph({
                   children: [
                     new TextRun({
-                      text: options.metadata?.title || '',
+                      text: title || '',
                       italics: true,
                     }),
                   ],
@@ -888,9 +913,11 @@ export class WordExportService {
       }
 
       // Create document
+      // Sans auteur, docx écrirait « Un-named » (mesuré) : une chaîne vide, plutôt qu'une signature.
       const doc = new Document({
-        creator: options.metadata?.author || 'ClioDesk',
-        title: options.metadata?.title || 'Document',
+        creator: author ?? '',
+        lastModifiedBy: author ?? '',
+        title: title || 'Document',
         description: abstract || '',
         sections,
         numbering: ORDERED_LIST_NUMBERING,
@@ -916,10 +943,10 @@ export class WordExportService {
             finalBuffer = await this.mergeWithTemplate(
               options.templatePath,
               {
-                title: options.metadata?.title || '',
-                author: options.metadata?.author || '',
-                date: options.metadata?.date || '',
-                content: options.content,
+                title: title || '',
+                author: author ?? '',
+                date: date ?? '',
+                content: frontMatter.body,
                 abstract: abstract || '',
               }
             );

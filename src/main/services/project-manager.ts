@@ -17,6 +17,7 @@ import { migrateWorkspaceToFlat } from '../../../backend/core/workspace/migrator
 import { workspaceConfigIssue, type WorkspaceConfigIssue } from '../../../backend/core/workspace/config.js';
 import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
 import { CONTEXT_FILE, CONTEXT_TEMPLATE } from '../../../backend/core/hints/loader.js';
+import { ABSTRACT_PLACEHOLDER } from './pandoc-args.js';
 import {
   CHAPTERS_DIR,
   DEFAULT_BOOK_SETTINGS,
@@ -414,9 +415,10 @@ export class ProjectManager {
       templates.push({ relPath: 'document.md', content: data.content || '# ' + data.name });
     }
 
-    // For articles and books, create abstract.md and context.md
+    // For articles and books, create abstract.md and context.md. Le texte de remplissage invite
+    // l'auteur à écrire ; les exports ne l'impriment pas (`exportableAbstract`).
     if (projectType === 'article' || projectType === 'book') {
-      templates.push({ relPath: 'abstract.md', content: '# Résumé\n\nRésumé à compléter...' });
+      templates.push({ relPath: 'abstract.md', content: `# Résumé\n\n${ABSTRACT_PLACEHOLDER}` });
 
       // Gabarit inerte : les instructions vivent dans un commentaire HTML,
       // retiré avant injection (cf. backend/core/hints/loader.ts). Un

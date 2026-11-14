@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -8,6 +8,8 @@ import {
   splitAbstract,
   pandocUnresolvedCitations,
 } from '../word-export';
+import { documentDate } from '../pandoc-args';
+import { setLanguage } from '../../i18n';
 import { bibliographyService } from '../bibliography-service';
 import { CitationEngine, defaultCSLResourcesRoot } from '../../../../backend/core/citation/CitationEngine';
 import type { OutcomeIssue } from '../../../../backend/types/outcome';
@@ -37,12 +39,16 @@ async function exportNative(
     /** Fichiers du projet, relatifs à lui, que la fenêtre transmet. */
     templatePath?: string;
     bibliographyPath?: string;
+    /** Ce que la fenêtre envoie ; par défaut un titre et une autrice saisis. */
+    metadata?: { title?: string; author?: string };
   } = {}
 ): Promise<{
   document: string;
   footnotes: string;
   rels: string;
   contentTypes: string;
+  /** Propriétés du document (`docProps/core.xml`) : auteur, dernier modificateur. */
+  core: string;
   unresolved?: string[];
   warnings?: OutcomeIssue[];
 }> {
@@ -60,7 +66,7 @@ async function exportNative(
     projectType: 'article',
     content,
     outputPath,
-    metadata: { title: 'Titre', author: 'Autrice' },
+    metadata: extra.metadata ?? { title: 'Titre', author: 'Autrice' },
     citation: extra.citation,
     templatePath: extra.templatePath && join(projectPath, extra.templatePath),
     bibliographyPath: extra.bibliographyPath && join(projectPath, extra.bibliographyPath),
@@ -73,6 +79,7 @@ async function exportNative(
     footnotes: read('word/footnotes.xml'),
     rels: read('word/_rels/footnotes.xml.rels') + read('word/_rels/document.xml.rels'),
     contentTypes: read('[Content_Types].xml'),
+    core: read('docProps/core.xml'),
     unresolved: result.unresolvedCitations,
     warnings: result.warnings,
   };
@@ -276,6 +283,93 @@ describe('modèle .dotx sur le chemin interne (S12-1-2)', () => {
     expect(contentTypes).toContain('wordprocessingml.document.main+xml');
     expect(contentTypes).not.toContain('template.main+xml');
     expect(warnings).toContainEqual({ code: 'export.word.templateRawMarkdown', params: { file: 'revue.dotx' } });
+  });
+});
+
+/**
+ * L10-4 (S18-1-3, Q42) : le générateur interne recopiait le front matter dans le corps (marked le
+ * rendait en titre « author: … date: … »), signait « ClioDesk » faute d'auteur saisi, et docx
+ * écrivait « Un-named » comme dernier modificateur. Le document fait foi : auteur, date et résumé
+ * du front matter, sauf auteur saisi dans la fenêtre ; sans date, celle du jour, dans la langue de
+ * l'interface.
+ */
+describe('générateur docx interne : le front matter du document fait foi', () => {
+  const ARTICLE =
+    '---\nauthor: Frédéric Clavert\ndate: 1er mai 1968\n---\n\n# Introduction\n\nCORPSTEXTE.\n';
+
+  afterEach(() => setLanguage('fr'));
+
+  it('auteur et date du front matter sur la page de titre, rien du front matter dans le corps', async () => {
+    const { document, core } = await exportNative(ARTICLE, { metadata: { title: 'Titre' } });
+    const text = plain(document);
+    expect(text).toContain('Frédéric Clavert');
+    expect(text).toContain('1er mai 1968');
+    expect(text).not.toMatch(/author:|date:/);
+    expect(text.indexOf('Frédéric Clavert')).toBeLessThan(text.indexOf('CORPSTEXTE'));
+    expect(core).toContain('<dc:creator>Frédéric Clavert</dc:creator>');
+    expect(core).not.toMatch(/ClioDes[kc]|Un-named/);
+  });
+
+  it('auteur saisi dans la fenêtre : il l’emporte sur celui du front matter', async () => {
+    const { document } = await exportNative(ARTICLE, { metadata: { title: 'Titre', author: 'Autrice saisie' } });
+    expect(plain(document)).toContain('Autrice saisie');
+    expect(plain(document)).not.toContain('Frédéric Clavert');
+  });
+
+  it('ni auteur ni date : pas de signature, et la date du jour dans la langue de l’interface', async () => {
+    setLanguage('en');
+    const before = documentDate(new Date());
+    const { document, core } = await exportNative('CORPSTEXTE.\n', { metadata: { title: 'Titre' } });
+    const after = documentDate(new Date());
+    const text = plain(document);
+    expect([before, after].some((date) => text.includes(date))).toBe(true);
+    expect(before).toMatch(/^[A-Z][a-z]+ \d{1,2}, \d{4}$/);
+    expect(core).not.toMatch(/ClioDes[kc]|Un-named/);
+    expect(core).not.toMatch(/<dc:creator>[^<]+<\/dc:creator>/);
+  });
+
+  it('résumé du front matter, sans abstract.md', async () => {
+    const { document } = await exportNative('---\nabstract: Un *RÉSUMÉFM* soigné.\n---\nCORPSTEXTE.\n', {
+      metadata: { title: 'Titre' },
+    });
+    expect(plain(document)).toContain('Un RÉSUMÉFM soigné.');
+    expect(document).toMatch(/<w:i\/>.*RÉSUMÉFM/s);
+  });
+
+  it('article neuf : le texte de remplissage d’abstract.md ne s’imprime pas', async () => {
+    const { document } = await exportNative('CORPSTEXTE.\n', {
+      // Ce qu'écrit `project-manager` à la création d'un article.
+      abstract: '# Résumé\n\nRésumé à compléter...',
+    });
+    expect(plain(document)).not.toContain('compléter');
+    expect(plain(document)).not.toContain('Résumé');
+  });
+
+  it('modèle à balise {content} : auteur et date du document, texte sans front matter', async () => {
+    const { document } = await exportNative(ARTICLE, {
+      metadata: { title: 'Titre' },
+      prepare: (projectPath) =>
+        writeFileSync(join(projectPath, 'revue.dotx'), dotx('[{author}] [{date}] {content}')),
+      templatePath: 'revue.dotx',
+    });
+    const text = plain(document);
+    expect(text).toContain('[Frédéric Clavert] [1er mai 1968]');
+    expect(text).toContain('CORPSTEXTE');
+    expect(text).not.toMatch(/author:|date:/);
+  });
+
+  it('modèle à balise {content}, sans auteur ni date : auteur vide, date du jour', async () => {
+    const before = documentDate(new Date());
+    const { document } = await exportNative('CORPSTEXTE.\n', {
+      metadata: { title: 'Titre' },
+      prepare: (projectPath) =>
+        writeFileSync(join(projectPath, 'revue.dotx'), dotx('[{author}] [{date}] {content}')),
+      templatePath: 'revue.dotx',
+    });
+    const after = documentDate(new Date());
+    const text = plain(document);
+    expect(text).toContain('[] [');
+    expect([before, after].some((date) => text.includes(`[] [${date}]`))).toBe(true);
   });
 });
 

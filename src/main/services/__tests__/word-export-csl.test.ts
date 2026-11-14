@@ -14,7 +14,7 @@
  * plain` ou dans son XML, dit que c'est bien lui qui a rendu les citations.
  * Style indépendant : un style « dépendant » ferait télécharger son parent.
  */
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -22,6 +22,8 @@ import { join } from 'path';
 import PizZip from 'pizzip';
 import { WordExportService, type WordExportOptions } from '../word-export';
 import { bibliographyService } from '../bibliography-service';
+import { documentDate } from '../pandoc-args';
+import { setLanguage } from '../../i18n';
 import { pandocAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 
 vi.setConfig({ testTimeout: 60_000 });
@@ -395,5 +397,80 @@ describe('export Word sans pandoc : le moteur interne et le style du projet', ()
     expect(result).toMatchObject({ success: true });
     expect(text).toContain('[@farge1989]');
     expect(text).not.toContain('MARQUEUR');
+  });
+});
+
+/**
+ * L10-4 (S18-1-3, Q42) : le document fait foi, en Word comme en PDF. Le champ Auteur laissé vide
+ * envoyait « ClioDesk », la fenêtre imposait la date du jour en français, et le titre de la
+ * bibliographie partait en `--metadata`, qui l'emporte sur le front matter. Vrai pandoc : le
+ * `.docx` produit est relu (texte du document, propriétés).
+ */
+describe.skipIf(!pandocAvailable())('export Word par pandoc : le document fait foi (L10-4)', () => {
+  afterEach(() => setLanguage('fr'));
+
+  /** Le texte du document et ses propriétés, tels que Word les lit. */
+  function readDocx(outputPath: string): { text: string; document: string; core: string } {
+    const zip = new PizZip(readFileSync(outputPath));
+    const document = zip.file('word/document.xml')?.asText() ?? '';
+    return { text: document.replace(/<[^>]+>/g, ' '), document, core: zip.file('docProps/core.xml')?.asText() ?? '' };
+  }
+
+  it('front matter : son auteur, sa date et son titre de bibliographie ; le résumé garde son italique', async () => {
+    const projectPath = makeProject('article');
+    writeFileSync(join(projectPath, 'abstract.md'), '# Résumé\n\nUn *ABSITAL* chez Dupont & Fils.\n');
+    const options: WordExportOptions = {
+      ...articleOptions(projectPath),
+      content:
+        '---\nauthor: Frédéric Clavert\ndate: 1er mai 1968\nreference-section-title: Sources citées\n---\n\n' +
+        'Comme le montre Farge [@farge1989].\n',
+      metadata: { title: 'Essai' },
+    };
+
+    const result = await new WordExportService().exportToWord(options);
+
+    expect(result, result.error).toMatchObject({ success: true });
+    const { text, document, core } = readDocx(options.outputPath!);
+    expect(text).toContain('Frédéric Clavert');
+    expect(text).toContain('1er mai 1968');
+    expect(text).toContain('Sources citées');
+    expect(text).not.toContain('Références');
+    expect(text).toContain('Dupont &amp; Fils');
+    expect(text).not.toContain('*ABSITAL*');
+    expect(document).toMatch(/<w:i ?\/>(?:(?!<\/w:r>).)*ABSITAL/s);
+    expect(core).not.toMatch(/ClioDes[kc]/);
+  });
+
+  it('sans date dans le document : la date du jour, dans la langue de l’interface ; l’auteur saisi l’emporte', async () => {
+    setLanguage('de');
+    const projectPath = makeProject('article');
+    const options: WordExportOptions = {
+      ...articleOptions(projectPath),
+      content: '---\nauthor: Frédéric Clavert\n---\n\nComme le montre Farge [@farge1989].\n',
+      metadata: { title: 'Essai', author: 'Autrice saisie' },
+    };
+
+    const before = documentDate(new Date());
+    const result = await new WordExportService().exportToWord(options);
+    const after = documentDate(new Date());
+
+    expect(result, result.error).toMatchObject({ success: true });
+    const { text } = readDocx(options.outputPath!);
+    expect([before, after].some((date) => text.includes(date))).toBe(true);
+    expect(text).toContain('Autrice saisie');
+    expect(text).not.toContain('Frédéric Clavert');
+    expect(text).toContain('Literatur');
+  });
+
+  it('article neuf : le texte de remplissage d’abstract.md ne s’imprime pas', async () => {
+    const projectPath = makeProject('article');
+    // Ce qu'écrit `project-manager` à la création d'un article.
+    writeFileSync(join(projectPath, 'abstract.md'), '# Résumé\n\nRésumé à compléter...');
+    const options: WordExportOptions = { ...articleOptions(projectPath), metadata: { title: 'Essai' } };
+
+    const result = await new WordExportService().exportToWord(options);
+
+    expect(result, result.error).toMatchObject({ success: true });
+    expect(readDocx(options.outputPath!).text).not.toContain('compléter');
   });
 });
