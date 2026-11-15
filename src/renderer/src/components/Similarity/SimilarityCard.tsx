@@ -156,7 +156,8 @@ export const SimilarityCard: React.FC<SimilarityCardProps> = ({ recommendation }
             </div>
           )}
         </div>
-        <div className={`similarity-card-score ${getSimilarityClass()}`}>
+        {/* La similarité de la recherche ; avec le reclassement, l'ordre vient du modèle (S13-1-33). */}
+        <div className={`similarity-card-score ${getSimilarityClass()}`} title={t('similarity.scoreTooltip')}>
           {similarityPercent}%
         </div>
       </div>

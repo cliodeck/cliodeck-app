@@ -1359,6 +1359,7 @@
     "showPreview": "Auszug anzeigen",
     "hidePreview": "Auszug ausblenden",
     "page": "Seite {{page}}",
+    "scoreTooltip": "Ähnlichkeit zwischen Ihrem Text und diesem Auszug. Mit intelligentem Reranking ordnet die KI die Quellen: Ein niedrigerer Prozentsatz kann über einem höheren stehen.",
     "collections": "Sammlungen",
     "collectionsDescription": "Ähnlichkeitssuche auf bestimmte Sammlungen beschränken",
     "allCollections": "Alle Sammlungen"
