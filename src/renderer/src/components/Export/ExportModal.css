@@ -45,8 +45,9 @@
 }
 
 /* `select` : la portée d'un livre et les listes du moteur de citation, que seule la feuille du
-   panneau Projets habillait jusque-là, aux mêmes valeurs. */
-:where(.export-modal) .form-field input,
+   panneau Projets habillait jusque-là, aux mêmes valeurs. La case du moteur de citation garde
+   sa taille, au début de sa ligne : `width: 100%` l'étirait, son libellé repoussé à droite. */
+:where(.export-modal) .form-field input:not([type='checkbox']),
 :where(.export-modal) .form-field select {
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
