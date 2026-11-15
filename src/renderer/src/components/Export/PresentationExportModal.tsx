@@ -9,6 +9,7 @@ import {
   manuscriptFileName,
   resolveManuscriptContent,
 } from '../../services/export-manuscript-content';
+import './ExportModal.css';
 import './PresentationExportModal.css';
 
 import { exportErrorMessage, exportThrownMessage } from './export-error';
@@ -218,7 +219,7 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
   if (!isOpen) return null;
 
   return (
-    <div ref={trapRef} className="presentation-export-modal" {...backdropClose(handleClose)}>
+    <div ref={trapRef} className="export-modal presentation-export-modal" {...backdropClose(handleClose)}>
       <div className="presentation-export-content" onClick={(e) => e.stopPropagation()}>
         <div className="presentation-export-header">
           <h3>{t('presentation.title')}</h3>

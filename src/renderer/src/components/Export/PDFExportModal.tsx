@@ -10,6 +10,7 @@ import {
   loadDefaultCitationValue,
   type ExportCitationValue,
 } from './ExportCitationSection';
+import './ExportModal.css';
 import './PDFExportModal.css';
 
 import { exportErrorMessage, exportThrownMessage } from './export-error';
@@ -330,7 +331,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ isOpen, onClose 
   const partCount = (chapters ?? []).filter((c) => !c.missing).length;
 
   return (
-    <div ref={trapRef} className="pdf-export-modal" {...backdropClose(handleClose)}>
+    <div ref={trapRef} className="export-modal pdf-export-modal" {...backdropClose(handleClose)}>
       <div
         className="pdf-export-content"
         role="dialog"

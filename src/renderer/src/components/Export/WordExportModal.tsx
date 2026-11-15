@@ -22,6 +22,7 @@ import {
   type ExportCitationValue,
 } from './ExportCitationSection';
 import { backdropClose } from '../../utils/backdropClose';
+import './ExportModal.css';
 import './PDFExportModal.css'; // Reuse the same CSS
 
 interface WordExportModalProps {
@@ -298,7 +299,7 @@ export const WordExportModal: React.FC<WordExportModalProps> = ({ isOpen, onClos
   if (!isOpen) return null;
 
   return (
-    <div ref={trapRef} className="pdf-export-modal" {...backdropClose(handleClose)}>
+    <div ref={trapRef} className="export-modal pdf-export-modal" {...backdropClose(handleClose)}>
       <div
         className="pdf-export-content"
         role="dialog"

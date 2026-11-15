@@ -194,11 +194,14 @@
   color: var(--text-secondary);
 }
 
-.form-field {
+/* Le formulaire de nouveau projet, sous sa racine (J13). Sans portée, ces règles, chargées au
+   démarrage, habillaient aussi les champs des fenêtres d'export et de « Signaler un
+   problème », qui ont maintenant les leurs. `:where(…)` garde leur spécificité. */
+:where(.create-project-modal) .form-field {
   margin-bottom: var(--spacing-lg);
 }
 
-.form-field label {
+:where(.create-project-modal) .form-field label {
   display: block;
   margin-bottom: var(--spacing-sm);
   font-size: var(--font-size-sm);
@@ -206,8 +209,8 @@
   color: var(--text-secondary);
 }
 
-.form-field input,
-.form-field select {
+:where(.create-project-modal) .form-field input,
+:where(.create-project-modal) .form-field select {
   width: 100%;
   padding: var(--item-padding-vertical) var(--item-padding-horizontal);
   background-color: var(--bg-panel);
@@ -217,19 +220,19 @@
   font-size: var(--font-size-sm);
 }
 
-.form-field input:focus,
-.form-field select:focus {
+:where(.create-project-modal) .form-field input:focus,
+:where(.create-project-modal) .form-field select:focus {
   outline: none;
   border-color: var(--color-accent);
 }
 
-.form-actions {
+:where(.create-project-modal) .form-actions {
   display: flex;
   gap: var(--list-item-gap);
   margin-top: var(--spacing-lg);
 }
 
-.form-actions button {
+:where(.create-project-modal) .form-actions button {
   flex: 1;
   padding: var(--item-padding-vertical) var(--item-padding-horizontal);
   border: 1px solid var(--border-color);
@@ -239,26 +242,26 @@
   transition: all var(--transition-normal);
 }
 
-.form-actions .btn-cancel {
+:where(.create-project-modal) .form-actions .btn-cancel {
   background-color: var(--bg-panel);
   color: var(--text-secondary);
 }
 
-.form-actions .btn-cancel:hover {
+:where(.create-project-modal) .form-actions .btn-cancel:hover {
   background-color: var(--bg-card-hover);
 }
 
-.form-actions .btn-submit {
+:where(.create-project-modal) .form-actions .btn-submit {
   background-color: var(--color-accent);
   color: var(--text-primary);
   border-color: var(--color-accent);
 }
 
-.form-actions .btn-submit:hover {
+:where(.create-project-modal) .form-actions .btn-submit:hover {
   background-color: var(--color-accent-hover);
 }
 
-.form-actions .btn-submit:disabled {
+:where(.create-project-modal) .form-actions .btn-submit:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -274,17 +277,17 @@
   font-size: var(--font-size-sm);
 }
 
-.path-selector {
+:where(.create-project-modal) .path-selector {
   display: flex;
   gap: var(--list-item-gap);
   align-items: center;
 }
 
-.path-selector input {
+:where(.create-project-modal) .path-selector input {
   flex: 1;
 }
 
-.path-selector button {
+:where(.create-project-modal) .path-selector button {
   padding: 0.5rem 1rem;
   background-color: var(--bg-input);
   color: var(--text-secondary);
@@ -295,7 +298,7 @@
   transition: all var(--transition-normal);
 }
 
-.path-selector button:hover {
+:where(.create-project-modal) .path-selector button:hover {
   background-color: var(--bg-card-hover);
   border-color: var(--color-accent);
 }
