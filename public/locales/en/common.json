@@ -128,7 +128,6 @@
     "wordWrap": "Word wrap",
     "minimap": "Show minimap",
     "fontFamily": "Font family",
-    "noCitations": "No citations",
     "importBibliography": "Import your bibliography...",
     "fontSizeHelp": "Text size in the Markdown editor",
     "currentSize": "Current size: {{size}}px",

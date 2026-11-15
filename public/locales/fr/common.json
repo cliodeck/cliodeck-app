@@ -136,7 +136,6 @@
     "fontFamilyHelp": "Police employée par l'éditeur",
     "fontSystem": "Polices système (SF Mono, Monaco, Consolas)",
     "fontNote": "Les polices système sont toujours disponibles. Les autres nécessitent d'être installées sur votre système.",
-    "noCitations": "Aucune citation",
     "importBibliography": "Importez votre bibliographie...",
     "autoSave": "Sauvegarde automatique",
     "autoSaveHelp": "Sauvegarde automatiquement le document après une période d'inactivité",

@@ -136,7 +136,6 @@
     "fontFamilyHelp": "Schriftart des Editors",
     "fontSystem": "Systemschriftarten (SF Mono, Monaco, Consolas)",
     "fontNote": "Systemschriftarten sind immer verfügbar. Andere müssen auf Ihrem System installiert sein.",
-    "noCitations": "Keine Zitate",
     "importBibliography": "Ihre Bibliographie importieren...",
     "autoSave": "Automatisches Speichern",
     "autoSaveHelp": "Speichert das Dokument automatisch nach einer Inaktivitätsperiode",
