@@ -247,8 +247,12 @@ function focusIsFree(): boolean {
 /**
  * Des changements localisés en une seule étape de Cmd+Z : sans `isolateHistory`, une transaction
  * sans `userEvent` se fondrait dans la frappe voisine, et Cmd+Z emporterait les deux. Chaque texte
- * inséré est coupé sur `\n` : dans un fichier CRLF, une chaîne passée telle quelle ne l'est que sur
- * le séparateur déclaré. Le curseur demandé est borné par la longueur d'arrivée, en offsets du
+ * inséré est coupé sur `\n` seulement, jamais par `toDocText` : les changements sont calculés sur
+ * `getDocText`, où une fin de ligne vaut un `\n` (dans un fichier CRLF, `setValue` y a déjà ramené
+ * ses `\r\n`). Dans un fichier mixte, un `\r` du texte reçu est un caractère du document et doit le
+ * rester : le couper en ferait une fin de ligne, réécrite en douce. `Text.of` rend cette coupe
+ * indépendante du séparateur déclaré : sans séparateur (fichier CRLF), CM6 couperait une chaîne
+ * brute sur `\r` aussi. Le curseur demandé est borné par la longueur d'arrivée, en offsets du
  * document : celle du texte reçu compte deux unités par fin de ligne CRLF. Un ajout au bout du
  * document marqué `afterProposals` (la définition d'une note) ne touche pas la proposition qui
  * finit là.

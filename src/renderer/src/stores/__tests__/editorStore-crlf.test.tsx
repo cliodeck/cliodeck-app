@@ -199,4 +199,18 @@ describe('un fichier déjà mixte reste mixte', () => {
 
     expect(await save()).toBe(source.slice(0, at) + 'Ajout.\n' + source.slice(at));
   });
+
+  it('un texte remplacé par la porte y garde ses `\\r` : `applyChanges` ne coupe que sur `\\n`', async () => {
+    // Couper le texte inséré sur `\r\n?` aussi (`toDocText`) ferait de ces `\r` des fins de ligne
+    // et réécrirait en douce les fins de ligne du passage changé.
+    const source = fixture('line-endings-mixed.md');
+    const next = source.replace('Ce paragraphe', 'Ajout.\r\n\r\nCe paragraphe');
+    expect(next).not.toBe(source);
+    await mount(source);
+
+    act(() => editor().editorFacade?.setValue(next));
+
+    expect(docText()).toBe(next);
+    expect(await save()).toBe(next);
+  });
 });
