@@ -11,10 +11,10 @@
  * L'aperçu est donc une fenêtre d'environ 35 mots prise dans le texte de l'extrait : celle qui
  * contient le plus de mots différents de la requête (`tokenize`, mots vides écartés, accents
  * repliés). À égalité, et quand la requête n'a aucun mot dans l'extrait (une requête dans une
- * autre langue), la fenêtre qui commence une phrase, puis la plus proche du milieu : le milieu
- * d'un extrait d'environ 1 800 caractères tombe hors de l'en-tête et du recouvrement. Si les mots
- * de la requête sont dans le recouvrement, la fenêtre peut y tomber : ce texte fait partie de
- * l'extrait embarqué.
+ * autre langue), la fenêtre qui commence une phrase, hors du premier mot, puis la plus proche du
+ * milieu : le milieu d'un extrait d'environ 1 800 caractères tombe hors de l'en-tête et du
+ * recouvrement. Si les mots de la requête sont dans le recouvrement, la fenêtre peut y tomber : ce
+ * texte fait partie de l'extrait embarqué.
  */
 import { stripChunkHeader } from './chunk-text';
 import { tokenize, type TokenizeOptions } from '../text/normalize';
@@ -53,7 +53,9 @@ export function chunkPreview(content: string, query: string, maxChars = PREVIEW_
       start,
       end: start + match[0].length,
       terms: queryTerms.size > 0 ? tokenize(match[0], TERM_OPTIONS).filter((t) => queryTerms.has(t)) : [],
-      startsSentence: words.length === 0 || ENDS_SENTENCE.test(previous),
+      // Le premier mot n'a pas cette prime : il est dans le recouvrement ou dans l'en-tête d'une
+      // source primaire (« Titre: … Date: … »). Sans autre fin de phrase, la fenêtre du milieu gagne.
+      startsSentence: words.length > 0 && ENDS_SENTENCE.test(previous),
     });
     previous = match[0];
   }

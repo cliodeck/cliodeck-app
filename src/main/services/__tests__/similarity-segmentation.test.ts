@@ -73,8 +73,44 @@ describe('découpage en phrases — les abréviations restent des abréviations'
     expect(found[0]).toContain('vol. II, p. 45');
   });
 
+  // Revue de L11-3 : seul « vol. II, » était testé, la virgule cachait le cas. L'ancien découpage
+  // (main) gardait ces renvois entiers ; la première réécriture les coupait après l'abréviation.
+  it.each([
+    ['« vol. IV de »', 'Lavisse, Histoire de France, vol. IV de l’édition Hachette. La suite vient.', [
+      'Lavisse, Histoire de France, vol. IV de l’édition Hachette.',
+      'La suite vient.',
+    ]],
+    ['« chap. III et »', 'Voir chap. III et la conclusion. La suite vient.', [
+      'Voir chap. III et la conclusion.',
+      'La suite vient.',
+    ]],
+    ['« p. xiv. » : une page liminaire en minuscules', 'Voir la préface, p. xiv. La suite vient.', [
+      'Voir la préface, p. xiv.',
+      'La suite vient.',
+    ]],
+    ['« pp. xii-xv »', 'Voir l’introduction, pp. xii-xv et la note. La suite vient.', [
+      'Voir l’introduction, pp. xii-xv et la note.',
+      'La suite vient.',
+    ]],
+    ['« Bd. II des »', 'Siehe Müller, Bd. II des Werkes. Der Band ist vergriffen.', [
+      'Siehe Müller, Bd. II des Werkes.',
+      'Der Band ist vergriffen.',
+    ]],
+  ])('un chiffre romain suivi d’un blanc ne coupe pas : %s', (_name, text, expected) => {
+    expect(contents(text)).toEqual(expected);
+  });
+
+  it('« He said no. I left. » : devant le pronom « I », « no » finit la phrase', () => {
+    expect(contents('He said no. I left.')).toEqual(['He said no.', 'I left.']);
+    expect(contents('He said no. I, for one, left.')).toEqual(['He said no.', 'I, for one, left.']);
+  });
+
   it('« C’était un vol. » : devant autre chose qu’un nombre, « vol » est un mot', () => {
     expect(contents('C’était un vol. Il fut puni.')).toEqual(['C’était un vol.', 'Il fut puni.']);
+  });
+
+  it('en capitales, un mot fait de lettres romaines n’est pas un numéro : « vol. IL FUT »', () => {
+    expect(contents('C’était un vol. IL FUT PUNI.')).toEqual(['C’était un vol.', 'IL FUT PUNI.']);
   });
 
   it('latin et renvois, toujours : « cf. », « i.e. », « op. cit. », « ibid. »', () => {
@@ -119,6 +155,42 @@ describe('découpage en phrases — allemand', () => {
     expect(contents('Vgl. Schmidt, Hg. Meier, bzw. Die Neuauflage von 1990. Sie ist vergriffen.')).toEqual([
       'Vgl. Schmidt, Hg. Meier, bzw. Die Neuauflage von 1990.',
       'Sie ist vergriffen.',
+    ]);
+  });
+
+  // Revue de L11-3 : la date et le siècle s'écrivent avec un ordinal (« 9. », « 19. »).
+  it.each([
+    ['« Am 9. November »', 'Am 9. November 1989 fiel die Mauer. Danach kam die Einheit.', [
+      'Am 9. November 1989 fiel die Mauer.',
+      'Danach kam die Einheit.',
+    ]],
+    ['« am 14. Juli »', 'Er kam am 14. Juli in Paris an. Dann ging er.', [
+      'Er kam am 14. Juli in Paris an.',
+      'Dann ging er.',
+    ]],
+    ['« im 19. Jh. entstand »', 'Im 19. Jh. entstand die Bewegung. Sie wuchs schnell.', [
+      'Im 19. Jh. entstand die Bewegung.',
+      'Sie wuchs schnell.',
+    ]],
+    ['« im 18. Jahrhundert »', 'Im 18. Jahrhundert wuchs die Stadt. Sie wurde reich.', [
+      'Im 18. Jahrhundert wuchs die Stadt.',
+      'Sie wurde reich.',
+    ]],
+  ])('un ordinal de date ou de siècle ne coupe pas : %s', (_name, text, expected) => {
+    expect(contents(text)).toEqual(expected);
+  });
+
+  it('« Jh. » comme « etc. » : devant une capitale, il finit la phrase', () => {
+    expect(contents('Die Bewegung entstand im 19. Jh. Danach wuchs sie.')).toEqual([
+      'Die Bewegung entstand im 19. Jh.',
+      'Danach wuchs sie.',
+    ]);
+  });
+
+  it('un nombre qui finit une phrase devant un autre mot qu’un mois ou un siècle coupe', () => {
+    expect(contents('The quote is on page 12. The rest follows.')).toEqual([
+      'The quote is on page 12.',
+      'The rest follows.',
     ]);
   });
 

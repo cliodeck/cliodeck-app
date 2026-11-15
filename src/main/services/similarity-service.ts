@@ -177,22 +177,55 @@ const SPACED_ABBREVIATIONS: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /**
- * Des abréviations seulement devant un nombre, en minuscules : « p. 12 », « vol. II, », « S. 12 »
- * (Seite), « Nr. 5 », « Bd. 3 ». Ailleurs, « vol », « no », « fig », « chap » ou « tab » sont des
- * mots qui peuvent finir une phrase (« C'était un vol. »).
+ * Des abréviations seulement devant un nombre, en minuscules : « p. 12 », « vol. IV de », « S. 12 »
+ * (Seite), « Nr. 5 », « Bd. II des ». Ailleurs, « vol », « no », « fig », « chap » ou « tab » sont
+ * des mots qui peuvent finir une phrase (« C'était un vol. »).
  */
 const BEFORE_NUMBER_ABBREVIATIONS: ReadonlySet<string> = new Set([
   'p', 'pp', 'vol', 'no', 'chap', 'fig', 'tab', 's', 'nr', 'bd',
 ]);
 
 /**
- * Un nombre après l'abréviation : des chiffres, ou des chiffres romains suivis d'une ponctuation
- * (« vol. II, »). Suivis d'un blanc, ils ne comptent pas : « He said no. I left. »
+ * Un nombre romain bien formé, de I à MMMMCMXCIX : « IV », « XIV », mais pas « IL », « DID » ou
+ * « CIVIL », mots d'un texte en capitales (« C'était un vol. IL FUT PUNI. »).
  */
-const NUMBER_AHEAD = /^\s+(?:\p{N}|[IVXLCDM]+[,.;:)\]])/u;
+const ROMAN = 'M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})';
 
-/** « etc. », « usw. » : la fin d'une énumération, et d'une phrase seulement devant une capitale. */
-const LIST_END_ABBREVIATIONS: ReadonlySet<string> = new Set(['etc', 'usw']);
+/** Ce qui suit un numéro : un blanc, une ponctuation, un tiret ou la fin du texte. */
+const NUMBER_END = '(?=[\\s,.;:)\\]–-]|$)';
+
+/**
+ * Un nombre après l'abréviation : des chiffres, ou un chiffre romain en capitales suivi d'un blanc,
+ * d'une ponctuation ou d'un tiret (« vol. IV de », « vol. II, », « chap. III et »).
+ */
+const NUMBER_AHEAD = new RegExp(`^\\s+(?:\\p{N}|(?=[IVXLCDM])${ROMAN}${NUMBER_END})`, 'u');
+
+/** Après « p. » et « pp. », une page liminaire en chiffres romains minuscules (« p. xiv », « pp. xii-xv »). */
+const LOWER_ROMAN_AHEAD = new RegExp(`^\\s+(?=[ivxlcdm])${ROMAN.toLowerCase()}${NUMBER_END}`, 'u');
+
+/**
+ * Après « no. », un « I » seul est le pronom anglais, pas un numéro : « He said no. I left. »
+ * Après « vol. », « chap. » ou « Bd. », il reste un numéro (« vol. I de ») : comme l'ancien
+ * découpage, qui ne coupait jamais après eux, « a nice chap. I liked him. » ne coupe pas.
+ */
+const LONE_I_AHEAD = /^\s+I(?![\p{L}\p{N}])/u;
+
+/**
+ * « etc. », « usw. » : la fin d'une énumération, et d'une phrase seulement devant une capitale.
+ * « Jh. » (Jahrhundert) de même : « im 19. Jh. entstand » ne coupe pas, « im 19. Jh. Danach » si.
+ */
+const BEFORE_CAPITAL_ABBREVIATIONS: ReadonlySet<string> = new Set(['etc', 'usw', 'jh']);
+
+/**
+ * Un ordinal allemand de date ou de siècle : un ou deux chiffres, puis un mois, « Jh. » ou
+ * « Jahrhundert » (« am 9. November », « im 19. Jh. »). Les autres ordinaux restent des fins de
+ * phrase possibles : en allemand, tout nom prend une capitale, et un ordinal devant un nom
+ * (« der 2. Weltkrieg ») s'écrit comme une phrase qui finit sur un nombre (« … auf Seite 12. Kriege
+ * brachen aus. »).
+ */
+const ORDINAL_NUMBER = /^\d{1,2}$/;
+const GERMAN_DATE_AHEAD =
+  /^\s+(?:Januar|Jänner|Februar|Feber|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember|Jh\.|Jahrhunderts?)(?=[\s,.;:)\]]|$)/u;
 
 /** Le mot qui précède un point : ce qui suit le dernier blanc ou la dernière ouverture (« ( », « « »…). */
 const WORD_BEFORE = /[^\s«"“‘([]*$/u;
@@ -209,9 +242,13 @@ function isAbbreviationDot(text: string, dot: number): boolean {
   const lower = word.toLowerCase();
   if (ALWAYS_ABBREVIATIONS.has(lower)) return true;
 
-  const ahead = text.slice(dot + 1, dot + 12);
-  if (BEFORE_NUMBER_ABBREVIATIONS.has(lower)) return NUMBER_AHEAD.test(ahead);
-  if (LIST_END_ABBREVIATIONS.has(lower)) return !/^\s+\p{Lu}/u.test(ahead);
+  const ahead = text.slice(dot + 1, dot + 24);
+  if (BEFORE_NUMBER_ABBREVIATIONS.has(lower)) {
+    if (lower === 'no' && LONE_I_AHEAD.test(ahead)) return false;
+    return NUMBER_AHEAD.test(ahead) || ((lower === 'p' || lower === 'pp') && LOWER_ROMAN_AHEAD.test(ahead));
+  }
+  if (BEFORE_CAPITAL_ABBREVIATIONS.has(lower)) return !/^\s+\p{Lu}/u.test(ahead);
+  if (ORDINAL_NUMBER.test(word)) return GERMAN_DATE_AHEAD.test(ahead);
 
   // « z. B. » : au premier point, la lettre qui suit ; au second, celle qui précède.
   const next = /^\s(\p{L})\./u.exec(ahead)?.[1]?.toLowerCase();

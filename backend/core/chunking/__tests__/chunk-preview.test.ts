@@ -72,6 +72,25 @@ describe('chunkPreview — le passage, sans l’en-tête', () => {
     );
   });
 
+  // Revue de L11-3 : le premier mot comptait comme un début de phrase. Sans autre fin de phrase
+  // (un OCR de télégrammes, un registre) et sans mot de la requête, la fenêtre 0 l'emportait sur
+  // celle du milieu : l'en-tête « Titre: … Date: … » de la source primaire, donc le titre une
+  // deuxième fois.
+  it('sans ponctuation ni mot de la requête : la fenêtre du milieu, pas le début', () => {
+    const content =
+      'Titre: Télégrammes du préfet\nDate: 1934-02-06\nArchive: AN F7 13305\n\n' +
+      Array.from({ length: 60 }, (_, n) => `ARRIVEE TROUPES SECTEUR ${n} CALME SIGNALE PREFET STOP`).join(' ');
+
+    const preview = chunkPreview(content, 'Was the strike widespread?');
+
+    expect(preview).not.toContain('Titre:');
+    expect(preview.startsWith('… ')).toBe(true);
+    const sectors = [...preview.matchAll(/SECTEUR (\d+)/g)].map((m) => Number(m[1]));
+    expect(sectors.length).toBeGreaterThan(0);
+    expect(Math.min(...sectors)).toBeGreaterThan(20);
+    expect(Math.max(...sectors)).toBeLessThan(40);
+  });
+
   it('sans en-tête (source primaire) : le texte tel quel', () => {
     expect(chunkPreview('Titre: Rapport du préfet\nArchive: AN F7', 'préfet')).toBe(
       'Titre: Rapport du préfet Archive: AN F7'
