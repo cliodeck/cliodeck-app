@@ -14,7 +14,6 @@ export interface CitationCandidate {
  */
 export interface ScholarlyLabels {
   citationNotFound: string;
-  bibliographyEmpty: string;
   footnoteNoDefinition: string;
   save: string;
   cancel: string;
@@ -24,7 +23,6 @@ export interface ScholarlyLabels {
 
 export const DEFAULT_LABELS: ScholarlyLabels = {
   citationNotFound: 'Key not found in bibliography',
-  bibliographyEmpty: 'No citations — import a bibliography first',
   footnoteNoDefinition: 'Missing definition — Cmd/Ctrl+click to create it',
   save: 'Save',
   cancel: 'Cancel',

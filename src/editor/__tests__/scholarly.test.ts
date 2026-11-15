@@ -103,6 +103,17 @@ describe('rendu live — citations pandoc', () => {
     const d = compute(doc, doc.length);
     expect(marks(d, 'cm-live-citation-unresolved')).toHaveLength(0);
   });
+
+  it('le `-` de l’auteur supprimé reste visible, comme le `;` : il change le rendu', () => {
+    // Masqué, `[-@smith2020, p. 4]` montrait la même pastille que `[@smith2020, p. 4]`, alors que
+    // l'export rend « (2020, p. 4) » au lieu de « (Smith 2020, p. 4) ».
+    const text = 'Voir [-@smith2020, p. 4], [@smith2020, p. 4] et -@nu2020.\n';
+    const d = compute(text, text.length);
+    expect(marks(d, 'cm-live-citation')).toHaveLength(3);
+    const hidden = hides(d).map((h) => text.slice(h.from, h.to));
+    expect(hidden).not.toContain('-');
+    expect(hidden.filter((h) => h === '@')).toHaveLength(3);
+  });
 });
 
 describe('footnote-lookup', () => {

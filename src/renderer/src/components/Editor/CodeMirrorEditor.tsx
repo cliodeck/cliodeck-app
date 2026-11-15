@@ -486,7 +486,6 @@ export const CodeMirrorEditor: React.FC = () => {
           getCitations,
           labels: {
             citationNotFound: t('editor.citationNotFound'),
-            bibliographyEmpty: t('editor.noCitations'),
             footnoteNoDefinition: t('editor.footnoteNoDefinition'),
             save: t('toolbar.save'),
             cancel: t('common.cancel'),

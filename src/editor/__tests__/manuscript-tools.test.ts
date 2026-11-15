@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renumberManuscript, renumberFootnotes } from '../footnote-tools';
 import { collectCitationKeys } from '../citation-tools';
+import { extractProseText } from '../document-stats';
 
 describe('renumberManuscript — numérotation continue', () => {
   const docs = [
@@ -162,6 +163,13 @@ describe('collectCitationKeys', () => {
       '',
     ].join('\n');
     expect(collectCitationKeys(source).map((k) => k.key)).toEqual(['vrai2013']);
+  });
+
+  // S14-1-9 : la citation à auteur supprimé échappait à « Vérifier les citations ».
+  it('relève la clé d’une citation à auteur supprimé, et la retire du texte embarqué', () => {
+    const source = 'Smith le montre [-@smith2020, p. 4].\n';
+    expect(collectCitationKeys(source).map((k) => k.key)).toEqual(['smith2020']);
+    expect(extractProseText(source)).toBe('Smith le montre .');
   });
 
   it('renseigne les numéros de ligne', () => {

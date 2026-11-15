@@ -6,24 +6,28 @@ import {
 } from '@codemirror/autocomplete';
 import type { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
-import type { CitationCandidate, ScholarlyLabels } from './types';
+import type { CitationCandidate } from './types';
 import { changeOrigin } from '../change-origin';
 
 /**
- * Autocomplétion des citations (Phase 3b) : déclenchée par `@` précédé de
- * `[` ou d'une frontière de mot — détection par regex sur le texte avant le
- * curseur, PAS sur l'arbre (le nœud de citation nue n'existe qu'après un
- * premier caractère de clé). Filtrage identique au composant partagé
- * CitationAutocomplete : préfixe d'id d'abord, puis sous-chaîne sur
- * id / auteur / titre / année.
+ * Autocomplétion des citations (Phase 3b) : déclenchée par `@` (ou `-@`,
+ * auteur supprimé) précédé de `[` ou d'une frontière de mot — détection par
+ * regex sur le texte avant le curseur, PAS sur l'arbre (le nœud de citation
+ * nue n'existe qu'après un premier caractère de clé). Filtrage identique au
+ * composant partagé CitationAutocomplete : préfixe d'id d'abord, puis
+ * sous-chaîne sur id / auteur / titre / année.
  */
 
-const TRIGGER = /(^|[\s([;>])@([A-Za-z0-9_:-]*)$/;
+const TRIGGER = /(^|[\s([;>])-?@([A-Za-z0-9_:-]*)$/;
+/**
+ * Les caractères de clé qui suivent le curseur, quand un délimiteur de citation (`]`, `;`, `,`)
+ * les termine : la fin d'une clé existante, remplacée avec elle.
+ */
+const KEY_TAIL = /^[A-Za-z0-9_:-]+(?=[\];,])/;
 const MAX_RESULTS = 12;
 
 interface CompletionOptions {
   getCitations?: () => CitationCandidate[];
-  labels: ScholarlyLabels;
 }
 
 function rank(
@@ -51,12 +55,23 @@ function rank(
 
 function applyCitation(candidate: CitationCandidate) {
   return (view: EditorView, _c: Completion, from: number, to: number) => {
-    // `[@` ouvert et pas encore fermé → on ferme le crochet.
-    const openedByBracket = view.state.sliceDoc(from - 2, from - 1) === '[';
-    const alreadyClosed = view.state.sliceDoc(to, to + 1) === ']';
-    const insert = candidate.id + (openedByBracket && !alreadyClosed ? ']' : '');
+    const line = view.state.doc.lineAt(from);
+    // Un crochet ouvert et pas encore fermé sur la ligne → on le ferme. Ouvert : le dernier `[`
+    // avant la clé n'est suivi d'aucun `]`. Fermé : un `]` vient après la clé avant tout `[`.
+    const before = view.state.sliceDoc(line.from, from);
+    const opened = before.lastIndexOf('[') > before.lastIndexOf(']');
+    // Dans une citation entre crochets, la clé entière est remplacée, pas seulement sa partie
+    // avant le curseur (S14-2-1). Ailleurs, ou sans délimiteur après elle, la suite reste : une clé
+    // tapée collée devant du texte (« Voir @jo|Smith », « [@jo|p. 4] ») ne doit rien effacer.
+    const tail = opened ? (KEY_TAIL.exec(view.state.sliceDoc(to, line.to))?.[0].length ?? 0) : 0;
+    const end = to + tail;
+    const after = view.state.sliceDoc(end, line.to);
+    const close = after.indexOf(']');
+    const reopen = after.indexOf('[');
+    const alreadyClosed = close >= 0 && (reopen < 0 || close < reopen);
+    const insert = candidate.id + (opened && !alreadyClosed ? ']' : '');
     view.dispatch({
-      changes: { from, to, insert },
+      changes: { from, to: end, insert },
       selection: { anchor: from + insert.length },
       annotations: changeOrigin.of('programmatic'),
     });
@@ -72,22 +87,10 @@ export function citationCompletion(options: CompletionOptions): Extension {
     const query = match[2];
     const from = ctx.pos - query.length; // juste après le `@`
 
+    // Bibliographie vide : pas de liste. Une entrée informative prenait la touche Entrée
+    // (S14-2-5) ; le soulignement « clé introuvable » et « Vérifier les citations » restent.
     const candidates = options.getCitations?.() ?? [];
-    if (candidates.length === 0) {
-      return {
-        from,
-        to: ctx.pos,
-        options: [
-          {
-            label: options.labels.bibliographyEmpty,
-            apply: () => {
-              /* informative, non insérable */
-            },
-          },
-        ],
-        filter: false,
-      };
-    }
+    if (candidates.length === 0) return null;
 
     const completions: Completion[] = rank(candidates, query).map((c) => ({
       label: `@${c.id}`,

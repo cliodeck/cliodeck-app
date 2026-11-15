@@ -31,7 +31,7 @@ export function scholarly(options: ScholarlyOptions = {}): Extension {
     scholarlyTooltips({ resolveCitation: options.resolveCitation, labels }),
     footnotePopup(labels),
     scholarlyNav(),
-    citationCompletion({ getCitations: options.getCitations, labels }),
+    citationCompletion({ getCitations: options.getCitations }),
     frontmatterFold(labels),
     scholarlyTheme,
   ];

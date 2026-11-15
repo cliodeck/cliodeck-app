@@ -66,6 +66,48 @@ describe('PandocCitation — bracketed', () => {
   });
 });
 
+// S14-1-9 : `[-@clef]` supprime le nom de l'auteur chez Pandoc (SuppressAuthor,
+// mesuré avec pandoc 3.13). Le `-` collé à un mot reste du texte.
+describe('PandocCitation — suppressed author (-@key)', () => {
+  it('parses [-@key, p. 4], the `-` being a mark', () => {
+    const doc = 'Smith le montre [-@smith2020, p. 4].';
+    const [cit] = nodes(doc, 'PandocCitation');
+    expect(cit?.text).toBe('[-@smith2020, p. 4]');
+    expect(texts(doc, 'CitationKey')).toEqual(['smith2020']);
+    expect(texts(doc, 'CitationMark')).toEqual(['[', '-', '@', ']']);
+    expect(texts(doc, 'CitationPrefix')).toEqual([]);
+    expect(texts(doc, 'CitationSuffix')).toEqual([', p. 4']);
+  });
+
+  it('after a prefix and in a cluster, the prefix stops before the `-`', () => {
+    const doc = '[voir -@a; @b]';
+    expect(nodes(doc, 'PandocCitation')).toHaveLength(1);
+    expect(texts(doc, 'CitationKey')).toEqual(['a', 'b']);
+    expect(texts(doc, 'CitationPrefix')).toEqual(['voir ']);
+    expect(texts('[@a;-@b]', 'CitationKey')).toEqual(['a', 'b']);
+  });
+
+  it('parses a bare -@key', () => {
+    const doc = '-@smith2020 le dit, et Nue -@lester1932 aussi.';
+    expect(texts(doc, 'CitationKey')).toEqual(['smith2020', 'lester1932']);
+    expect(texts(doc, 'PandocCitation')).toEqual(['-@smith2020', '-@lester1932']);
+  });
+
+  it('a `-` glued to a word stays text, in and out of brackets', () => {
+    expect(nodes('foo-@bar', 'PandocCitation')).toHaveLength(0);
+    expect(nodes('a.b-@c', 'PandocCitation')).toHaveLength(0);
+    expect(nodes('[foo-@bar]', 'PandocCitation')).toHaveLength(0);
+    expect(nodes('[a.b-@c]', 'PandocCitation')).toHaveLength(0);
+  });
+
+  it('a `-` followed by a blank stays in the prefix, as in Pandoc', () => {
+    const doc = '[voir - @a]';
+    expect(texts(doc, 'CitationKey')).toEqual(['a']);
+    expect(texts(doc, 'CitationPrefix')).toEqual(['voir - ']);
+    expect(texts(doc, 'CitationMark')).toEqual(['[', '@', ']']);
+  });
+});
+
 describe('PandocCitation — bare', () => {
   it('parses at start of text and after a delimiter', () => {
     expect(texts('@lester1932 en début.', 'CitationKey')).toEqual(['lester1932']);

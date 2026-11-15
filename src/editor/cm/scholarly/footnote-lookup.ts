@@ -21,6 +21,11 @@ export interface DefinitionRange {
   /** Corps de la note : après `]:` (+ un espace optionnel). */
   contentFrom: number;
   contentTo: number;
+  /**
+   * La définition est au niveau du document, hors de toute citation en bloc et de toute liste :
+   * le retrait de ses lignes de suite se compte alors depuis la colonne 0.
+   */
+  topLevel: boolean;
 }
 
 export function fullTree(state: EditorState): Tree {
@@ -80,6 +85,7 @@ export function findDefinition(
         to: node.to,
         contentFrom,
         contentTo: node.to,
+        topLevel: node.node.parent?.name === 'Document',
       };
       return false;
     },
