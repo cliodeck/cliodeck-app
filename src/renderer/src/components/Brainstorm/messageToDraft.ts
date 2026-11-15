@@ -34,6 +34,18 @@ export interface DraftBlockOptions {
 const OPEN_MARKER = '<!-- cliodeck:brainstorm-draft';
 const CLOSE_MARKER = '<!-- /cliodeck:brainstorm-draft -->';
 
+/** Une ligne de marqueur entière, d'ouverture ou de fin, telle que l'écrit `messageToDraft`. */
+const MARKER_LINE = /^<!--\s*\/?cliodeck:brainstorm-draft\b.*-->$/;
+
+/**
+ * La ligne est-elle un marqueur de provenance ? Le titre et l'aperçu d'un brouillon dans la file
+ * (`draftTitle`, `draftPreview`) la sautent ; le texte du brouillon la garde, jusque dans le
+ * manuscrit.
+ */
+export function isDraftMarkerLine(line: string): boolean {
+  return MARKER_LINE.test(line.trim());
+}
+
 export function messageToDraft(
   message: Pick<BrainstormMessage, 'id' | 'role' | 'content'>,
   opts: DraftBlockOptions = {}

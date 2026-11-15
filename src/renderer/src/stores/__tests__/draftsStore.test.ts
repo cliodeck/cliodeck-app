@@ -8,7 +8,8 @@
  * jusqu'à ce qu'ils soient insérés ou jetés, et aucun ne se perd à la mise à jour.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import { draftsForProject, useDraftsStore } from '../draftsStore';
+import { draftPreview, draftTitle, draftsForProject, useDraftsStore, type BrainstormDraft } from '../draftsStore';
+import { messageToDraft } from '../../components/Brainstorm/messageToDraft';
 
 const A = '/projets/A';
 const B = '/projets/B';
@@ -129,5 +130,45 @@ describe('la file persistée d’avant la mise à jour', () => {
     expect(persisted()).toMatchObject([{ content: 'Réponse de A', projectPath: A }, BEFORE.state.drafts[0]]);
     expect(shownIn(A)).toEqual(['Réponse de A', 'Brouillon d’avant la mise à jour']);
     expect(shownIn(B)).toEqual(['Brouillon d’avant la mise à jour']);
+  });
+});
+
+describe('titre et aperçu d’une réponse mise de côté depuis le chat', () => {
+  /**
+   * « Mettre en brouillon » met en file `messageToDraft(m)` : le marqueur de provenance en première
+   * ligne, le texte, puis le marqueur de fin. Le titre et l'aperçu prenaient le marqueur pour le
+   * texte : toutes les cartes s'intitulaient « <!-- cliodeck:brainstorm-d… ».
+   */
+  const queued = (content: string): BrainstormDraft => ({
+    id: 'd-1',
+    createdAt: '2026-11-15T10:00:00.000Z',
+    content: messageToDraft({ id: 'm-1', role: 'assistant', content }, { at: '2026-11-15T10:00:00.000Z' }),
+  });
+
+  it('le titre est la première ligne du texte, pas le marqueur de provenance', () => {
+    expect(draftTitle(queued('## Le port de Danzig\n\nEn 1920, la ville libre est placée sous la SDN.'))).toBe(
+      'Le port de Danzig'
+    );
+  });
+
+  it('l’aperçu commence au texte, et aucun marqueur ne prend sa place', () => {
+    const text = `En 1920, la ville libre est placée sous la SDN. ${'Les quais changent de mains. '.repeat(10)}`;
+    const preview = draftPreview(queued(text));
+
+    expect(preview).not.toContain('cliodeck:brainstorm-draft');
+    expect(preview).toBe(text.trim().slice(0, 220));
+  });
+
+  it('un brouillon tapé sans marqueur garde son titre et son début', () => {
+    const draft: BrainstormDraft = { id: 'd-2', createdAt: '2026-11-15T10:00:00.000Z', content: '\n# Plan\n\nI. Le port' };
+
+    expect(draftTitle(draft)).toBe('Plan');
+    expect(draftPreview(draft)).toBe('# Plan\n\nI. Le port');
+  });
+
+  it('une ligne du texte qui cite le marqueur sans en être un reste dans le texte', () => {
+    const line = 'Le marqueur <!-- cliodeck:brainstorm-draft --> se lit dans le source.';
+
+    expect(draftTitle(queued(line))).toBe(`${line.slice(0, 57)}…`);
   });
 });

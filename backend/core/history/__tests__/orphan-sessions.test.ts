@@ -147,3 +147,58 @@ describe.skipIf(!sqliteAvailable)('HistoryManager.closeOrphanSessions', () => {
     expect(info.mock.calls.flat().join(' ')).toMatch(/2 session/);
   });
 });
+
+/**
+ * Les rapports exportés d'une session réparée (J18) : sa fin et sa durée sont des estimations, et le
+ * rapport le dit. Le JSON porte déjà `metadata.endedBy` ; le Markdown et le LaTeX, écrits en anglais
+ * quelle que soit la langue de l'interface, le disent dans cette langue.
+ */
+describe.skipIf(!sqliteAvailable)('HistoryManager.exportSessionReport : session réparée', () => {
+  function repairedAndMeasured(): { hm: HistoryManager; repaired: string; measured: string } {
+    seedOrphan('reparee', '2026-11-10T09:00:00.000Z', ['2026-11-10T09:10:00.000Z', '2026-11-10T10:30:00.000Z']);
+    const hm = new HistoryManager(projectDir);
+    hm.closeOrphanSessions();
+    const measured = hm.startSession();
+    hm.endSession(measured);
+    return { hm, repaired: 'reparee', measured };
+  }
+
+  const line = (report: string, label: string): string =>
+    report.split('\n').find((l) => l.includes(label)) ?? '';
+
+  it('Markdown : la fin et la durée de la session réparée sont dites estimées', () => {
+    const { hm, repaired, measured } = repairedAndMeasured();
+    const report = hm.exportSessionReport(repaired, 'markdown');
+    const control = hm.exportSessionReport(measured, 'markdown');
+    hm.close();
+
+    expect(line(report, '**Duration:**')).toBe(
+      '**Duration:** 90 minutes (estimated: the app did not close this session; it ends at its last recorded event)'
+    );
+    expect(line(report, '**Ended:**')).toMatch(/ \(estimated\)$/);
+    // Témoin : une session fermée par l'app garde sa durée mesurée, sans mention.
+    expect(control).not.toContain('estimated');
+    expect(line(control, '**Duration:**')).toMatch(/^\*\*Duration:\*\* \d+ minutes$/);
+  });
+
+  it('LaTeX : de même', () => {
+    const { hm, repaired, measured } = repairedAndMeasured();
+    const report = hm.exportSessionReport(repaired, 'latex');
+    const control = hm.exportSessionReport(measured, 'latex');
+    hm.close();
+
+    expect(line(report, '\\item Duration:')).toBe(
+      '  \\item Duration: 90 minutes (estimated: the app did not close this session; it ends at its last recorded event)'
+    );
+    expect(line(report, '\\item Ended:')).toMatch(/ \(estimated\)$/);
+    expect(control).not.toContain('estimated');
+  });
+
+  it('JSON : la marque de la réparation y est déjà', () => {
+    const { hm, repaired } = repairedAndMeasured();
+    const report = JSON.parse(hm.exportSessionReport(repaired, 'json')) as { session: { metadata?: object } };
+    hm.close();
+
+    expect(report.session.metadata).toMatchObject({ endedBy: 'repair' });
+  });
+});

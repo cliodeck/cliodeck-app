@@ -6,7 +6,7 @@ import {
   SearchCode, Inbox,
 } from 'lucide-react';
 import { DraftsPanel } from './DraftsPanel';
-import { draftsForProject, useDraftsStore } from '../../stores/draftsStore';
+import { draftsForProject, useDraftsStore, useLocateDraftProjects } from '../../stores/draftsStore';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { insertAfterSelection } from '@/editor/cm/inline-formatting';
 import { renumberFootnotes, renumberManuscript } from '@/editor/footnote-tools';
@@ -67,10 +67,12 @@ export const EditorPanel: React.FC = () => {
   // le projet s'ouvrirait sans son document.
   const isProjectLoading = useProjectStore((s) => s.loadState.kind === 'loading');
   // Brouillons Brainstorm (#7) — panneau flottant, compteur sur le bouton. Ceux que le panneau
-  // montre : du projet ouvert, ou sans projet (Q12).
+  // montre : du projet ouvert, ou sans projet (Q12). Le main dit où sont les projets des autres
+  // (J12) : un chemin qui mène au même dossier compte comme celui du projet ouvert.
   const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
-  const draftsCount = useDraftsStore((s) => draftsForProject(s.drafts, projectPath).length);
+  const draftsCount = useDraftsStore((s) => draftsForProject(s.drafts, projectPath, s.projectPlaces).length);
   const isDraftsPanelOpen = useDraftsStore((s) => s.isPanelOpen);
+  useLocateDraftProjects(projectPath, isDraftsPanelOpen);
   const toggleDraftsPanel = useDraftsStore((s) => s.togglePanel);
   const closeDraftsPanel = useDraftsStore((s) => s.closePanel);
 

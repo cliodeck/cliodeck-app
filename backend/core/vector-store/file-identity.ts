@@ -160,6 +160,17 @@ export function sameFileKey(filePath: string, realpath: RealpathFn = realpathSyn
 }
 
 /**
+ * La même clé que `sameFileKey`, sans appel synchrone : pour le dossier d'un projet que l'app ne
+ * connaît plus, sur un volume qui peut ne plus répondre (les brouillons, J12). L'appelant borne
+ * l'attente.
+ */
+export async function sameFileKeyAsync(filePath: string): Promise<string> {
+  const api = pathApi(filePath);
+  const real = ((await realLocationAsync(filePath)) ?? api.resolve(filePath)).normalize('NFC');
+  return api === path.win32 ? real.toLowerCase() : real;
+}
+
+/**
  * Ces deux chemins désignent-ils le même fichier ? Le disque tranche la casse et les
  * liens ; pour ce qui n'existe pas encore, seule la forme Unicode est pardonnée (et la
  * casse sous Windows, qui ne la distingue jamais).

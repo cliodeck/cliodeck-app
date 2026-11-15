@@ -45,7 +45,7 @@ const ALLOWED = new Set([
   'PDF', 'DOCX', 'JSON', 'YAML', 'CSL', 'MCP', 'RAG', 'BERTopic', 'Transkribus',
   'pandoc', 'xelatex', 'Europeana', 'GitHub', 'Electron',
   'Transkribus Export', 'ALTO XML', 'PAGE XML', 'prompt injection',
-  'User ID', 'API Key', 'Frédéric Clavert',
+  'Frédéric Clavert',
   // Polices — noms propres
   'JetBrains Mono', 'Fira Code', 'Source Code Pro', 'Cascadia Code',
   'Prose', 'Monospace',

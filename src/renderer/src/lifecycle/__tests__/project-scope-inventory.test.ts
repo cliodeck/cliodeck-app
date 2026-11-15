@@ -93,7 +93,7 @@ const INVENTORY: Record<string, Scope> = {
   },
   'draftsStore.ts': {
     scope: 'filtered',
-    why: 'brouillons de tous les projets, persistés ; chacun porte le sien, ceux d’avant sans projet se voient partout (Q12)',
+    why: 'brouillons de tous les projets, persistés ; chacun porte le sien, ceux d’avant sans projet se voient partout (Q12) ; où sont leurs projets, relu sur le disque par chemin, vaut pour tout projet ouvert (J12)',
     selector: 'draftsForProject',
   },
   'modeStore.ts': {
