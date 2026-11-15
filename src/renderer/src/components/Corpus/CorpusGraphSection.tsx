@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import ForceGraph2DImpl from 'react-force-graph-2d';
 import type { GraphData, GraphNode, GraphEdge } from './corpus-types';
@@ -64,6 +64,9 @@ export const CorpusGraphSection: React.FC<Props> = ({
   onExportGEXF,
 }) => {
   const { t } = useTranslation();
+  // force-graph relance sa simulation (`stop().alpha(1)`) à chaque nouvel objet `graphData` : un
+  // objet recréé à chaque rendu faisait repartir le graphe au clic sur un nœud.
+  const forceGraphData = useMemo(() => ({ nodes: graphData.nodes, links: graphData.edges }), [graphData]);
 
   return (
     <div className="graph-container">
@@ -136,10 +139,7 @@ export const CorpusGraphSection: React.FC<Props> = ({
       <div className="graph-visualization">
         <ForceGraph2D
           ref={graphRef}
-          graphData={{
-            nodes: graphData.nodes,
-            links: graphData.edges,
-          }}
+          graphData={forceGraphData}
           nodeLabel={(node: Record<string, unknown>) => {
             const n = node as unknown as GraphNode;
             return n.metadata?.title || n.label;
