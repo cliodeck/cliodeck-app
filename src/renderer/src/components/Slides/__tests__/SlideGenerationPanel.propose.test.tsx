@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * Une diapositive générée n'entre dans le texte que par une proposition. Le repli écrivait
- * directement par `setValue` ou `appendText` si `propose` manquait ou refusait : une écriture de
+ * directement par `setValue` ou `appendText` (retiré depuis) si `propose` manquait ou refusait : une écriture de
  * l'IA sans décision, et le panneau se refermait sur le seul exemplaire du texte généré.
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -28,12 +28,13 @@ import { SlideGenerationPanel } from '../SlideGenerationPanel';
 const DOCUMENT = '# Chapitre\n\nDu texte.';
 const GENERATED = '# Diapositive générée';
 
-function facadeWith(propose: EditorFacade['propose']): EditorFacade {
+function facadeWith(propose: EditorFacade['propose'], fileText: string = DOCUMENT): EditorFacade {
   return {
     getSelectionText: () => null,
-    getValue: () => DOCUMENT,
+    getValue: () => fileText,
+    // Le texte de la vue : une fin de ligne y vaut un caractère, même dans un fichier CRLF.
+    getDocText: () => fileText.replace(/\r\n/g, '\n'),
     setValue: vi.fn(),
-    appendText: vi.fn(),
     focus: vi.fn(),
     propose,
   } as unknown as EditorFacade;
@@ -85,6 +86,21 @@ describe('SlideGenerationPanel — appliquer', () => {
     expect(h.closePanel).toHaveBeenCalled();
   });
 
+  it.each([
+    ['slides.generate.append', { from: DOCUMENT.length, to: DOCUMENT.length }],
+    ['slides.generate.replace', { from: 0, to: DOCUMENT.length }],
+  ])('présentation en CRLF : « %s » se borne au texte de la vue, pas à celui du fichier', async (label, range) => {
+    // Le fichier compte deux caractères par fin de ligne, la vue un : la borne dépassait la fin du
+    // document, et seule la vue la ramenait dedans (S14-1-5).
+    const propose = vi.fn(() => true);
+    h.facade = facadeWith(propose, DOCUMENT.replace(/\n/g, '\r\n'));
+    await generate();
+
+    fireEvent.click(screen.getByText(label));
+
+    expect(propose).toHaveBeenCalledWith(expect.objectContaining({ range }));
+  });
+
   it.each(['slides.generate.append', 'slides.generate.replace'])(
     '« %s » refusé par la vue : aucune écriture, et le panneau garde le texte généré',
     async (label) => {
@@ -95,7 +111,6 @@ describe('SlideGenerationPanel — appliquer', () => {
       fireEvent.click(screen.getByText(label));
 
       expect(facade.setValue).not.toHaveBeenCalled();
-      expect(facade.appendText).not.toHaveBeenCalled();
       expect(h.closePanel).not.toHaveBeenCalled();
       expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(GENERATED);
       expect(screen.getByText('editor.proposalUnavailable')).toBeTruthy();

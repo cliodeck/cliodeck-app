@@ -63,6 +63,7 @@ vi.mock('../../../services/history-service.js', () => ({
 import { setupEditorHandlers } from '../editor-handlers.js';
 import { validateWritePath } from '../../utils/path-validator.js';
 import { symlinkAvailable } from '../../../../../backend/__tests__/helpers/native-guards.js';
+import { roundTrip } from '../../../../editor/cm/fidelity.js';
 
 interface LoadResponse {
   success: boolean;
@@ -229,6 +230,22 @@ describe('editor:load-file', () => {
     await call('editor:save-file', documentMd, '\uFEFF# Été\nSuite.\n');
 
     expect(fs.readFileSync(documentMd).equals(Buffer.concat([BOM, Buffer.from('# Été\nSuite.\n', 'utf8')]))).toBe(true);
+  });
+
+  it('le corpus de fidélité, CRLF et BOM compris : ouvert, chargé dans l’éditeur, enregistré, octet pour octet', async () => {
+    const corpus = path.resolve(__dirname, '../../../../../test-fixtures/editor');
+    const names = fs.readdirSync(corpus).filter((name) => name.endsWith('.md'));
+    expect(names).toEqual(expect.arrayContaining(['bom.md', 'line-endings-crlf.md', 'line-endings-mixed.md']));
+
+    for (const name of names) {
+      const bytes = fs.readFileSync(path.join(corpus, name));
+      fs.writeFileSync(documentMd, bytes);
+
+      const { content } = await load(documentMd);
+      await call('editor:save-file', documentMd, roundTrip(content ?? ''));
+
+      expect(fs.readFileSync(documentMd).equals(bytes), name).toBe(true);
+    }
   });
 
   it('un fichier sans BOM n’en reçoit pas, un fichier neuf non plus', async () => {

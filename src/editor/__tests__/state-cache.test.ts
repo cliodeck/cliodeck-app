@@ -67,9 +67,8 @@ describe('serializeEditorState / restoreEditorState', () => {
   });
 
   it('restaure fidèlement un document CRLF (séparateur préservé)', () => {
-    // `EditorState.toJSON` sérialise le document via `sliceDoc()`, qui
-    // respecte le séparateur déclaré — contrairement à `doc.toString()`,
-    // qui joint toujours avec "\n" et convertirait le fichier en LF.
+    // `EditorState.toJSON` sérialise le document joint en "\n" : les fins de
+    // ligne du fichier reviennent de `source`, par `docExtensions`.
     const source = '# Titre\r\n\r\nDeux lignes CRLF.\r\n';
     const state = createDocState(source, EXT);
     const restored = restoreEditorState(
@@ -80,6 +79,16 @@ describe('serializeEditorState / restoreEditorState', () => {
 
     expect(restored).not.toBeNull();
     expect(readDocText(restored!)).toBe(source);
+  });
+
+  it('un document CRLF restauré reçoit `X\\nY` : quatre lignes, et le fichier reste uniforme', () => {
+    const source = 'a\r\nb\r\nc';
+    const restored = restoreEditorState(serializeEditorState(createDocState(source, EXT), 0), source, EXT)!;
+
+    const next = restored.update(restored.replaceSelection('X\nY')).state;
+
+    expect(next.doc.lines).toBe(4);
+    expect(readDocText(next)).toBe('X\r\nYa\r\nb\r\nc');
   });
 
   it('restaure un document LF, séparateur préservé', () => {

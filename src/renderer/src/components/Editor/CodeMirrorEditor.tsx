@@ -22,7 +22,7 @@ import {
   syntaxHighlighting,
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
-import { createDocState, readDocText, toDocLineBreaks, toDocText } from '@/editor/cm/fidelity';
+import { createDocState, documentEol, readDocText, toDocLineBreaks, toDocText } from '@/editor/cm/fidelity';
 import { restoreEditorState, serializeEditorState } from '@/editor/cm/state-cache';
 import {
   liveRender,
@@ -247,8 +247,12 @@ function focusIsFree(): boolean {
 /**
  * Des changements localisés en une seule étape de Cmd+Z : sans `isolateHistory`, une transaction
  * sans `userEvent` se fondrait dans la frappe voisine, et Cmd+Z emporterait les deux. Chaque texte
- * inséré est coupé sur `\n` : dans un fichier CRLF, une chaîne passée telle quelle ne l'est que sur
- * le séparateur déclaré. Le curseur demandé est borné par la longueur d'arrivée, en offsets du
+ * inséré est coupé sur `\n` seulement, jamais par `toDocText` : les changements sont calculés sur
+ * `getDocText`, où une fin de ligne vaut un `\n` (dans un fichier CRLF, `setValue` y a déjà ramené
+ * ses `\r\n`). Dans un fichier mixte, un `\r` du texte reçu est un caractère du document et doit le
+ * rester : le couper en ferait une fin de ligne, réécrite en douce. `Text.of` rend cette coupe
+ * indépendante du séparateur déclaré : sans séparateur (fichier CRLF), CM6 couperait une chaîne
+ * brute sur `\r` aussi. Le curseur demandé est borné par la longueur d'arrivée, en offsets du
  * document : celle du texte reçu compte deux unités par fin de ligne CRLF. Un ajout au bout du
  * document marqué `afterProposals` (la définition d'une note) ne touche pas la proposition qui
  * finit là.
@@ -311,17 +315,12 @@ function createFacade(
     setValue: (text, cursorOffset, origin) => {
       // Remplacer tout le document ramenait le curseur en tête et retirait toutes les propositions
       // en attente (L01-6) : seul ce qui diffère change. Le texte reçu est celui de `getValue` : dans
-      // un fichier CRLF, ses `\r\n` sont une fin de ligne du document.
-      const next = view.state.lineBreak === '\r\n' ? text.replace(/\r\n/g, '\n') : text;
+      // un fichier CRLF, ses `\r\n` sont une fin de ligne du document. Dans un fichier mixte, ses `\r`
+      // sont des caractères : ils restent.
+      const next = view.state.facet(documentEol) === '\r\n' ? text.replace(/\r\n?/g, '\n') : text;
       applyChanges(view, minimalChanges(view.state.doc.toString(), next), cursorOffset, origin);
     },
     applyChanges: (changes, cursorOffset, origin) => applyChanges(view, changes, cursorOffset, origin),
-    appendText: (text, origin) => {
-      view.dispatch({
-        changes: { from: view.state.doc.length, insert: text },
-        annotations: changeOrigin.of(origin ?? 'programmatic'),
-      });
-    },
     getProposalRanges: () => view.state.field(proposalsInstance.field).map((p) => p.range),
     propose: (partial) => {
       // L'effet passerait, pas le texte : accepter journaliserait une décision sans rien écrire.

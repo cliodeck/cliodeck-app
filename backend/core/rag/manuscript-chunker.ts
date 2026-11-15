@@ -37,9 +37,11 @@ export const CHUNK_OVERLAP = 200;
  *
  *  1 — découpage d'origine (rc.4) ;
  *  2 — citations en bloc et notes de référence hors du texte embarqué
- *      (docs/poids-du-manuscrit.md, palier 3).
+ *      (docs/poids-du-manuscrit.md, palier 3) ;
+ *  3 — un fichier qui commence par un BOM a son premier titre, et le BOM
+ *      sort du texte embarqué (S14-1-14). Seule montée de la rc.6.
  */
-export const CHUNKER_VERSION = 2;
+export const CHUNKER_VERSION = 3;
 /**
  * En deçà, le corps d'une note est une référence (« Lester, p. 45 »), pas un
  * argument : il sort du texte embarqué du manuscrit.

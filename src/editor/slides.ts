@@ -52,6 +52,9 @@ const YAML_KEY = /^\s*[A-Za-z0-9_][\w.-]*\s*:/;
 
 const slidesParser = markdownParser.configure([GFM, Footnotes, PandocCitations]);
 
+/** Le BOM UTF-8 d'un fichier lu sur le disque : pas du texte (cf. outline.ts, S14-1-14). */
+const BOM = '\uFEFF';
+
 /** Le `---` peut porter un `\r` résiduel (fichiers mixtes, cf. fidelity.ts). */
 export function isSeparatorLine(text: string): boolean {
   return text === '---' || text === '---\r';
@@ -61,12 +64,14 @@ export function isSeparatorLine(text: string): boolean {
  * Détection de frontmatter sur des textes de lignes bruts (sans `\n`).
  * Retourne l'index 0-based de la ligne de clôture, ou null. Source unique
  * de la règle — le repli scholarly (cm/scholarly/frontmatter.ts) et
- * parseSlides s'alignent dessus.
+ * parseSlides s'alignent dessus. Un BOM en tête de la première ligne n'empêche
+ * pas d'y voir l'ouverture.
  */
 export function detectFrontmatterLines(
   lines: readonly string[]
 ): { closingLine: number } | null {
-  if (lines.length < 2 || !isSeparatorLine(lines[0])) return null;
+  const opening = lines[0]?.startsWith(BOM) ? lines[0].slice(BOM.length) : lines[0];
+  if (lines.length < 2 || !isSeparatorLine(opening)) return null;
   // Ligne vide immédiatement après l'ouverture : c'est un séparateur de
   // slide en tête de deck, pas un frontmatter.
   if (lines[1] !== undefined && lines[1].trim() === '') return null;
@@ -238,6 +243,8 @@ function containsPoint(ranges: readonly { from: number; to: number }[], at: numb
 const HEADING = /^(?:ATXHeading|SetextHeading)([12])$/;
 
 export function parseSlides(source: string): DeckInfo {
+  // Un BOM en tête n'est pas du texte : le découpage se fait sans lui, aux offsets de `source`.
+  if (source.startsWith(BOM)) return shiftDeck(parseSlides(source.slice(BOM.length)), BOM.length);
   const lines = splitLines(source);
   const tree = slidesParser.parse(source);
   const code = codeRanges(tree);
@@ -303,6 +310,18 @@ export function parseSlides(source: string): DeckInfo {
   }
 
   return { frontmatter, slides, separatorLines: separators };
+}
+
+function shiftDeck(deck: DeckInfo, by: number): DeckInfo {
+  return {
+    ...deck,
+    frontmatter: deck.frontmatter && {
+      ...deck.frontmatter,
+      from: deck.frontmatter.from + by,
+      to: deck.frontmatter.to + by,
+    },
+    slides: deck.slides.map((slide) => ({ ...slide, from: slide.from + by, to: slide.to + by })),
+  };
 }
 
 function lineNumberAt(lines: readonly LineRec[], offset: number): number {

@@ -79,7 +79,21 @@ describe('chunkManuscriptChapter — découpage du manuscrit', () => {
   });
 
   it('porte une version de découpage que l’indexeur mêle à l’empreinte', () => {
-    expect(CHUNKER_VERSION).toBeGreaterThanOrEqual(2);
+    // 3 : un chapitre qui commence par un BOM a désormais son premier titre (S14-1-14).
+    expect(CHUNKER_VERSION).toBeGreaterThanOrEqual(3);
+  });
+
+  it('un chapitre qui commence par un BOM (Bloc-notes de Windows) garde son premier titre', () => {
+    // Lu sur le disque, le BOM reste dans le texte : « \uFEFF# Titre » n'était pas un titre, et la
+    // première section partait sans lui, son `#` et le BOM dans le texte embarqué (S14-1-14).
+    const md = '\uFEFF# Le Volkstag\n\nLes élections de 1932 marquent une rupture.\n';
+
+    const chunks = chunkManuscriptChapter(md);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].sectionTitle).toBe('Le Volkstag');
+    expect(chunks[0].line).toBe(1);
+    expect(chunks[0].content).not.toContain('\uFEFF');
+    expect(chunks[0].content).not.toContain('#');
   });
 
   it('ignore un titre situé dans un bloc de code', () => {

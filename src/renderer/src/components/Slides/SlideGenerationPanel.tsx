@@ -161,7 +161,8 @@ export const SlideGenerationPanel: React.FC = () => {
    */
   const applyGenerated = (mode: 'replace' | 'append') => {
     if (!editorFacade || !streamedContent) return;
-    const docLength = editorFacade.getValue().length;
+    // Une borne du document : dans un fichier CRLF, `getValue` compte deux caractères par fin de ligne.
+    const docLength = editorFacade.getDocText().length;
     const range =
       mode === 'replace' ? { from: 0, to: docLength } : { from: docLength, to: docLength };
     const proposed = mode === 'replace' ? streamedContent : '\n\n' + streamedContent;

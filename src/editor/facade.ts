@@ -102,9 +102,6 @@ export interface EditorFacade {
    */
   applyChanges(changes: ReadonlyArray<DocChange>, cursorOffset?: number, origin?: ChangeOrigin): boolean;
 
-  /** Ajoute du texte en fin de document. */
-  appendText(text: string, origin?: ChangeOrigin): void;
-
   /**
    * Soumet le texte comme proposition adjudicable (contrat propositionnel,
    * Phase 4b) plutôt que de l'insérer, et l'amène à l'écran, curseur compris :

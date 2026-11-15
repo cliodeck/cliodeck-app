@@ -514,6 +514,12 @@ describe('documentFrontMatter', () => {
     });
   });
 
+  it('un BOM en tête du fichier (Bloc-notes de Windows) : le front matter est lu quand même', () => {
+    const fm = documentFrontMatter('\uFEFF---\nauthor: Anne\n---\n\n# Texte\n');
+    expect(fm.fields).toEqual({ author: 'Anne' });
+    expect(fm.body).toBe('\n# Texte\n');
+  });
+
   it('un champ vide reste un champ : `date: ""` retire la date, comme pandoc', () => {
     expect(documentFrontMatter('---\ndate: ""\nauthor:\n---\nTexte.\n').fields).toEqual({ date: '', author: '' });
   });

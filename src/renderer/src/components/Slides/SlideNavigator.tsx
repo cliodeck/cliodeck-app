@@ -18,7 +18,12 @@ export const SlideNavigator: React.FC = () => {
   const content = useEditorStore((state) => state.content);
   const editorFacade = useEditorStore((state) => state.editorFacade);
 
-  const deck = useMemo<DeckInfo>(() => parseSlides(content), [content]);
+  // Découpé sur le texte de la vue, celui que comptent ses offsets : dans un fichier CRLF, celui du
+  // fichier compte deux caractères par fin de ligne, et le curseur y prenait du retard (S14-1-5).
+  const deck = useMemo<DeckInfo>(
+    () => parseSlides(editorFacade ? editorFacade.getDocText() : content),
+    [content, editorFacade]
+  );
   const deckRef = useRef(deck);
   useEffect(() => {
     deckRef.current = deck;

@@ -75,6 +75,41 @@ describe('parseOutline', () => {
   });
 });
 
+/**
+ * Un BOM UTF-8 en tête (Bloc-notes de Windows) : « \uFEFF# Titre » n'est pas un titre pour Lezer,
+ * alors que pandoc l'ignore. Le plan d'un chapitre fermé, le découpage du manuscrit indexé et de
+ * l'export Word perdaient leur premier titre, et le renommage en ajoutait un second (S14-1-14).
+ */
+describe('un fichier qui commence par un BOM', () => {
+  const BOM = '\uFEFF';
+
+  it('parseOutline trouve le premier titre, aux offsets du texte reçu', () => {
+    const source = fixture('bom.md');
+    const outline = parseOutline(source);
+
+    expect(outline.map((h) => [h.level, h.text, h.line])).toEqual([
+      [1, 'Chapitre premier', 1],
+      [2, 'Une section', 6],
+    ]);
+    expect(source.slice(outline[0].from, outline[0].to)).toBe('# Chapitre premier');
+    expect(source.slice(outline[1].from, outline[1].to)).toBe('## Une section');
+  });
+
+  it('renommer remplace le titre, sans le dupliquer, et le BOM reste en tête', () => {
+    expect(replaceLeadingHeading(`${BOM}# Chapitre premier\n\nTexte.\n`, 'Nouveau titre')).toBe(
+      `${BOM}# Nouveau titre\n\nTexte.\n`
+    );
+  });
+
+  it('sans titre, le titre ajouté vient après le BOM', () => {
+    expect(replaceLeadingHeading(`${BOM}Texte seul.\n`, 'Titre')).toBe(`${BOM}# Titre\n\nTexte seul.\n`);
+  });
+
+  it('stripLeadingHeading retire le titre de tête', () => {
+    expect(stripLeadingHeading(`${BOM}# Résumé\n\nLe texte.\n`)).toBe('Le texte.');
+  });
+});
+
 describe('replaceLeadingHeading', () => {
   it('remplace le premier titre de niveau 1', () => {
     expect(replaceLeadingHeading('# Ancien\n\ntexte\n', 'Nouveau')).toBe(

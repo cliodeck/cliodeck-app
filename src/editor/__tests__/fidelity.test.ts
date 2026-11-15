@@ -47,11 +47,13 @@ const read = (name: string): string =>
 describe('corpus de fidélité (intégrité des fixtures)', () => {
   it('couvre tous les cas exigés par la Phase 0', () => {
     expect(fixtures).toEqual([
+      'bom.md',
       'citations.md',
       'code-blocks.md',
       'footnotes.md',
       'frontmatter.md',
       'kitchen-sink.md',
+      'line-endings-crlf.md',
       'line-endings-mixed.md',
       'links-images.md',
       'milkdown-artifacts.md',
@@ -69,6 +71,16 @@ describe('corpus de fidélité (intégrité des fixtures)', () => {
     const doc = read('line-endings-mixed.md');
     expect(doc).toContain('\r\n');
     expect(doc).toMatch(/[^\r]\n/);
+  });
+
+  it('conserve un fichier uniformément CRLF', () => {
+    const doc = read('line-endings-crlf.md');
+    expect(doc).toContain('\r\n');
+    expect(doc.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/);
+  });
+
+  it('conserve le BOM UTF-8 en tête', () => {
+    expect(read('bom.md').startsWith('\uFEFF# ')).toBe(true);
   });
 
   it('conserve les blancs significatifs et l’absence de saut final', () => {
@@ -132,6 +144,56 @@ describe('détection du séparateur de ligne', () => {
     expect(detectLineSeparator('a\nb\n')).toBe('\n');
     expect(detectLineSeparator('a\r\nb\n')).toBe('\n');
     expect(detectLineSeparator('sans saut')).toBe('\n');
+  });
+  it('un `\\r` isolé fait un fichier mixte, même entre des CRLF', () => {
+    expect(detectLineSeparator('a\r\nb\rc\r\n')).toBe('\n');
+    expect(detectLineSeparator('a\r\nb\r')).toBe('\n');
+  });
+});
+
+/**
+ * Un fichier CRLF déclarait `\r\n` comme séparateur : CM6 ne coupait plus une chaîne insérée que
+ * sur lui, et un `\n` restait à l'intérieur d'une « ligne ». Toute commande qui insère une chaîne
+ * (collage, Cmd+Maj+Alt+Bas, remplacer par `\n`) rendait le fichier mixte, et ses `\r` s'affichaient
+ * à la réouverture (S14-1-24).
+ */
+describe('un fichier uniformément CRLF reçoit du texte', () => {
+  const CRLF = 'a\r\nb\r\nc';
+
+  it('`replaceSelection("X\\nY")` : quatre lignes, et le fichier reste uniforme', () => {
+    const state = createDocState(CRLF);
+    const next = state.update(state.replaceSelection('X\nY')).state;
+
+    expect(next.doc.lines).toBe(4);
+    expect(readDocText(next)).toBe('X\r\nYa\r\nb\r\nc');
+  });
+
+  it('un changement en chaîne brute, comme ceux des commandes de CM6, aussi', () => {
+    const state = createDocState(CRLF);
+    const next = state.update({ changes: { from: state.doc.length, insert: '\nd\r\ne\rf' } }).state;
+
+    expect(next.doc.lines).toBe(6);
+    expect(readDocText(next)).toBe('a\r\nb\r\nc\r\nd\r\ne\r\nf');
+  });
+});
+
+describe('un fichier mixte reste mixte : rien n’est réécrit en douce', () => {
+  it('ses `\\r` restent des caractères, et une insertion n’en ajoute ni n’en retire', () => {
+    const source = read('line-endings-mixed.md');
+    const state = createDocState(source);
+    const at = source.indexOf('\n\n') + 1;
+    const next = state.update({ changes: { from: at, insert: 'X\nY' } }).state;
+
+    expect(readDocText(next)).toBe(source.slice(0, at) + 'X\nY' + source.slice(at));
+  });
+
+  it('un `\\r` isolé entre des CRLF reste un caractère : ni une fin de ligne, ni retiré', () => {
+    const source = 'a\r\nb\rc\r\n';
+    const state = createDocState(source);
+    const next = state.update({ changes: { from: 0, insert: 'X' } }).state;
+
+    expect(next.doc.lines).toBe(3);
+    expect(readDocText(next)).toBe('Xa\r\nb\rc\r\n');
   });
 });
 

@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm, symlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import { assembleManuscript } from '../manuscript-assembler';
+import { splitIntoChapters } from '../word-export';
 import { DEFAULT_BOOK_SETTINGS, type Chapter } from '../../../../backend/types/book';
 import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards';
 
@@ -105,6 +106,26 @@ describe('assembleManuscript', () => {
 
     expect(markdown).toContain('Frappe non sauvegardee.');
     expect(markdown).not.toContain('Version enregistree.');
+  });
+
+  it('un chapitre fermé qui commence par un BOM : le BOM ne passe pas dans le livre, son titre ouvre un chapitre', async () => {
+    // Lu sur le disque, le BOM restait au milieu du flux assemblé : « \uFEFF# Deux » n'y est plus
+    // un titre, ni pour pandoc, ni pour le découpage de l'export Word (S14-1-14).
+    await write('chapters/01.md', '# Un\n\nAlpha.\n');
+    await writeFile(path.join(dir, 'chapters/02.md'), '\uFEFF# Deux\n\nBeta.\n', 'utf-8');
+
+    const { markdown } = await assembleManuscript({
+      projectPath: dir,
+      settings: DEFAULT_BOOK_SETTINGS,
+      chapters: [
+        CH({ id: 'a', filePath: 'chapters/01.md', order: 0 }),
+        CH({ id: 'b', filePath: 'chapters/02.md', order: 1 }),
+      ],
+      target: 'plain',
+    });
+
+    expect(markdown).not.toContain('\uFEFF');
+    expect(splitIntoChapters(markdown)).toEqual(['# Un\n\nAlpha.', '# Deux\n\nBeta.']);
   });
 
   it('signale un chapitre illisible sans interrompre l’assemblage', async () => {

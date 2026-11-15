@@ -28,6 +28,12 @@ export interface OutlineHeading {
 
 const HEADING = /^(?:ATXHeading|SetextHeading)([1-6])$/;
 
+/**
+ * Le BOM UTF-8 d'un fichier lu sur le disque (Bloc-notes de Windows) : pas du texte, et pandoc
+ * l'ignore, mais « \uFEFF# Titre » n'est pas un titre pour Lezer (S14-1-14).
+ */
+const BOM = '\uFEFF';
+
 /** Numéro de ligne (1-indexé) d'un offset. */
 function lineNumberAt(source: string, offset: number): number {
   let line = 1;
@@ -50,9 +56,14 @@ function headingText(source: string, from: number, to: number): string {
     .trim();
 }
 
-/** Tous les titres du document, dans l'ordre, hors blocs de code. */
+/**
+ * Tous les titres du document, dans l'ordre, hors blocs de code. Un BOM en tête est écarté du
+ * parse ; les offsets restent ceux de `source`.
+ */
 export function parseOutline(source: string): OutlineHeading[] {
-  const tree = outlineParser.parse(source);
+  const skip = source.startsWith(BOM) ? BOM.length : 0;
+  const text = source.slice(skip);
+  const tree = outlineParser.parse(text);
   const out: OutlineHeading[] = [];
 
   tree.iterate({
@@ -63,10 +74,10 @@ export function parseOutline(source: string): OutlineHeading[] {
       if (!match) return undefined;
       out.push({
         level: Number(match[1]),
-        text: headingText(source, node.from, node.to),
-        from: node.from,
-        to: node.to,
-        line: lineNumberAt(source, node.from),
+        text: headingText(text, node.from, node.to),
+        from: node.from + skip,
+        to: node.to + skip,
+        line: lineNumberAt(text, node.from),
       });
       return false; // le contenu d'un titre n'a pas de sous-titre
     },
@@ -86,7 +97,11 @@ export function parseOutline(source: string): OutlineHeading[] {
  */
 export function replaceLeadingHeading(content: string, title: string): string {
   const first = parseOutline(content).find((h) => h.level === 1);
-  if (!first) return `# ${title}\n\n${content}`;
+  if (!first) {
+    // Le BOM reste en tête : au milieu du fichier, il ferait du titre qui le suit un paragraphe.
+    const bom = content.startsWith(BOM) ? BOM : '';
+    return `${bom}# ${title}\n\n${content.slice(bom.length)}`;
+  }
   // Le nœud titre englobe le `\r` d'un fichier CRLF : l'inclure dans le
   // remplacement convertirait cette ligne en LF. La fidélité octet par
   // octet prime (même famille que readDocText, cf. cm/fidelity.ts).
