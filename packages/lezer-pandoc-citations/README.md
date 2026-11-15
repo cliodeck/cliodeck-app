@@ -3,8 +3,8 @@
 [Pandoc citation](https://pandoc.org/MANUAL.html#citation-syntax) extension
 for the [Lezer Markdown parser](https://github.com/lezer-parser/markdown):
 `[@key]`, locators (`[@key, p. 12]`), clusters (`[@a; @b, pp. 101-103]`),
-prefixes/suffixes (`[see @key, p. 33]`) and bare `@key` citations — with an
-email-address guard. Works with CodeMirror 6 via `@codemirror/lang-markdown`
+prefixes/suffixes (`[see @key, p. 33]`), suppressed author (`[-@key]`) and
+bare `@key` citations — with an email-address guard. Works with CodeMirror 6 via `@codemirror/lang-markdown`
 and with any `@lezer/markdown` consumer.
 
 To our knowledge the first Lezer extension for Pandoc citations. Extracted
@@ -52,6 +52,12 @@ PandocCitation
 
 Bare citations parse as `PandocCitation[CitationMark, CitationKey]`.
 Keys match `[A-Za-z0-9_:-]+` (Pandoc-compatible).
+
+Suppressed author: in `[-@key, p. 4]`, `[see -@key]` or a bare `-@key`, the
+`-` is a `CitationMark` of its own, right before the `@` one. It must open
+the segment or follow a blank (a non-word delimiter for a bare citation):
+`foo-@bar` stays text, and in `[see - @key]` the `-` belongs to the prefix,
+as in Pandoc.
 
 Known v1 limits (documented in the source): locators are part of
 `CitationSuffix` (no dedicated node); a segment whose suffix contains a

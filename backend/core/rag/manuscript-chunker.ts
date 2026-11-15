@@ -39,7 +39,8 @@ export const CHUNK_OVERLAP = 200;
  *  2 — citations en bloc et notes de référence hors du texte embarqué
  *      (docs/poids-du-manuscrit.md, palier 3) ;
  *  3 — un fichier qui commence par un BOM a son premier titre, et le BOM
- *      sort du texte embarqué (S14-1-14). Seule montée de la rc.6.
+ *      sort du texte embarqué (S14-1-14) ; `[-@clef]` est une citation,
+ *      donc hors du texte embarqué (S14-1-9). Seule montée de la rc.6.
  */
 export const CHUNKER_VERSION = 3;
 /**

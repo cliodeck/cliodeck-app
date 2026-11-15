@@ -11,6 +11,13 @@
  * of the inline section or a non-word delimiter — `name@example.org` never
  * matches.
  *
+ * Suppressed author: a single `-` right before the `@` (`[-@key, p. 4]`,
+ * `[see -@key]`, bare `-@key`) is a `CitationMark` of its own, when it
+ * follows the start of the segment, a blank or, for a bare citation, a
+ * non-word delimiter. A `-` glued to a word (`foo-@bar`) keeps the e-mail
+ * guard; one followed by a blank (`[see - @key]`) stays in the prefix, as in
+ * Pandoc.
+ *
  * Known v1 limits (documented on purpose):
  * - no separate locator node: everything between the key and the next `;`
  *   or `]` is a single `CitationSuffix` (locators included);
@@ -43,6 +50,7 @@ const AT = 64; /* @ */
 const SEMICOLON = 59; /* ; */
 const BACKSLASH = 92; /* \ */
 const CARET = 94; /* ^ */
+const MINUS = 45; /* - */
 
 function isKeyChar(ch: number): boolean {
   return (
@@ -104,10 +112,18 @@ function parseSegment(
   }
   if (at < 0 || at >= segEnd) return -1;
 
+  // `-@key` (suppressed author): the `-` opens the segment or follows a blank.
+  const mark =
+    at > from &&
+    cx.char(at - 1) === MINUS &&
+    (at - 1 === from || isSpace(cx.char(at - 2)))
+      ? at - 1
+      : at;
+
   // The prefix may not end with a word character (e-mail guard) and may not
   // contain `@` (checked implicitly: `at` is the first `@`).
-  if (at > from) {
-    const prev = cx.char(at - 1);
+  if (mark > from) {
+    const prev = cx.char(mark - 1);
     if (isKeyChar(prev) || prev === 46) return -1;
   }
 
@@ -121,9 +137,10 @@ function parseSegment(
     if (cx.char(i) === AT) return -1;
   }
 
-  if (hasInk(cx, from, at)) {
-    children.push(cx.elt('CitationPrefix', from, at));
+  if (hasInk(cx, from, mark)) {
+    children.push(cx.elt('CitationPrefix', from, mark));
   }
+  if (mark < at) children.push(cx.elt('CitationMark', mark, at)); // `-`
   children.push(cx.elt('CitationMark', at, at + 1));
   children.push(cx.elt('CitationKey', at + 1, keyEnd));
   if (hasInk(cx, keyEnd, segEnd)) {
@@ -160,17 +177,18 @@ function parseBracketed(cx: InlineContext, pos: number): number {
   return cx.addElement(cx.elt('PandocCitation', pos, close + 1, children));
 }
 
+/** `pos` is the `@`, or the `-` of a bare `-@key`. */
 function parseBare(cx: InlineContext, pos: number): number {
   if (pos > cx.offset && blocksBareCitation(cx.char(pos - 1))) return -1;
-  let keyEnd = pos + 1;
+  const at = cx.char(pos) === MINUS ? pos + 1 : pos;
+  let keyEnd = at + 1;
   while (keyEnd < cx.end && isKeyChar(cx.char(keyEnd))) keyEnd++;
-  if (keyEnd === pos + 1) return -1;
-  return cx.addElement(
-    cx.elt('PandocCitation', pos, keyEnd, [
-      cx.elt('CitationMark', pos, pos + 1),
-      cx.elt('CitationKey', pos + 1, keyEnd),
-    ])
-  );
+  if (keyEnd === at + 1) return -1;
+  const children: Element[] = [];
+  if (at > pos) children.push(cx.elt('CitationMark', pos, at)); // `-`
+  children.push(cx.elt('CitationMark', at, at + 1));
+  children.push(cx.elt('CitationKey', at + 1, keyEnd));
+  return cx.addElement(cx.elt('PandocCitation', pos, keyEnd, children));
 }
 
 /**
@@ -193,6 +211,7 @@ export const PandocCitations: MarkdownConfig = {
           return parseBracketed(cx, pos);
         }
         if (next === AT) return parseBare(cx, pos);
+        if (next === MINUS && cx.char(pos + 1) === AT) return parseBare(cx, pos);
         return -1;
       },
       before: 'Link',
