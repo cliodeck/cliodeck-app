@@ -537,7 +537,8 @@
       "claude": "Anthropic Claude (cloud API)",
       "openai": "OpenAI (cloud API)",
       "mistral": "Mistral (cloud API)",
-      "gemini": "Google Gemini (cloud API)"
+      "gemini": "Google Gemini (cloud API)",
+      "cloudEmbeddingsConsent": "Switching to {{provider}} will send your ENTIRE corpus to that provider on every indexing pass, because “Use this provider for embeddings too” is ticked: the text of your PDFs, your archive transcriptions, your Obsidian notes and your manuscript. That data leaves your machine and falls under the provider's terms. Change backend?"
     },
     "backendHelp": "LLM service to use",
     "ollamaURL": "Ollama URL",

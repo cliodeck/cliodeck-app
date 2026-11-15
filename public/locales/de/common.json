@@ -537,7 +537,8 @@
       "claude": "Anthropic Claude (Cloud-API)",
       "openai": "OpenAI (Cloud-API)",
       "mistral": "Mistral (Cloud-API)",
-      "gemini": "Google Gemini (Cloud-API)"
+      "gemini": "Google Gemini (Cloud-API)",
+      "cloudEmbeddingsConsent": "Der Wechsel zu {{provider}} schickt bei jeder Indexierung Ihr GESAMTES Korpus an diesen Anbieter, da „Diesen Anbieter auch für Embeddings verwenden“ aktiviert ist: den Text Ihrer PDFs, die Transkriptionen Ihrer Archive, Ihre Obsidian-Notizen und Ihr Manuskript. Diese Daten verlassen Ihren Rechner und unterliegen den Bedingungen des Anbieters. Backend wechseln?"
     },
     "backendHelp": "Zu verwendender LLM-Dienst",
     "ollamaURL": "Ollama-URL",

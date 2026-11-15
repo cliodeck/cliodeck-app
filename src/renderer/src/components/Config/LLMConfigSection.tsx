@@ -83,6 +83,10 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
    * passer à Claude revenait à Ollama, sans une question (S17-1-31). Les mêmes questions qu'ailleurs,
    * donc : l'invalidation des index si la cible change, le consentement si elle est en ligne. Un
    * refus laisse le backend tel quel.
+   *
+   * Le consentement est celui du changement de backend, qui nomme le fournisseur qui recevra le
+   * corpus : celui de la case commence par « Activer cette option… », et l'historien n'active rien
+   * (E4).
    */
   const handleBackendChange = async (next: LLMConfig['backend']) => {
     const changed = { ...config, backend: next };
@@ -92,7 +96,8 @@ export const LLMConfigSection: React.FC<LLMConfigSectionProps> = ({
       const dialogs = useDialogStore.getState();
       if (!(await dialogs.showConfirm(t('embeddedEmbedding.providerChangeConfirm')))) return;
       if (after && classifyEmbeddingTarget(after).isCloud) {
-        if (!(await dialogs.showConfirm(t('llm.cloudEmbeddings.consent')))) return;
+        const provider = t(`llm.backend.${next ?? 'ollama'}`);
+        if (!(await dialogs.showConfirm(t('llm.backend.cloudEmbeddingsConsent', { provider })))) return;
       }
     }
     onChange(changed);

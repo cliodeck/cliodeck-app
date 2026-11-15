@@ -537,7 +537,8 @@
       "claude": "Anthropic Claude (API en ligne)",
       "openai": "OpenAI (API en ligne)",
       "mistral": "Mistral (API en ligne)",
-      "gemini": "Google Gemini (API en ligne)"
+      "gemini": "Google Gemini (API en ligne)",
+      "cloudEmbeddingsConsent": "Passer à {{provider}} enverra l'INTÉGRALITÉ de votre corpus à ce fournisseur, à chaque indexation, puisque la case « Utiliser aussi ce fournisseur pour les embeddings » est cochée : le texte de vos PDF, les transcriptions de vos archives, vos notes Obsidian et votre manuscrit. Ces envois sortent de votre machine et sont soumis aux conditions du fournisseur. Changer de backend ?"
     },
     "backendHelp": "Service LLM à utiliser",
     "ollamaURL": "URL Ollama",
