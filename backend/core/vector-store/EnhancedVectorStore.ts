@@ -1,6 +1,7 @@
 import { VectorStore, type IndexRebuildReason } from './VectorStore';
 import { HNSWVectorStore } from './HNSWVectorStore';
 import { EmbeddingSpaceMismatchError } from './embedding-space';
+import { SearchIndexBuildingError } from './search-index-building';
 import { BM25Index } from '../search/BM25Index';
 import { HybridSearch } from '../search/HybridSearch';
 import type { SearchResult, DocumentChunk, VectorStoreStatistics } from '../../types/pdf-document';
@@ -390,10 +391,11 @@ export class EnhancedVectorStore {
       return results;
     }
 
-    // If rebuilding, throw error to avoid blocking
+    // Une reconstruction en cours : le corpus n'est pas en panne, son index se construit. L'erreur
+    // typée le dit au parcours des corpus, qui le rapporte « en indexation », pas en échec (E3).
     if (this.isRebuilding) {
       const status = this.getRebuildStatus();
-      throw new Error(
+      throw new SearchIndexBuildingError(
         `Search indexes are being rebuilt (${status.percentage}%). Please wait a moment and try again.`
       );
     }

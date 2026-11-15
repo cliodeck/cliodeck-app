@@ -46,6 +46,8 @@ export interface RAGExplanation {
       ok: boolean;
       hitCount: number;
       selectedCount: number;
+      /** Pas interrogé parce que son index se construit : « indexation en cours », pas un échec (E3). */
+      indexing?: boolean;
     }>;
     /**
      * Taille des blocs de contexte réellement injectés, en caractères :

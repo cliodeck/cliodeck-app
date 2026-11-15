@@ -55,6 +55,19 @@ describe('retrievalStatus', () => {
     // Extraits rendus puis tous écartés (bande, inspecteur) : le corpus a répondu, la panne reste partielle.
     expect(retrievalStatus([failed, answered], true)).toBe('partial');
   });
+
+  // E3 : un corpus dont l'index se construit n'a pas pu être interrogé, mais il n'est pas en panne.
+  // Seul, il ne fait ni une recherche en échec ni une panne partielle.
+  it('un corpus en indexation n’est ni une panne totale, ni une panne partielle', () => {
+    const indexing = { ...failed, source: 'secondary' as const, indexing: true };
+    const answered = { ...success, source: 'primary' as const, hitCount: 2, selectedCount: 2 };
+    expect(retrievalStatus([indexing], true)).toBe('empty');
+    expect(retrievalStatus([indexing, success], true)).toBe('empty');
+    expect(retrievalStatus([indexing, answered], false)).toBeUndefined();
+    // À côté d'une vraie panne, la panne compte toujours.
+    expect(retrievalStatus([indexing, failed], true)).toBe('failed');
+    expect(retrievalStatus([indexing, failed, answered], false)).toBe('partial');
+  });
 });
 
 function makeFakeProvider(chunks: ChatChunk[]): {

@@ -674,13 +674,16 @@ export interface ChatStreamEnvelope {
  *   sans rien trouver compte de même : `fanOutCorpora` rend `ok: true, hitCount: 0` dans les deux cas.
  * - `partial` : une panne, et un autre corpus a rendu des extraits.
  * - `empty` : aucune panne, aucun extrait.
+ *
+ * Un corpus dont l'index se construit (`indexing`) n'a pas pu être interrogé, mais il n'est pas en
+ * panne : il ne compte pas parmi les échecs (E3). La bande et les consignes le disent à part.
  */
 export function retrievalStatus(
   corpora: NonNullable<RAGExplanation['search']['corpora']>,
   noHits: boolean
 ): RAGExplanation['search']['retrievalStatus'] {
   const attempted = corpora.filter((corpus) => corpus.attempted);
-  const failures = attempted.filter((corpus) => !corpus.ok);
+  const failures = attempted.filter((corpus) => !corpus.ok && !corpus.indexing);
   if (failures.length > 0) {
     // Un extrait dans le prompt, ou un corpus qui en a rendu (même écarté ensuite par la bande ou
     // l'inspecteur) : quelque chose a répondu.
@@ -1170,7 +1173,8 @@ class FusionChatService {
                   retrievalService.describeDocuments(options?.documentIds ?? []),
                   promptLang
                 );
-            const retrievalNotes = formatRetrievalNotes(status, { noHits, ownOnly }, promptLang);
+            const indexing = stats.search.corpora.some((corpus) => corpus.attempted && corpus.indexing);
+            const retrievalNotes = formatRetrievalNotes(status, { noHits, ownOnly, indexing }, promptLang);
             const ownFound = ownHits.length + noteHits.length;
             const blocksFor = (read: ReadExtracts) => {
               const text = CONTEXT_TEXT[promptLang];
@@ -1778,6 +1782,12 @@ interface ContextText {
   searchFailed: string;
   /** Une partie des corpus tentés en échec, un autre a rendu des extraits. */
   someSearchesFailed: string;
+  /**
+   * Un corpus au moins n'a pas été interrogé parce que son index se construit (E3) : ni une panne, ni
+   * une absence. Sans cette consigne, « aucun extrait ne correspond » ferait conclure au modèle que
+   * la bibliographie se tait.
+   */
+  sourcesIndexing: string;
   /** Aucun extrait du tout, quand une source a échoué ou que seul le texte de l'utilisateur est interrogé. */
   noEvidence: string;
   /** Consigne de rappel : dire à l'utilisateur ce qu'il a déjà écrit. */
@@ -1817,6 +1827,8 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
     searchFailed: RETRIEVAL_FAILED_TEXT.fr,
     someSearchesFailed:
       'Certaines recherches dans les sources ont échoué pour ce tour : les éléments disponibles peuvent être incomplets. Dis à l’utilisateur qu’une partie de ses sources n’a pas pu être consultée : ne conclus pas qu’une information en est absente, ne prétends pas avoir consulté les corpus en échec et ne fabrique pas de citations.',
+    sourcesIndexing:
+      'Une partie des sources est en cours d’indexation et n’a pas pu être consultée pour ce tour. Ne conclus pas qu’elle ne dit rien sur la question, et ne prétends pas l’avoir consultée.',
     noEvidence:
       'Aucun extrait n’a été fourni. Ne prétends pas disposer de preuves et ne fabrique pas de citations.',
     manuscript: [
@@ -1877,6 +1889,8 @@ const CONTEXT_TEXT: Record<PromptLanguage, ContextText> = {
     searchFailed: RETRIEVAL_FAILED_TEXT.en,
     someSearchesFailed:
       'Some source searches failed for this turn: the available evidence may be incomplete. Tell the user that part of their sources could not be searched: do not conclude that something is absent from them, do not imply that the failed sources were consulted, and do not invent citations.',
+    sourcesIndexing:
+      'Part of the sources is being indexed and could not be searched for this turn. Do not conclude that it says nothing about the question, and do not imply that it was consulted.',
     noEvidence: 'No evidence was retrieved. Do not imply that evidence was provided or invent citations.',
     manuscript: [
       "--- THE USER'S MANUSCRIPT (not a source) ---",
@@ -1967,16 +1981,17 @@ export function formatSelectionScope(
  */
 function formatRetrievalNotes(
   status: RAGExplanation['search']['retrievalStatus'],
-  opts: { noHits: boolean; ownOnly: boolean },
+  opts: { noHits: boolean; ownOnly: boolean; indexing?: boolean },
   lang: PromptLanguage = 'fr'
 ): string {
   const text = CONTEXT_TEXT[lang];
-  if (status === 'failed') return `\n${text.searchFailed}`;
+  const indexing = opts.indexing ? `\n${text.sourcesIndexing}` : '';
+  if (status === 'failed') return `\n${text.searchFailed}${indexing}`;
   const notes = [
     ...(status === 'partial' ? [text.someSearchesFailed] : []),
     ...(opts.noHits && (opts.ownOnly || status === 'partial') ? [text.noEvidence] : []),
   ];
-  return notes.map((note) => `\n${note}`).join('');
+  return notes.map((note) => `\n${note}`).join('') + indexing;
 }
 
 export function formatContextAsSystemPrompt(

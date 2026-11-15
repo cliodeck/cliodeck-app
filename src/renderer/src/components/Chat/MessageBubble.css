@@ -221,15 +221,18 @@
   color: var(--color-danger);
 }
 
-/* Aucune source pertinente, ou aucune qui tienne dans la fenêtre du modèle : une information, pas une panne. */
+/* Aucune source pertinente, aucune qui tienne dans la fenêtre du modèle, ou un index qui se construit
+   pendant que d'autres corpus répondent : une information, pas une panne. */
 .retrieval-warning[data-status='empty'],
-.retrieval-warning[data-status='unread'] {
+.retrieval-warning[data-status='unread'],
+.retrieval-warning[data-status='indexing'] {
   background-color: color-mix(in srgb, var(--color-accent) 10%, transparent);
   border-bottom-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 .retrieval-warning[data-status='empty'] svg,
-.retrieval-warning[data-status='unread'] svg {
+.retrieval-warning[data-status='unread'] svg,
+.retrieval-warning[data-status='indexing'] svg {
   color: var(--color-accent);
 }
 

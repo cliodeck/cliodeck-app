@@ -10,6 +10,7 @@ import {
   type CorpusId,
   type CorpusRetriever,
 } from '../corpus.js';
+import { SearchIndexBuildingError } from '../../../vector-store/search-index-building.js';
 
 interface Hit {
   id: string;
@@ -99,6 +100,44 @@ describe('fanOutCorpora', () => {
       hitCount: 2,
     });
     expect(onError).toHaveBeenCalledWith('primary', expect.any(Error));
+  });
+
+  // E3 : un index qui se construit (reconstruction, première indexation) n'est pas une panne. Le
+  // corpus n'a pas pu être interrogé : `ok` reste faux, et `indexing` le distingue d'un échec.
+  it('un index en construction : corpus « en indexation », pas en échec, et rien au journal des pannes', async () => {
+    const onError = vi.fn();
+    const { outcomes } = await fanOutCorpora(
+      [
+        retriever('secondary', new SearchIndexBuildingError('Search indexes are being rebuilt (40%).')),
+        retriever('primary', []),
+      ],
+      new Set<CorpusId>(['secondary', 'primary']),
+      'q',
+      options,
+      onError
+    );
+    expect(outcomes.find((o) => o.source === 'secondary')).toMatchObject({
+      attempted: true,
+      ok: false,
+      indexing: true,
+      hitCount: 0,
+    });
+    expect(outcomes.find((o) => o.source === 'primary')?.indexing).toBeUndefined();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('témoin : une panne ordinaire n’est pas « en indexation »', async () => {
+    const onError = vi.fn();
+    const { outcomes } = await fanOutCorpora(
+      [retriever('secondary', new Error('Search indexes are not available.'))],
+      new Set<CorpusId>(['secondary']),
+      'q',
+      options,
+      onError
+    );
+    expect(outcomes[0]).toMatchObject({ attempted: true, ok: false });
+    expect(outcomes[0].indexing).toBeUndefined();
+    expect(onError).toHaveBeenCalledWith('secondary', expect.any(Error));
   });
 
   it('transmet la requête et les options à chaque corpus', async () => {

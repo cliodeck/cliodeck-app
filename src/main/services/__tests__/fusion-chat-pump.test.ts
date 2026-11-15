@@ -763,6 +763,35 @@ describe('recherche en échec : le modèle et l’écran le disent (S04-2-1)', (
     expect(systemText()).not.toMatch(/La recherche dans les sources a échoué/);
   });
 
+  // E3 : la bibliographie dont l'index se reconstruit n'a pas pu être interrogée, mais elle n'est pas
+  // en panne. Ni « La recherche de sources a échoué », ni « Certaines recherches ont échoué » : la
+  // ligne « Par corpus » la dit en indexation. Au modèle, ni la consigne d'échec, ni « rien ne
+  // correspond » seul : une partie des sources n'a pas été consultée, il ne doit pas conclure à une
+  // absence.
+  it('bibliographie en indexation, archives vides : ni échec ni panne partielle, et le modèle ne conclut pas à une absence', async () => {
+    const indexing = { ...corpus('secondary', false), indexing: true };
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValueOnce(withCorpora([indexing, corpus('primary', true)]));
+    const sent = await turn();
+    expect(explanationOf(sent)?.search.retrievalStatus).toBe('empty');
+    expect(explanationOf(sent)?.search.corpora?.[0]).toMatchObject({ source: 'secondary', ok: false, indexing: true });
+    expect(systemText()).toMatch(/en cours d['’]indexation/);
+    expect(systemText()).toMatch(/Ne conclus pas qu['’]elle ne dit rien/);
+    expect(systemText()).not.toMatch(/La recherche dans les sources a échoué/);
+    expect(systemText()).not.toMatch(/Certaines recherches dans les sources ont échoué/);
+  });
+
+  it('témoin E3 : bibliographie en indexation, archives qui répondent : aucune bande de panne', async () => {
+    const indexing = { ...corpus('secondary', false), indexing: true };
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValueOnce(
+      withCorpora([indexing, corpus('primary', true, 1)], [archiveHit])
+    );
+    const sent = await turn();
+    expect(explanationOf(sent)?.search.retrievalStatus).toBeUndefined();
+    expect(systemText()).toContain(ARCHIVE);
+    expect(systemText()).toMatch(/en cours d['’]indexation/);
+    expect(systemText()).not.toMatch(/Certaines recherches dans les sources ont échoué/);
+  });
+
   it('témoin J9 : « Arrêter » pendant la recherche ne donne ni consigne, ni échec affiché, ni appel au modèle', async () => {
     let searching = false;
     vi.mocked(retrievalService.searchWithStats).mockImplementationOnce(

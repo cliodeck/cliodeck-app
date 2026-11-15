@@ -325,6 +325,8 @@ export interface RetrievalSearchStats {
       ok: boolean;
       hitCount: number;
       selectedCount: number;
+      /** Pas interrogé, son index se construit (E3). */
+      indexing?: boolean;
     }>;
     /** Posé par l'appelant qui construit le prompt (`fusion-chat-service`). */
     contextChars?: {
@@ -474,11 +476,18 @@ export function documentsOfHits(hits: MultiSourceSearchResult[]): ConsultedDocum
  * l'utilisateur ne pouvait pas voir (docs/poids-du-manuscrit.md).
  */
 export function withSelectedCounts<
-  C extends { source: string; attempted: boolean; ok: boolean; hitCount: number },
+  C extends { source: string; attempted: boolean; ok: boolean; hitCount: number; indexing?: boolean },
 >(
   corpora: C[],
   selected: Array<{ sourceType: string }>
-): Array<{ source: C['source']; attempted: boolean; ok: boolean; hitCount: number; selectedCount: number }> {
+): Array<{
+  source: C['source'];
+  attempted: boolean;
+  ok: boolean;
+  hitCount: number;
+  selectedCount: number;
+  indexing?: boolean;
+}> {
   const selectedBySource = new Map<string, number>();
   for (const r of selected) {
     selectedBySource.set(r.sourceType, (selectedBySource.get(r.sourceType) ?? 0) + 1);
@@ -489,6 +498,8 @@ export function withSelectedCounts<
     ok: c.ok,
     hitCount: c.hitCount,
     selectedCount: selectedBySource.get(c.source) ?? 0,
+    // Seulement quand il l'est : un corpus ordinaire garde la forme d'avant.
+    ...(c.indexing ? { indexing: true } : {}),
   }));
 }
 
