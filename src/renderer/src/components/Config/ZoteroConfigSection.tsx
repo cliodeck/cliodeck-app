@@ -130,7 +130,7 @@ export const ZoteroConfigSection: React.FC<ZoteroConfigSectionProps> = ({
         {mode === 'api' ? (
           <>
             <div className="config-field">
-              <label>User ID</label>
+              <label>{t('zotero.userId')}</label>
               <input
                 type="text"
                 value={config.userId}
@@ -140,7 +140,7 @@ export const ZoteroConfigSection: React.FC<ZoteroConfigSectionProps> = ({
             </div>
 
             <div className="config-field">
-              <label>API Key</label>
+              <label>{t('zotero.apiKey')}</label>
               <input
                 type="password"
                 value={config.apiKey}
