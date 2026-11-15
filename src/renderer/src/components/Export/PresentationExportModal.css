@@ -38,8 +38,14 @@
   font-size: var(--font-size-lg);
 }
 
+/* Le corps défile, donc coupe ce qui dépasse de sa marge intérieure : 4 px tout autour gardent
+   entier l'anneau de focus des champs (index.css : 2 px, décalé de 2 px), que les champs pleine
+   largeur portaient sinon contre son bord. Les marges négatives rendent ces 4 px : les champs
+   restent où ils étaient, 16 px sous l'en-tête et au-dessus des boutons (4 px en densité
+   compacte). Revue de J13 ; vérifié par export-modal-focus-room.test.ts. */
 .presentation-export-body {
-  margin-bottom: var(--spacing-lg);
+  padding: 4px;
+  margin: -4px -4px calc(var(--spacing-lg) - 4px);
   overflow-y: auto;
   flex: 1;
 }
