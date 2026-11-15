@@ -36,6 +36,16 @@ interface KnowledgeGraphOptions {
   computeLayout?: boolean;
 }
 
+/** L'état du corpus des PDF qui change quand il change (`getIndexFreshness`). */
+export interface PdfIndexFreshness {
+  documentCount: number;
+  chunkCount: number;
+  lastIndexedAt: string | null;
+  rebuildDue: boolean;
+  /** Avec un filtre de collections, les documents qu'il retient, triés ; `null` sans filtre. */
+  collectionDocumentIds: string[] | null;
+}
+
 /** Options for topic analysis */
 interface AnalyzeTopicsOptions {
   minTopicSize?: number;
@@ -641,6 +651,28 @@ class PDFService {
   async getStatistics() {
     this.ensureStore();
     return this.vectorStore!.getStatistics();
+  }
+
+  /**
+   * Ce qui change avec le corpus des PDF, pour l'empreinte du cache de similarité (S13-1-1) : une
+   * réindexation garde le nombre de documents mais pas la date du dernier. Une reconstruction due
+   * (J8) en est aussi : l'index servi d'ici là peut manquer des extraits. Avec un filtre de
+   * collections, les documents qu'il retient, comme la recherche (sous-collections comprises) : une
+   * synchronisation Zotero change l'appartenance sans réindexer.
+   */
+  getIndexFreshness(collectionKeys: readonly string[] | null = null): PdfIndexFreshness {
+    this.ensureStore();
+    const store = this.vectorStore!;
+    const { documentCount, chunkCount } = store.getStatistics();
+    return {
+      documentCount,
+      chunkCount,
+      lastIndexedAt: store.getLastIndexedAt(),
+      rebuildDue: this.getIndexState().rebuildDue,
+      collectionDocumentIds: collectionKeys?.length
+        ? [...store.getDocumentIdsInCollections([...collectionKeys], true)].sort()
+        : null,
+    };
   }
 
   /**

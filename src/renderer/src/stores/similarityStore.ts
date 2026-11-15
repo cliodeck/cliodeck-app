@@ -84,7 +84,8 @@ interface SimilarityState {
   isPanelOpen: boolean;
 
   // Actions
-  analyze: (text: string) => Promise<void>;
+  /** Analyse `text`, le document ouvert dans `documentPath` (`null` sans nom). */
+  analyze: (text: string, documentPath: string | null) => Promise<void>;
   cancelAnalysis: () => void;
   clearResults: () => void;
   selectSegment: (segmentId: string | null) => void;
@@ -92,7 +93,11 @@ interface SimilarityState {
   togglePanel: () => void;
   openPanel: () => void;
   closePanel: () => void;
-  loadCachedResults: () => Promise<void>;
+  /**
+   * Les résultats en cache pour le document ouvert, `text` dans `documentPath` (`null` sans nom) :
+   * ils remplacent toujours la liste.
+   */
+  loadCachedResults: (text: string, documentPath: string | null) => Promise<void>;
 
   // Internal
   setProgress: (progress: AnalysisProgress) => void;
@@ -123,6 +128,30 @@ const DEFAULT_PROGRESS: AnalysisProgress = {
 /** Les analyses lancées : seule la dernière met fin à l'attente quand son projet a quitté l'écran. */
 let analyses = 0;
 
+/**
+ * Les relectures du cache, une par document affiché (S13-1-3) : seule la dernière s'inscrit, et une
+ * analyse partie avant elle n'affiche ses résultats tels quels que si ce document est le sien. Les
+ * résultats affichés d'une analyse comptent comme la dernière relecture.
+ */
+let views = 0;
+/** Le document de la dernière relecture : celui qui est ouvert. */
+let viewed: { text: string; documentPath: string | null } = { text: '', documentPath: null };
+
+/**
+ * Le document affiché est-il celui de l'analyse ? La règle du main (`getAllCachedResults`) : le
+ * texte exact, quel que soit le fichier (« Enregistrer sous »), ou le même fichier. Les deux chemins
+ * sont le `filePath` de l'éditeur, lu à deux moments : s'ils diffèrent pour un même fichier (casse),
+ * la relecture du main, qui compare par `sameFile`, tranche.
+ */
+const isViewed = (text: string, documentPath: string | null): boolean =>
+  viewed.text === text || (documentPath !== null && viewed.documentPath === documentPath);
+
+const DONE_PROGRESS: AnalysisProgress = {
+  ...DEFAULT_PROGRESS,
+  percentage: 100,
+  status: 'Analyse terminée',
+};
+
 // MARK: - Store
 
 export const useSimilarityStore = create<SimilarityState>((set, get) => ({
@@ -136,7 +165,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
   isPanelOpen: false,
 
   // Actions
-  analyze: async (text: string) => {
+  analyze: async (text: string, documentPath: string | null) => {
     logger.store('Similarity', 'Starting analysis', { textLength: text.length });
     const { options } = get();
     // L'analyse vaut pour le projet où elle est partie : ni sa progression, ni ses résultats, ni son
@@ -144,6 +173,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
     // seulement fin à l'attente, pour le projet d'avant revenu après un échec.
     const analysis = ++analyses;
     const handle = projectLifecycle.capture();
+    const view = views;
     const stale = (): boolean => {
       if (handle?.isCurrent()) return false;
       if (analysis === analyses) set({ isAnalyzing: false, progress: DEFAULT_PROGRESS });
@@ -166,7 +196,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
 
       // Call IPC
       logger.ipc('similarity.analyze', { textLength: text.length, options });
-      const result = await window.electron.similarity.analyze(text, options);
+      const result = await window.electron.similarity.analyze(text, options, documentPath);
       logger.ipc('similarity.analyze response', { success: result.success });
 
       // Remove listener
@@ -174,6 +204,20 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
       if (stale()) return;
 
       if (result.success && result.results) {
+        // Un autre document s'est ouvert pendant l'analyse : ses résultats sont ceux du texte
+        // analysé. Le cache, qu'elle vient d'écrire, est relu pour le document ouvert. Le même
+        // document relu entre-temps (panneau refermé et rouvert, aller et retour d'un chapitre à
+        // l'autre) affiche ses résultats, comme sans relecture : relire le cache ne rendait rien
+        // quand le corpus avait changé pendant l'analyse ou que le cache n'avait pas pu s'écrire,
+        // et des minutes de reclassement étaient perdues (revue de L11-2).
+        if (view !== views && !isViewed(text, documentPath)) {
+          set({ isAnalyzing: false, progress: DONE_PROGRESS });
+          void get().loadCachedResults(viewed.text, viewed.documentPath);
+          return;
+        }
+        // Une relecture encore en vol a lu le cache d'avant l'analyse : elle ne s'inscrit plus.
+        views += 1;
+
         // Convert array to Map
         const resultsMap = new Map<string, SimilarityResult>();
         for (const r of result.results) {
@@ -183,11 +227,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
         set({
           results: resultsMap,
           isAnalyzing: false,
-          progress: {
-            ...DEFAULT_PROGRESS,
-            percentage: 100,
-            status: 'Analyse terminée',
-          },
+          progress: DONE_PROGRESS,
         });
 
         logger.store('Similarity', 'Analysis complete', {
@@ -269,26 +309,28 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
     set({ isPanelOpen: false, selectedSegmentId: null });
   },
 
-  loadCachedResults: async () => {
+  loadCachedResults: async (text: string, documentPath: string | null) => {
     logger.store('Similarity', 'Loading cached results');
     const handle = projectLifecycle.capture();
+    const view = ++views;
+    viewed = { text, documentPath };
+    const resultsMap = new Map<string, SimilarityResult>();
     try {
-      const result = await window.electron.similarity.getAllResults();
-      // Le cache d'un projet qui n'est plus à l'écran : ses segments et ses clés n'ont rien à faire ici.
-      if (!handle?.isCurrent()) return;
-
+      const result = await window.electron.similarity.getAllResults(text, documentPath);
       if (result.success && result.results) {
-        const resultsMap = new Map<string, SimilarityResult>();
         for (const r of result.results) {
           resultsMap.set(r.segmentId, r);
         }
-
-        set({ results: resultsMap });
-        logger.store('Similarity', 'Cached results loaded', { segments: resultsMap.size });
       }
     } catch (error) {
       logger.error('Similarity', 'Failed to load cached results', error);
     }
+    // Le cache d'un projet qui n'est plus à l'écran : ses segments et ses clés n'ont rien à faire ici.
+    // Une relecture partie avant la dernière est celle d'un autre document.
+    if (!handle?.isCurrent() || view !== views) return;
+    // Toujours remplacée, même vide ou en échec : la liste d'un autre document ne reste pas.
+    set({ results: resultsMap });
+    logger.store('Similarity', 'Cached results loaded', { segments: resultsMap.size });
   },
 
   // Internal

@@ -21,8 +21,12 @@ import { runWithJournalContext } from '../../../../backend/core/usage-journal/co
 
 // MARK: - Validation Schemas
 
+/** Le fichier du document ouvert, `null` pour un document sans nom (S13-1-3). */
+const DocumentPathSchema = z.string().min(1).nullable().optional();
+
 export const SimilarityAnalyzeSchema = z.object({
   text: z.string().min(1, 'Text cannot be empty'),
+  documentPath: DocumentPathSchema,
   options: z
     .object({
       granularity: z.enum(['section', 'paragraph', 'sentence']).optional(),
@@ -42,7 +46,12 @@ export function setupSimilarityHandlers() {
   /**
    * Analyze a document and find similar PDFs
    */
-  ipcMain.handle('similarity:analyze', async (event, text: string, options?: Partial<SimilarityOptions>) => {
+  ipcMain.handle('similarity:analyze', async (
+    event,
+    text: string,
+    options?: Partial<SimilarityOptions>,
+    documentPath?: unknown
+  ) => {
     console.log('📞 IPC Call: similarity:analyze', {
       textLength: text?.length,
       options,
@@ -58,7 +67,7 @@ export function setupSimilarityHandlers() {
       requireProject(projectPath);
 
       // Validate input
-      const validatedData = validate(SimilarityAnalyzeSchema, { text, options });
+      const validatedData = validate(SimilarityAnalyzeSchema, { text, options, documentPath });
 
       const window = BrowserWindow.fromWebContents(event.sender);
 
@@ -91,7 +100,8 @@ export function setupSimilarityHandlers() {
             if (window) {
               window.webContents.send('similarity:progress', progress);
             }
-          }
+          },
+          validatedData.documentPath ?? null
         )
       );
 
@@ -129,19 +139,19 @@ export function setupSimilarityHandlers() {
   });
 
   /**
-   * Get results for a specific segment
+   * Les résultats en cache pour le document ouvert, son texte et son fichier : le cache n'en rend
+   * que les segments, et seulement s'il est celui de l'analyse (S13-1-3). Sans texte, rien.
    */
-  /**
-   * Get all cached results
-   */
-  ipcMain.handle('similarity:get-all-results', async () => {
+  ipcMain.handle('similarity:get-all-results', async (_event, text?: unknown, documentPath?: unknown) => {
     console.log('📞 IPC Call: similarity:get-all-results');
 
     try {
       const projectPath = projectManager.getCurrentProjectPath();
       requireProject(projectPath);
 
-      const results = await similarityService.getAllCachedResults();
+      const documentText = validate(z.string().optional(), text);
+      const openedPath = validate(DocumentPathSchema, documentPath) ?? null;
+      const results = documentText ? await similarityService.getAllCachedResults(documentText, openedPath) : [];
 
       console.log('📤 IPC Response: similarity:get-all-results', {
         segments: results.length,

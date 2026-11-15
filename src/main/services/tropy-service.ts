@@ -58,6 +58,14 @@ export interface TropySearchResult {
   error?: string;
 }
 
+/** L'état des sources primaires qui change quand leurs extraits changent (`getIndexFreshness`). */
+export interface PrimaryIndexFreshness {
+  sourceCount: number;
+  chunkCount: number;
+  lastIndexedAt: string | null;
+  lastChunkId: string | null;
+}
+
 /**
  * Pourquoi une source n'a pas été réindexée, à dire par le renderer.
  * `embedding-space-changed` : le modèle d'embeddings a changé depuis
@@ -1185,6 +1193,18 @@ class TropyService {
     }
 
     return this.vectorStore.getStatistics();
+  }
+
+  /**
+   * Pour l'empreinte du cache de similarité (S13-1-1) : la synchro réécrit la source (`indexed_at`),
+   * mais la réindexation H7 et la transcription d'une carte ne refont que ses extraits, souvent
+   * autant qu'avant. Le dernier extrait écrit le dit. `null` sans magasin.
+   */
+  getIndexFreshness(): PrimaryIndexFreshness | null {
+    const store = this.vectorStore;
+    if (!store) return null;
+    const { sourceCount, chunkCount } = store.getStatistics();
+    return { sourceCount, chunkCount, lastIndexedAt: store.getLastIndexedAt(), lastChunkId: store.getLastChunkId() };
   }
 
   /**
