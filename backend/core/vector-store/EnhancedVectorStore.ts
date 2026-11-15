@@ -3,7 +3,7 @@ import { HNSWVectorStore } from './HNSWVectorStore';
 import { EmbeddingSpaceMismatchError } from './embedding-space';
 import { BM25Index } from '../search/BM25Index';
 import { HybridSearch } from '../search/HybridSearch';
-import type { SearchResult, DocumentChunk } from '../../types/pdf-document';
+import type { SearchResult, DocumentChunk, VectorStoreStatistics } from '../../types/pdf-document';
 import type { RebuildProgressEvent } from '../../types/rebuild-progress';
 
 /**
@@ -800,8 +800,12 @@ export class EnhancedVectorStore {
     return this.vectorStore.saveTopicAnalysis(result, options);
   }
 
-  getStatistics(): any {
+  getStatistics(): VectorStoreStatistics {
     return this.vectorStore.getStatistics();
+  }
+
+  getLastIndexedAt(): string | null {
+    return this.vectorStore.getLastIndexedAt();
   }
 
   cleanOrphanedChunks(): void {

@@ -38,13 +38,19 @@ export const SimilarityPanel: React.FC = () => {
   const [showOptions, setShowOptions] = React.useState(false);
 
   // Le cache du projet ouvert : à l'ouverture du panneau, et quand l'écran passe à un autre projet,
-  // dont le registre a vidé les résultats (S18-1-25).
+  // dont le registre a vidé les résultats (S18-1-25). Et pour le document ouvert : le main n'en rend
+  // que les segments, et un autre chapitre ne montre plus ceux du précédent (S13-1-3). Le texte est
+  // celui de l'éditeur vivant : à l'ouverture d'un document, la porte retire la façade de l'ancien,
+  // et `getLiveContent` rend alors le nouveau. `getValue` plutôt que `getDocText` : les segments se
+  // comptent en lignes, les mêmes dans les deux, et le main ramène les fins de ligne à `\n`.
   const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
+  const filePath = useEditorStore((s) => s.filePath);
+  const documentVersion = useEditorStore((s) => s.documentVersion);
   useEffect(() => {
     if (isPanelOpen) {
-      loadCachedResults();
+      void loadCachedResults(useEditorStore.getState().getLiveContent());
     }
-  }, [isPanelOpen, loadCachedResults, projectPath]);
+  }, [isPanelOpen, loadCachedResults, projectPath, filePath, documentVersion]);
 
   // Don't render if panel is closed
   if (!isPanelOpen) {
@@ -53,8 +59,10 @@ export const SimilarityPanel: React.FC = () => {
 
   const handleAnalyze = async () => {
     logger.component('SimilarityPanel', 'Starting analysis');
-    if (content.trim().length > 0) {
-      analyze(content);
+    // L'éditeur vivant : le miroir `content` a jusqu'à 300 ms de retard sur la frappe.
+    const text = useEditorStore.getState().getLiveContent();
+    if (text.trim().length > 0) {
+      analyze(text);
     } else {
       await useDialogStore.getState().showAlert(t('similarity.emptyDocument'));
     }

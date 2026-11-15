@@ -129,19 +129,18 @@ export function setupSimilarityHandlers() {
   });
 
   /**
-   * Get results for a specific segment
+   * Les résultats en cache pour le texte du document ouvert : le cache n'en rend que les segments
+   * (S13-1-3). Sans texte, rien.
    */
-  /**
-   * Get all cached results
-   */
-  ipcMain.handle('similarity:get-all-results', async () => {
+  ipcMain.handle('similarity:get-all-results', async (_event, text?: unknown) => {
     console.log('📞 IPC Call: similarity:get-all-results');
 
     try {
       const projectPath = projectManager.getCurrentProjectPath();
       requireProject(projectPath);
 
-      const results = await similarityService.getAllCachedResults();
+      const documentText = validate(z.string().optional(), text);
+      const results = documentText ? await similarityService.getAllCachedResults(documentText) : [];
 
       console.log('📤 IPC Response: similarity:get-all-results', {
         segments: results.length,

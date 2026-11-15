@@ -1133,7 +1133,8 @@ const api = {
       useContextualEmbedding?: boolean;
     }) => ipcRenderer.invoke('similarity:analyze', text, options),
     cancel: () => ipcRenderer.invoke('similarity:cancel'),
-    getAllResults: () => ipcRenderer.invoke('similarity:get-all-results'),
+    /** Les résultats en cache pour ce texte, celui du document ouvert (S13-1-3). */
+    getAllResults: (text: string) => ipcRenderer.invoke('similarity:get-all-results', text),
     clearCache: () => ipcRenderer.invoke('similarity:clear-cache'),
     onProgress: (callback: (progress: {
       current: number;

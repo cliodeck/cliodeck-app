@@ -868,6 +868,17 @@ export class VectorStore {
     };
   }
 
+  /**
+   * Date d'indexation du dernier PDF indexé, `null` sur une base vide. Une réindexation remplace le
+   * document (`mergeDocumentsInto`) : le nombre de documents reste, cette date change.
+   */
+  getLastIndexedAt(): string | null {
+    const row = this.db.prepare('SELECT MAX(indexed_at) AS last FROM pdf_documents').get() as {
+      last: string | null;
+    };
+    return row.last;
+  }
+
   // MARK: - Index HNSW à reconstruire (J8)
 
   /**

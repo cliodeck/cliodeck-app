@@ -36,6 +36,14 @@ interface KnowledgeGraphOptions {
   computeLayout?: boolean;
 }
 
+/** L'état du corpus des PDF qui change quand il change (`getIndexFreshness`). */
+export interface PdfIndexFreshness {
+  documentCount: number;
+  chunkCount: number;
+  lastIndexedAt: string | null;
+  rebuildDue: boolean;
+}
+
 /** Options for topic analysis */
 interface AnalyzeTopicsOptions {
   minTopicSize?: number;
@@ -641,6 +649,23 @@ class PDFService {
   async getStatistics() {
     this.ensureStore();
     return this.vectorStore!.getStatistics();
+  }
+
+  /**
+   * Ce qui change avec le corpus des PDF, pour l'empreinte du cache de similarité (S13-1-1) : une
+   * réindexation garde le nombre de documents mais pas la date du dernier. Une reconstruction due
+   * (J8) en est aussi : l'index servi d'ici là peut manquer des extraits.
+   */
+  getIndexFreshness(): PdfIndexFreshness {
+    this.ensureStore();
+    const store = this.vectorStore!;
+    const { documentCount, chunkCount } = store.getStatistics();
+    return {
+      documentCount,
+      chunkCount,
+      lastIndexedAt: store.getLastIndexedAt(),
+      rebuildDue: this.getIndexState().rebuildDue,
+    };
   }
 
   /**

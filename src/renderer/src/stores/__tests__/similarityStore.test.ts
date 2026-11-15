@@ -95,7 +95,7 @@ describe('similarityStore — changement de projet', () => {
   it('le cache de A, lu avant le passage à B et arrivé après, ne s’inscrit pas', async () => {
     const response = held<unknown>();
     similarity.getAllResults.mockReturnValueOnce(response.promise);
-    const loading = useSimilarityStore.getState().loadCachedResults();
+    const loading = useSimilarityStore.getState().loadCachedResults('# Texte de A');
 
     switchTo('/projets/B');
     response.release({ success: true, results: [RESULT_A] });
@@ -145,8 +145,34 @@ describe('similarityStore — changement de projet', () => {
     useSimilarityStore.setState({ results: new Map() });
     similarity.getAllResults.mockResolvedValueOnce({ success: true, results: [RESULT_A] });
 
-    await useSimilarityStore.getState().loadCachedResults();
+    await useSimilarityStore.getState().loadCachedResults('La grève de 1934');
 
     expect(useSimilarityStore.getState().results.size).toBe(1);
+  });
+});
+
+describe('similarityStore — le document ouvert (S13-1-3)', () => {
+  it('deux relectures en vol : seule la dernière s’affiche, même arrivée avant l’autre', async () => {
+    useSimilarityStore.setState({ results: new Map() });
+    const chapter1 = held<unknown>();
+    const chapter2 = held<unknown>();
+    similarity.getAllResults.mockReturnValueOnce(chapter1.promise).mockReturnValueOnce(chapter2.promise);
+
+    const first = useSimilarityStore.getState().loadCachedResults('# Chapitre 1');
+    const second = useSimilarityStore.getState().loadCachedResults('# Chapitre 2');
+    chapter2.release({ success: true, results: [] });
+    await second;
+    chapter1.release({ success: true, results: [RESULT_A] });
+    await first;
+
+    expect(useSimilarityStore.getState().results.size).toBe(0);
+  });
+
+  it('une relecture qui échoue vide la liste : les résultats d’un autre document ne restent pas', async () => {
+    similarity.getAllResults.mockResolvedValueOnce({ success: false, error: 'Validation failed' });
+
+    await useSimilarityStore.getState().loadCachedResults('# Chapitre 2');
+
+    expect(useSimilarityStore.getState().results.size).toBe(0);
   });
 });

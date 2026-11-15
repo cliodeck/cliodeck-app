@@ -2159,6 +2159,27 @@ export class PrimarySourcesVectorStore {
 
   // MARK: - Statistics
 
+  /** Date de la dernière source écrite par la synchro (`saveSource`), `null` sur une base vide. */
+  getLastIndexedAt(): string | null {
+    const row = this.db.prepare('SELECT MAX(indexed_at) AS last FROM tropy_sources').get() as {
+      last: string | null;
+    };
+    return row.last;
+  }
+
+  /**
+   * L'extrait écrit le dernier, `null` sans extrait. La réindexation des extraits périmés (H7) et la
+   * transcription d'une carte refont les extraits sans toucher la ligne de la source : `indexed_at`
+   * ne bouge pas, et leur nombre souvent non plus. `MAX(rowid)` non plus quand la source réécrite est
+   * la dernière : ses nouveaux extraits reprennent les numéros libérés. Leur id, lui, est neuf.
+   */
+  getLastChunkId(): string | null {
+    const id = this.db.prepare('SELECT id FROM tropy_chunks ORDER BY rowid DESC LIMIT 1').pluck().get() as
+      | string
+      | undefined;
+    return id ?? null;
+  }
+
   /**
    * Retourne les statistiques du store
    */

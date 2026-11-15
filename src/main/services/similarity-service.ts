@@ -8,8 +8,10 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { pdfService } from './pdf-service.js';
+import { tropyService } from './tropy-service.js';
 import { projectManager } from './project-manager.js';
 import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-guard.js';
+import { assertProjectRoot } from '../../../backend/core/workspace/project-root.js';
 
 // MARK: - Types
 
@@ -109,6 +111,35 @@ export function resolveSimilarityOptions(
   return { ...DEFAULT_OPTIONS, ...options };
 }
 
+/** L'empreinte de corpus qu'on n'a pas pu lire : aucun cache ne la vaut. */
+const UNKNOWN_CORPUS = 'unknown';
+
+/** Un cache vaut 24 heures. */
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Les fins de ligne ramenées à `\n`. L'éditeur rend le texte d'un fichier CRLF avec ses `\r\n`
+ * (`getValue`), les segments se coupent sur `\n`, et l'id d'un segment est le hash de son contenu :
+ * un `\r` resté en fin de ligne le changerait selon la forme reçue. L'analyse et la relecture du
+ * cache segmentent donc le même texte.
+ */
+function toLf(text: string): string {
+  return text.replace(/\r\n/g, '\n');
+}
+
+/** Les sept options, collections triées : tout ce qui change les recommandations (S13-1-3). */
+function optionsFingerprint(options: SimilarityOptions): string {
+  return JSON.stringify([
+    options.granularity,
+    options.maxResults,
+    options.similarityThreshold,
+    options.collectionFilter ? [...options.collectionFilter].sort() : null,
+    options.useReranking,
+    options.useContextualEmbedding,
+    options.sourceType,
+  ]);
+}
+
 // MARK: - Service
 
 class SimilarityService {
@@ -134,7 +165,7 @@ class SimilarityService {
    * Analyze a document and find similar PDFs for each segment
    */
   async analyzeDocument(
-    text: string,
+    documentText: string,
     options: Partial<SimilarityOptions> = {},
     onProgress?: (progress: AnalysisProgress) => void
   ): Promise<SimilarityResult[]> {
@@ -142,6 +173,7 @@ class SimilarityService {
     if (!projectPath) {
       throw new Error('No project is currently open');
     }
+    const text = toLf(documentText);
 
     // Merge with defaults
     const opts = resolveSimilarityOptions(options);
@@ -158,7 +190,7 @@ class SimilarityService {
 
     // Compute hashes for caching
     const documentHash = this.computeHash(text);
-    const vectorStoreHash = await this.computeVectorStoreHash();
+    const vectorStoreHash = this.computeVectorStoreHash(opts.sourceType);
 
     // Try to load from cache
     const cache = await this.loadCache(projectPath);
@@ -853,6 +885,9 @@ Your ranking:`;
   async saveCache(projectPath: string, cache: SimilarityCache): Promise<void> {
     if (this.cacheLinkedOutside(projectPath)) return;
     try {
+      // Le dossier du projet a disparu pendant l'analyse (déplacé, évincé) : il n'est pas recréé
+      // pour ce seul cache (L03-3b).
+      await assertProjectRoot(projectPath);
       const cachePath = this.getCachePath(projectPath);
       const cacheDir = path.dirname(cachePath);
 
@@ -893,31 +928,34 @@ Your ranking:`;
     vectorStoreHash: string,
     options: SimilarityOptions
   ): boolean {
-    // Check document and vector store haven't changed
-    if (cache.documentHash !== documentHash || cache.vectorStoreHash !== vectorStoreHash) {
+    // Check document and vector store haven't changed. Un corpus illisible n'est jamais le même.
+    if (
+      vectorStoreHash === UNKNOWN_CORPUS ||
+      cache.documentHash !== documentHash ||
+      cache.vectorStoreHash !== vectorStoreHash
+    ) {
       console.log('💾 [SIMILARITY] Cache invalidated: content changed');
       return false;
     }
 
     // Check options match
-    if (
-      cache.options.granularity !== options.granularity ||
-      cache.options.maxResults !== options.maxResults ||
-      cache.options.similarityThreshold !== options.similarityThreshold
-    ) {
+    if (optionsFingerprint(cache.options) !== optionsFingerprint(options)) {
       console.log('💾 [SIMILARITY] Cache invalidated: options changed');
       return false;
     }
 
-    // Cache is valid for 24 hours
-    const cacheAge = Date.now() - cache.createdAt;
-    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-    if (cacheAge > maxAge) {
+    if (this.isExpired(cache)) {
       console.log('💾 [SIMILARITY] Cache invalidated: too old');
       return false;
     }
 
     return true;
+  }
+
+  /** Plus de 24 heures, ou sans date lisible. */
+  private isExpired(cache: SimilarityCache): boolean {
+    const age = Date.now() - cache.createdAt;
+    return !Number.isFinite(age) || age > CACHE_MAX_AGE_MS;
   }
 
   // MARK: - Hash Utilities
@@ -926,14 +964,22 @@ Your ranking:`;
     return crypto.createHash('md5').update(content).digest('hex').substring(0, 12);
   }
 
-  private async computeVectorStoreHash(): Promise<string> {
+  /**
+   * Empreinte des seuls corpus où cherche l'analyse (S13-1-1). Elle lisait `stats.documents` et
+   * `stats.chunks`, que `getStatistics` ne rend pas : elle ne changeait jamais, et des PDF indexés
+   * après une analyse restaient invisibles 24 h. Une reconstruction de l'index ne la change pas : les
+   * extraits et leurs vecteurs restent les mêmes. Sauf si elle était due (J8) : l'index servi avant
+   * elle pouvait en manquer, et une analyse faite alors est à refaire.
+   */
+  private computeVectorStoreHash(sourceType: SourceType): string {
     try {
-      const stats = await pdfService.getStatistics();
-      // Hash based on document count and last modification
-      const hashInput = `${stats.documents}-${stats.chunks}`;
-      return this.computeHash(hashInput);
+      const corpora = {
+        secondary: sourceType === 'primary' ? null : pdfService.getIndexFreshness(),
+        primary: sourceType === 'secondary' ? null : tropyService.getIndexFreshness(),
+      };
+      return this.computeHash(JSON.stringify(corpora));
     } catch {
-      return 'unknown';
+      return UNKNOWN_CORPUS;
     }
   }
 
@@ -955,20 +1001,34 @@ Your ranking:`;
   }
 
   /**
-   * Get all cached results
+   * Les résultats en cache pour le texte du document ouvert (S13-1-3). Le cache est unique par
+   * projet, et il était rendu quel que soit ce texte : dans un livre, les segments et les lignes de
+   * l'analyse du chapitre 3 s'affichaient sur le chapitre 5. Le texte est resegmenté comme à
+   * l'analyse, et seuls reviennent les segments qui y sont encore, à leurs lignes actuelles : un
+   * autre chapitre ne rend rien, un paragraphe retouché ne fait pas perdre les autres. Un cache trop
+   * vieux, ou fait sur un autre état des corpus, ne rend rien.
    */
-  async getAllCachedResults(): Promise<SimilarityResult[]> {
+  async getAllCachedResults(text: string): Promise<SimilarityResult[]> {
     const projectPath = projectManager.getCurrentProjectPath();
-    if (!projectPath) {
+    if (!projectPath || text.trim() === '') {
       return [];
     }
 
     const cache = await this.loadCache(projectPath);
-    if (!cache) {
+    if (!cache || this.isExpired(cache)) {
+      return [];
+    }
+    const vectorStoreHash = this.computeVectorStoreHash(cache.options.sourceType);
+    if (vectorStoreHash === UNKNOWN_CORPUS || vectorStoreHash !== cache.vectorStoreHash) {
       return [];
     }
 
-    return Object.values(cache.segments);
+    const results: SimilarityResult[] = [];
+    for (const segment of this.segmentText(toLf(text), cache.options.granularity)) {
+      const cached = cache.segments[segment.id];
+      if (cached) results.push({ ...cached, segment });
+    }
+    return results;
   }
 }
 
