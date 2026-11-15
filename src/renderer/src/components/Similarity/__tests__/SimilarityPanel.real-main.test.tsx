@@ -21,6 +21,11 @@ import path from 'path';
 const main = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   projectPath: '' as string,
+  /** Le nombre de PDF indexés : une synchronisation Zotero en ajoute pendant l'analyse. */
+  documentCount: 1,
+  /** Tant qu'elle n'est pas résolue, la recherche attend, comme un reclassement de plusieurs minutes. */
+  searchGate: null as Promise<void> | null,
+  searching: 0,
 }));
 
 vi.mock('electron', () => ({
@@ -43,16 +48,20 @@ vi.mock('../../../../../../backend/core/llm/providers/cliodeck-config-adapter.js
 vi.mock('../../../../../main/services/pdf-service.js', () => ({
   pdfService: {
     // Un seul PDF répond, à tout segment assez long pour être cherché.
-    search: async () => [
-      {
-        sourceType: 'secondary',
-        similarity: 0.5,
-        document: { id: 'pdf-berstein', title: 'Le 6 février 1934', author: 'Berstein' },
-        chunk: { content: 'Extrait', pageNumber: 12 },
-      },
-    ],
+    search: async () => {
+      main.searching += 1;
+      if (main.searchGate) await main.searchGate;
+      return [
+        {
+          sourceType: 'secondary',
+          similarity: 0.5,
+          document: { id: 'pdf-berstein', title: 'Le 6 février 1934', author: 'Berstein' },
+          chunk: { content: 'Extrait', pageNumber: 12 },
+        },
+      ];
+    },
     getIndexFreshness: () => ({
-      documentCount: 1,
+      documentCount: main.documentCount,
       chunkCount: 1,
       lastIndexedAt: '2026-11-14T09:00:00.000Z',
       rebuildDue: false,
@@ -152,6 +161,9 @@ beforeEach(() => {
   fs.writeFileSync(chapterPath(1), CHAPTER_1);
   fs.writeFileSync(chapterPath(2), CHAPTER_2);
   main.projectPath = project;
+  main.documentCount = 1;
+  main.searchGate = null;
+  main.searching = 0;
 
   originalElectron = (window as unknown as { electron?: unknown }).electron;
   similarity = {
@@ -206,4 +218,32 @@ it('le chapitre 1 analysé, le chapitre 2 ouvert panneau ouvert : l’écran vid
   await openChapter(1, CHAPTER_1);
   await waitFor(() => expect(shownSegments().length).toBeGreaterThan(0));
   expect(screen.getByText('similarity.summary')).toBeTruthy();
+});
+
+// Revue de L11-2 : le même chapitre relu pendant l'analyse. La fin de l'analyse relisait alors le
+// cache, que l'indexation d'un PDF pendant ces minutes avait rendu caduc : l'écran revenait vide,
+// avec « Analyser le document », et le reclassement était perdu.
+it('le panneau refermé et rouvert pendant l’analyse, un PDF indexé entre-temps : ses résultats s’affichent', async () => {
+  render(<SimilarityPanel />);
+  await waitFor(() => expect(similarity.getAllResults).toHaveBeenCalledTimes(1));
+
+  let open!: () => void;
+  main.searchGate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  fireEvent.click(screen.getByText('similarity.analyze'));
+  // L'empreinte du corpus est prise : la recherche du premier segment attend.
+  await waitFor(() => expect(main.searching).toBeGreaterThan(0));
+
+  act(() => useSimilarityStore.getState().closePanel());
+  act(() => useSimilarityStore.getState().openPanel());
+  await waitFor(() => expect(similarity.getAllResults).toHaveBeenCalledTimes(2));
+
+  main.documentCount = 2;
+  open();
+  await waitFor(() => expect(useSimilarityStore.getState().isAnalyzing).toBe(false));
+
+  await waitFor(() => expect(screen.getByText('similarity.summary')).toBeTruthy());
+  expect(shownSegments()).toEqual(expect.arrayContaining(['## Introduction', '## Conclusion']));
+  expect(screen.queryByText('similarity.emptyState')).toBeNull();
 });

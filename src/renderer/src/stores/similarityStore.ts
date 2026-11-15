@@ -130,11 +130,21 @@ let analyses = 0;
 
 /**
  * Les relectures du cache, une par document affiché (S13-1-3) : seule la dernière s'inscrit, et une
- * analyse partie avant elle n'affiche pas ses résultats tels quels, ceux d'un autre document.
+ * analyse partie avant elle n'affiche ses résultats tels quels que si ce document est le sien. Les
+ * résultats affichés d'une analyse comptent comme la dernière relecture.
  */
 let views = 0;
 /** Le document de la dernière relecture : celui qui est ouvert. */
 let viewed: { text: string; documentPath: string | null } = { text: '', documentPath: null };
+
+/**
+ * Le document affiché est-il celui de l'analyse ? La règle du main (`getAllCachedResults`) : le
+ * texte exact, quel que soit le fichier (« Enregistrer sous »), ou le même fichier. Les deux chemins
+ * sont le `filePath` de l'éditeur, lu à deux moments : s'ils diffèrent pour un même fichier (casse),
+ * la relecture du main, qui compare par `sameFile`, tranche.
+ */
+const isViewed = (text: string, documentPath: string | null): boolean =>
+  viewed.text === text || (documentPath !== null && viewed.documentPath === documentPath);
 
 const DONE_PROGRESS: AnalysisProgress = {
   ...DEFAULT_PROGRESS,
@@ -195,12 +205,18 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
 
       if (result.success && result.results) {
         // Un autre document s'est ouvert pendant l'analyse : ses résultats sont ceux du texte
-        // analysé. Le cache, qu'elle vient d'écrire, est relu pour le document ouvert.
-        if (view !== views) {
+        // analysé. Le cache, qu'elle vient d'écrire, est relu pour le document ouvert. Le même
+        // document relu entre-temps (panneau refermé et rouvert, aller et retour d'un chapitre à
+        // l'autre) affiche ses résultats, comme sans relecture : relire le cache ne rendait rien
+        // quand le corpus avait changé pendant l'analyse ou que le cache n'avait pas pu s'écrire,
+        // et des minutes de reclassement étaient perdues (revue de L11-2).
+        if (view !== views && !isViewed(text, documentPath)) {
           set({ isAnalyzing: false, progress: DONE_PROGRESS });
           void get().loadCachedResults(viewed.text, viewed.documentPath);
           return;
         }
+        // Une relecture encore en vol a lu le cache d'avant l'analyse : elle ne s'inscrit plus.
+        views += 1;
 
         // Convert array to Map
         const resultsMap = new Map<string, SimilarityResult>();

@@ -196,6 +196,78 @@ describe('similarityStore — le document ouvert (S13-1-3)', () => {
     expect(useSimilarityStore.getState().results.size).toBe(0);
   });
 
+  // Revue de L11-2 : le même document relu pendant l'analyse (panneau refermé et rouvert, aller et
+  // retour d'un chapitre à l'autre). Relire le cache à la fin ne rendait rien quand le corpus avait
+  // changé entre-temps, ou quand le cache n'avait pas pu s'écrire : des minutes de reclassement
+  // perdues, l'écran vide et « Analyser le document ».
+  it('le même document relu pendant l’analyse : ses résultats s’affichent, même si le cache n’en rend plus', async () => {
+    const response = held<unknown>();
+    similarity.analyze.mockReturnValueOnce(response.promise);
+    const analysing = useSimilarityStore.getState().analyze('# Chapitre 1', '/projets/A/chapters/01.md');
+    await useSimilarityStore.getState().loadCachedResults('# Chapitre 1', '/projets/A/chapters/01.md');
+    similarity.getAllResults.mockClear();
+
+    response.release({ success: true, results: [RESULT_A] });
+    await analysing;
+
+    expect(useSimilarityStore.getState().results.size).toBe(1);
+    expect(useSimilarityStore.getState().isAnalyzing).toBe(false);
+    expect(similarity.getAllResults).not.toHaveBeenCalled();
+  });
+
+  it('le même document retouché puis relu pendant l’analyse : ses résultats s’affichent', async () => {
+    const response = held<unknown>();
+    similarity.analyze.mockReturnValueOnce(response.promise);
+    const analysing = useSimilarityStore.getState().analyze('# Chapitre 1', '/projets/A/chapters/01.md');
+    await useSimilarityStore.getState().loadCachedResults('# Chapitre 1\n\nUn ajout.', '/projets/A/chapters/01.md');
+
+    response.release({ success: true, results: [RESULT_A] });
+    await analysing;
+
+    expect(useSimilarityStore.getState().results.size).toBe(1);
+  });
+
+  it('« Enregistrer sous » pendant l’analyse, même texte : ses résultats s’affichent', async () => {
+    const response = held<unknown>();
+    similarity.analyze.mockReturnValueOnce(response.promise);
+    const analysing = useSimilarityStore.getState().analyze('# Chapitre 1', '/projets/A/chapters/01.md');
+    await useSimilarityStore.getState().loadCachedResults('# Chapitre 1', '/projets/A/copie.md');
+
+    response.release({ success: true, results: [RESULT_A] });
+    await analysing;
+
+    expect(useSimilarityStore.getState().results.size).toBe(1);
+  });
+
+  it('un document sans nom relu à son texte exact pendant l’analyse : ses résultats s’affichent', async () => {
+    const response = held<unknown>();
+    similarity.analyze.mockReturnValueOnce(response.promise);
+    const analysing = useSimilarityStore.getState().analyze('Sans nom', null);
+    await useSimilarityStore.getState().loadCachedResults('Sans nom', null);
+
+    response.release({ success: true, results: [RESULT_A] });
+    await analysing;
+
+    expect(useSimilarityStore.getState().results.size).toBe(1);
+  });
+
+  it('une relecture du même document partie avant la fin de l’analyse, arrivée après : les résultats de l’analyse restent', async () => {
+    const response = held<unknown>();
+    const reread = held<unknown>();
+    similarity.analyze.mockReturnValueOnce(response.promise);
+    similarity.getAllResults.mockReturnValueOnce(reread.promise);
+    const analysing = useSimilarityStore.getState().analyze('# Chapitre 1', '/projets/A/chapters/01.md');
+    const rereading = useSimilarityStore.getState().loadCachedResults('# Chapitre 1', '/projets/A/chapters/01.md');
+
+    response.release({ success: true, results: [RESULT_A] });
+    await analysing;
+    // Lue avant que l'analyse écrive le cache : elle ne sait rien de ses résultats.
+    reread.release({ success: true, results: [] });
+    await rereading;
+
+    expect(useSimilarityStore.getState().results.size).toBe(1);
+  });
+
   it('une relecture qui échoue vide la liste : les résultats d’un autre document ne restent pas', async () => {
     similarity.getAllResults.mockResolvedValueOnce({ success: false, error: 'Validation failed' });
 
