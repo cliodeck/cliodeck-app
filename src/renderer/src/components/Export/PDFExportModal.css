@@ -36,40 +36,15 @@
   font-size: var(--font-size-lg);
 }
 
-/* .close-btn, .progress-bar et .btn-cancel sous :where(.pdf-export-modal) : propres
-   aux fenêtres d'export PDF et Word, sans changer leur spécificité. Sans portée, cette
-   feuille, chargée à la demande, retouchait ensuite les fenêtres qui portent ces
-   classes (la croix de la Méthodologie, l'« Annuler » de l'import BibTeX). */
-:where(.pdf-export-modal) .close-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  padding: var(--spacing-xs);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--transition-normal);
-}
-
-:where(.pdf-export-modal) .close-btn:hover:not(:disabled) {
-  background-color: var(--bg-card);
-  color: var(--text-primary);
-}
-
-:where(.pdf-export-modal) .close-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .pdf-export-body {
   padding: var(--spacing-lg);
   overflow-y: auto;
   flex: 1;
 }
 
-.dependency-status {
+/* Propre aux fenêtres PDF et Word, sous leur racine : les règles communes aux trois fenêtres
+   d'export sont dans ExportModal.css (J13). */
+:where(.pdf-export-modal) .dependency-status {
   display: flex;
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-lg);
@@ -78,137 +53,19 @@
   border-radius: var(--radius-sm);
 }
 
-.dependency-item {
+:where(.pdf-export-modal) .dependency-item {
   display: flex;
   align-items: center;
   gap: var(--spacing-sm);
   font-size: var(--font-size-sm);
 }
 
-.dependency-item.success {
+:where(.pdf-export-modal) .dependency-item.success {
   color: var(--color-success);
 }
 
-.dependency-item.error {
+:where(.pdf-export-modal) .dependency-item.error {
   color: var(--color-danger);
-}
-
-.form-field {
-  margin-bottom: var(--spacing-lg);
-}
-
-.form-field label {
-  display: block;
-  margin-bottom: var(--spacing-sm);
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.form-field input {
-  width: 100%;
-  padding: var(--spacing-sm) var(--spacing-md);
-  background-color: var(--bg-panel);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  font-size: var(--font-size-sm);
-}
-
-.form-field input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.form-field input:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.path-selector {
-  display: flex;
-  gap: var(--spacing-sm);
-  align-items: center;
-}
-
-.path-selector input {
-  flex: 1;
-}
-
-.path-selector button {
-  padding: var(--spacing-sm) var(--spacing-md);
-  background-color: var(--bg-input);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: var(--font-size-sm);
-  transition: all var(--transition-normal);
-}
-
-.path-selector button:hover:not(:disabled) {
-  background-color: var(--bg-card-hover);
-  border-color: var(--color-accent);
-}
-
-.path-selector button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.export-progress {
-  margin-top: var(--spacing-md);
-  padding: var(--spacing-md);
-  background-color: var(--bg-panel);
-  border-radius: var(--radius-sm);
-}
-
-.progress-bar-container {
-  width: 100%;
-  height: 8px;
-  background-color: var(--border-color);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  margin-bottom: var(--spacing-sm);
-}
-
-:where(.pdf-export-modal) .progress-bar {
-  height: 100%;
-  background-color: var(--color-accent);
-  transition: width var(--transition-slow) ease;
-}
-
-.progress-message {
-  margin: 0;
-  font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
-}
-
-.export-error {
-  margin-top: var(--spacing-md);
-  padding: var(--spacing-md);
-  background-color: var(--color-danger-bg);
-  border: 1px solid var(--color-danger);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  color: var(--color-danger);
-  font-size: var(--font-size-sm);
-  white-space: pre-wrap;
-}
-
-.export-success {
-  margin-top: var(--spacing-md);
-  padding: var(--spacing-md);
-  background-color: var(--color-success-bg);
-  border: 1px solid var(--color-success);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  color: var(--color-success);
-  font-size: var(--font-size-sm);
 }
 
 .pdf-export-footer {
@@ -232,35 +89,10 @@
   gap: var(--spacing-sm);
 }
 
-:where(.pdf-export-modal) .btn-cancel {
-  background-color: var(--bg-panel);
-  color: var(--text-secondary);
-}
-
-:where(.pdf-export-modal) .btn-cancel:hover:not(:disabled) {
-  background-color: var(--bg-card-hover);
-}
-
-.btn-export {
-  background-color: var(--color-accent);
-  color: var(--text-primary);
-  border-color: var(--color-accent);
-}
-
-.btn-export:hover:not(:disabled) {
-  background-color: var(--color-accent-hover);
-}
-
-.btn-export:disabled,
-:where(.pdf-export-modal) .btn-cancel:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 /* Encart d'information (résumé lu depuis abstract.md, syntaxe Beamer,
    modèle Word détecté). Remplace des styles en ligne dupliqués dans les
    deux modales — tokens de thème uniquement. */
-.export-hint {
+:where(.pdf-export-modal) .export-hint {
   font-size: 0.875rem;
   color: var(--text-tertiary);
   margin-bottom: 1rem;
@@ -269,10 +101,10 @@
   border-radius: 4px;
 }
 
-.export-hint code {
+:where(.pdf-export-modal) .export-hint code {
   color: var(--color-success);
 }
 
-.export-hint--success {
+:where(.pdf-export-modal) .export-hint--success {
   color: var(--color-success);
 }

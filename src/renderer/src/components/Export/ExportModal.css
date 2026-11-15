@@ -1,0 +1,186 @@
+/* Règles communes aux trois fenêtres d'export (PDF, Word, présentation), sous leur racine
+   commune `.export-modal` (J13). Jusque-là, `PDFExportModal.css` et
+   `PresentationExportModal.css`, chargées à la demande, déclaraient sans portée les mêmes
+   classes à des valeurs différentes : la feuille chargée la dernière l'emportait (message de
+   progression centré, 16 px sous la progression…), et ces règles atteignaient aussi
+   « Signaler un problème » et le formulaire de nouveau projet. Une seule allure, celle de la
+   fenêtre PDF (choix de l'auteur du 2026-11-15), plus deux règles pour les trois fenêtres : une
+   erreur garde ses retours à la ligne, « Parcourir » ne se coupe pas. `:where(…)` garde à ces
+   règles la spécificité qu'elles avaient. Ce qui est propre à une fenêtre reste dans sa feuille,
+   sous sa racine. */
+
+:where(.export-modal) .close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-normal);
+}
+
+:where(.export-modal) .close-btn:hover:not(:disabled) {
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+}
+
+:where(.export-modal) .close-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+:where(.export-modal) .form-field {
+  margin-bottom: var(--spacing-lg);
+}
+
+:where(.export-modal) .form-field label {
+  display: block;
+  margin-bottom: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* `select` : la portée d'un livre et les listes du moteur de citation, que seule la feuille du
+   panneau Projets habillait jusque-là, aux mêmes valeurs. */
+:where(.export-modal) .form-field input,
+:where(.export-modal) .form-field select {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: var(--bg-panel);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+:where(.export-modal) .form-field input:focus,
+:where(.export-modal) .form-field select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+:where(.export-modal) .form-field input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+:where(.export-modal) .path-selector {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
+
+:where(.export-modal) .path-selector input {
+  flex: 1;
+}
+
+:where(.export-modal) .path-selector button {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: var(--bg-input);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  transition: all var(--transition-normal);
+  white-space: nowrap;
+}
+
+:where(.export-modal) .path-selector button:hover:not(:disabled) {
+  background-color: var(--bg-card-hover);
+  border-color: var(--color-accent);
+}
+
+:where(.export-modal) .path-selector button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+:where(.export-modal) .export-progress {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background-color: var(--bg-panel);
+  border-radius: var(--radius-sm);
+}
+
+:where(.export-modal) .progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background-color: var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: var(--spacing-sm);
+}
+
+:where(.export-modal) .progress-bar {
+  height: 100%;
+  background-color: var(--color-accent);
+  transition: width var(--transition-slow) ease;
+}
+
+:where(.export-modal) .progress-message {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+}
+
+:where(.export-modal) .export-error {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background-color: var(--color-danger-bg);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-danger);
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+}
+
+/* Une erreur de plusieurs lignes n'écrase pas son icône. */
+:where(.export-modal) .export-error > svg {
+  flex-shrink: 0;
+}
+
+:where(.export-modal) .export-success {
+  margin-top: var(--spacing-md);
+  padding: var(--spacing-md);
+  background-color: var(--color-success-bg);
+  border: 1px solid var(--color-success);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  color: var(--color-success);
+  font-size: var(--font-size-sm);
+}
+
+:where(.export-modal) .btn-cancel {
+  background-color: var(--bg-panel);
+  color: var(--text-secondary);
+}
+
+:where(.export-modal) .btn-cancel:hover:not(:disabled) {
+  background-color: var(--bg-card-hover);
+}
+
+:where(.export-modal) .btn-export {
+  background-color: var(--color-accent);
+  color: var(--text-primary);
+  border-color: var(--color-accent);
+}
+
+:where(.export-modal) .btn-export:hover:not(:disabled) {
+  background-color: var(--color-accent-hover);
+}
+
+:where(.export-modal) .btn-export:disabled,
+:where(.export-modal) .btn-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
