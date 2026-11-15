@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs/promises';
+import { readFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import {
@@ -8,6 +9,8 @@ import {
   appendMcpAudit,
   ALLOWED_BARE_COMMANDS,
 } from '../mcp-add-guard.js';
+
+const LOCALES = path.resolve(__dirname, '../../../../../public/locales');
 
 describe('validateMcpAddRequest — command whitelist', () => {
   it('accepts whitelisted bare interpreters', () => {
@@ -89,6 +92,26 @@ describe('validateMcpAddRequest — command whitelist', () => {
   });
 });
 
+describe('the command placeholder of Settings → MCP clients', () => {
+  // It proposed `cliodeck-mcp-server`, a bare command the whitelist refuses
+  // (command_not_in_whitelist): following the example led to a refusal.
+  it.each(['fr', 'en', 'de'])('%s: every command it suggests passes the guard', (lang) => {
+    const locale = JSON.parse(
+      readFileSync(path.join(LOCALES, lang, 'common.json'), 'utf8')
+    ) as { mcp: { form: { commandPlaceholder: string } } };
+    const commands = locale.mcp.form.commandPlaceholder
+      .split(',')
+      .map((c) => c.replace(/…$/, '').trim());
+
+    expect(commands.length).toBeGreaterThan(1);
+    for (const command of commands) {
+      expect(validateMcpAddRequest({ name: 'x', transport: 'stdio', command }), command).toEqual({
+        ok: true,
+      });
+    }
+  });
+});
+
 describe('confirmMcpAdd — native dialog gate', () => {
   it('returns true only when the user clicks the non-default "Add" button', async () => {
     const showMessageBox = vi.fn().mockResolvedValue({ response: 1 });
@@ -119,6 +142,19 @@ describe('confirmMcpAdd — native dialog gate', () => {
       { dialog: { showMessageBox } }
     );
     expect(ok).toBe(false);
+  });
+
+  it('says when the process starts: now, not on every project load (A10)', async () => {
+    // No MCP client starts when a project opens (A10): the server starts when
+    // it is added, and again when the user restarts it.
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+    await confirmMcpAdd(
+      { name: 'fs', transport: 'stdio', command: 'npx' },
+      { dialog: { showMessageBox } }
+    );
+    const detail = showMessageBox.mock.calls[0][1].detail as string;
+    expect(detail).not.toMatch(/project load/i);
+    expect(detail).toMatch(/\bnow\b/);
   });
 });
 

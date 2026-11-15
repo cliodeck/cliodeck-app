@@ -8,27 +8,44 @@
  *   de fichier à nommer.
  * - Le main refuse d'écrire l'export dans un fichier Markdown (`export-output-path.ts`) : la
  *   fenêtre le dit par sa phrase, avec le nom du fichier.
+ * - Les touches de reveal.js : la lettre, puis ce qu'elle fait. Un `.replace` ne retirait que le
+ *   préfixe anglais de la traduction, d'où « S : Touche S : … » en français et « S : S-Taste: … »
+ *   en allemand (S12-2-7). Le deux-points entre les deux vient de la traduction
+ *   (`presentation.keyColon`) : écrit en dur, il imposait la typographie française à l'anglais
+ *   et à l'allemand.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 import fr from '../../../../../../public/locales/fr/common.json';
 import en from '../../../../../../public/locales/en/common.json';
 import de from '../../../../../../public/locales/de/common.json';
 
+/** La langue des rendus : fr, sauf dans les tests qui la changent. */
+const ui = vi.hoisted(() => ({ lng: 'fr' as 'fr' | 'en' | 'de' }));
+
 vi.mock('react-i18next', async () => {
   const i18next = (await import('i18next')).default;
-  const resources = (await import('../../../../../../public/locales/fr/common.json')).default;
+  const [frCommon, enCommon, deCommon] = await Promise.all([
+    import('../../../../../../public/locales/fr/common.json'),
+    import('../../../../../../public/locales/en/common.json'),
+    import('../../../../../../public/locales/de/common.json'),
+  ]);
   const instance = i18next.createInstance();
   await instance.init({
     lng: 'fr',
     ns: ['common'],
     defaultNS: 'common',
-    resources: { fr: { common: resources } },
+    resources: {
+      fr: { common: frCommon.default },
+      en: { common: enCommon.default },
+      de: { common: deCommon.default },
+    },
     interpolation: { escapeValue: false },
+    showSupportNotice: false,
   });
   return {
-    useTranslation: () => ({ t: instance.t.bind(instance), i18n: instance }),
+    useTranslation: () => ({ t: instance.getFixedT(ui.lng), i18n: instance }),
     Trans: ({ children }: { children?: unknown }) => children ?? null,
     initReactI18next: { type: '3rdParty', init: () => undefined },
   };
@@ -80,6 +97,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  ui.lng = 'fr';
   useProjectStore.setState({ currentProject: null, chapters: [] } as never);
 });
 
@@ -114,6 +132,35 @@ describe('la phrase sur le frontmatter nomme le fichier exporté', () => {
     const text = (locale as { presentation: { frontmatterPrecedence: string } }).presentation.frontmatterPrecedence;
     expect(text).toContain('{{file}}');
     expect(text).not.toContain('slides.md');
+  });
+});
+
+describe('les touches de reveal.js : la lettre, puis ce qu’elle fait, une seule fois', () => {
+  // Toute la liste, ligne des flèches comprise : le deux-points suit la typographie de la
+  // langue (espace avant en français, aucune en anglais ni en allemand), le même sur
+  // chaque ligne. Écrit en dur dans le composant, il donnait « Arrows: Navigation » puis
+  // « S : Presenter mode with notes ».
+  it.each([
+    [
+      'fr',
+      ['Flèches : Navigation', 'S : Mode présentateur avec notes', 'F : Plein écran', "ESC : Vue d'ensemble"],
+    ],
+    [
+      'de',
+      ['Pfeiltasten: Navigation', 'S: Präsentationsmodus mit Notizen', 'F: Vollbild', 'ESC: Übersicht'],
+    ],
+    ['en', ['Arrows: Navigation', 'S: Presenter mode with notes', 'F: Fullscreen', 'ESC: Overview']],
+  ] as const)('%s', (lng, expected) => {
+    ui.lng = lng;
+    openProject('presentation');
+    render(<PresentationExportModal isOpen onClose={() => undefined} />);
+
+    const controls = screen.getByText('S').closest('ul');
+    expect(controls).not.toBeNull();
+    const lines = within(controls as HTMLElement)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+    expect(lines).toEqual(expected);
   });
 });
 
