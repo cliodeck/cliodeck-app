@@ -781,7 +781,8 @@ describe('un fichier CRLF', () => {
 
       const live = editor().getLiveContent();
       noBareLf(live);
-      expect(live).toBe('Un mot[^1].\r\n\r\n[^1]: Première ligne.\r\nDeuxième ligne.\r\n');
+      // Une ligne de suite reçoit le retrait de quatre espaces de Pandoc : elle reste dans la note (S14-1-7).
+      expect(live).toBe('Un mot[^1].\r\n\r\n[^1]: Première ligne.\r\n    Deuxième ligne.\r\n');
     });
 
     it('une définition créée en fin de document, séparateur compris', async () => {
@@ -799,7 +800,7 @@ describe('un fichier CRLF', () => {
 
       const live = editor().getLiveContent();
       noBareLf(live);
-      expect(live).toBe('Un mot[^1].\r\nSuite.\r\n\r\n[^1]: Première ligne.\r\nDeuxième ligne.');
+      expect(live).toBe('Un mot[^1].\r\nSuite.\r\n\r\n[^1]: Première ligne.\r\n    Deuxième ligne.');
     });
   });
 

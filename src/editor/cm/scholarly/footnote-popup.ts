@@ -18,6 +18,29 @@ import type { ScholarlyLabels } from './types';
  * popup annule. Le popup ne touche jamais au DOM du document.
  */
 
+/**
+ * Retrait des lignes qui suivent la première dans une définition : comme chez Pandoc, un
+ * paragraphe suivant n'appartient à la note que s'il est indenté de quatre colonnes (S14-1-7).
+ * La popup montre le corps sans ce retrait et le remet à l'enregistrement : un second paragraphe
+ * tapé reste dans la note, et une note qui en a deux revient octet pour octet. Une tabulation
+ * vaut quatre colonnes : elle s'ôte, et revient en quatre espaces.
+ */
+const CONTINUATION = '    ';
+
+function bodyToPopup(body: string): string {
+  return body
+    .split('\n')
+    .map((line, i) => (i === 0 ? line : line.replace(/^(?: {0,3}\t| {1,4})/, '')))
+    .join('\n');
+}
+
+function popupToBody(text: string): string {
+  return text
+    .split(/\r\n?|\n/)
+    .map((line, i) => (i > 0 && /\S/.test(line) ? CONTINUATION + line : line))
+    .join('\n');
+}
+
 export const openFootnotePopup = StateEffect.define<{
   label: string;
   at: number;
@@ -44,7 +67,7 @@ function popupTooltip(
 
       const def = findDefinition(view.state, value.label);
       const initial = def
-        ? view.state.sliceDoc(def.contentFrom, def.contentTo)
+        ? bodyToPopup(view.state.sliceDoc(def.contentFrom, def.contentTo))
         : '';
 
       const title = document.createElement('div');
@@ -75,7 +98,7 @@ function popupTooltip(
       };
 
       const save = () => {
-        const text = textarea.value;
+        const text = popupToBody(textarea.value);
         // Relocaliser la définition au moment du save : le document a pu
         // bouger pendant que le popup était ouvert.
         const current = findDefinition(view.state, value.label);
