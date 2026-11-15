@@ -15,6 +15,7 @@
 import fs from 'fs';
 import { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../backend/core/vector-store/EnhancedVectorStore.js';
+import { SearchIndexBuildingError } from '../../../backend/core/vector-store/search-index-building.js';
 import {
   SecondaryRetriever,
   createExpandQueryFrEn,
@@ -506,6 +507,11 @@ export function withSelectedCounts<
 class RetrievalService {
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
   /**
+   * Un PDF entre-t-il dans ce magasin ? `pdfService` suit ses indexations (E3), mais il importe ce
+   * module : l'importer ici ferait un cycle. Il passe donc la question à `configure`.
+   */
+  private pdfIndexingInto: ((store: VectorStore | EnhancedVectorStore) => boolean) | null = null;
+  /**
    * Typed embedding provider (fusion 1.2b). Owned by this service: the
    * registry built in `configure()` is disposed in `clear()`. We keep the
    * registry handle so `dispose()` cascades to the underlying provider's
@@ -559,10 +565,13 @@ class RetrievalService {
   configure(deps: {
     vectorStore: VectorStore | EnhancedVectorStore;
     workspaceRoot?: string;
+    /** Vrai quand une indexation de PDF écrit dans ce magasin (E3). */
+    isIndexing?: (store: VectorStore | EnhancedVectorStore) => boolean;
   }): void {
     this.releaseStore();
     this.vectorStore = deps.vectorStore;
     this.workspaceRoot = deps.workspaceRoot ?? null;
+    this.pdfIndexingInto = deps.isIndexing ?? null;
 
     // Build the typed embedding provider from the active config. Dispose
     // any previous registry to release HTTP agents / native handles.
@@ -720,6 +729,7 @@ class RetrievalService {
   clear(): void {
     this.releaseStore();
     this.vectorStore = null;
+    this.pdfIndexingInto = null;
     void this.disposePreviousRegistry();
     // Embedding cache persists across clear() — see constructor comment.
     this.workspaceRoot = null;
@@ -1487,7 +1497,18 @@ class RetrievalService {
     // Aucun PDF indexé : rien à trouver, donc aucune variante de la question à embarquer. Lu avant
     // l'embedding : un fournisseur en panne faisait dire « Bibliographie échec » à une bibliographie
     // vide (H6). Une base qui ne se lit plus lève ici, et reste un échec.
-    if (!captured.store.hasEmbeddedChunks()) return [];
+    if (!captured.store.hasEmbeddedChunks()) {
+      // Sauf si un PDF est en train d'y entrer : la toute première indexation calcule tous ses
+      // embeddings avant d'écrire le moindre extrait (L02-7). La bibliographie n'est pas vide, elle
+      // s'indexe : « indexation en cours », pas « 0 », et le modèle ne conclut pas qu'elle se tait
+      // (E3).
+      if (this.pdfIndexingInto?.(captured.store)) {
+        throw new SearchIndexBuildingError(
+          'A PDF is being indexed: the bibliography has no searchable extract yet.'
+        );
+      }
+      return [];
+    }
     const ragConfig = configManager.getRAGConfig();
     const topK = options?.topK || ragConfig.topK;
     const threshold = options?.threshold || ragConfig.similarityThreshold;

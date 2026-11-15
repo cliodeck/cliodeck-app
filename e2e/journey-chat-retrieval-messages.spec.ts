@@ -1,5 +1,5 @@
 /**
- * Ce que le chat dit d'une recherche en panne (H6, H5).
+ * Ce que le chat dit d'une recherche en panne (H6, H5), ou d'un corpus qui s'indexe (E3).
  *
  * - Un projet sans coffre Obsidian, sans PDF ni archives, dont le modèle d'embeddings manque : chaque
  *   corpus embarquait la question avant de savoir s'il avait le moindre extrait, et le chat disait
@@ -8,6 +8,9 @@
  * - Ollama qui s'arrête pendant la réponse, ou avant la question : l'explication ne partait qu'à la
  *   fin d'une réponse, et la panne de recherche restait cachée derrière « Le modèle a échoué ». Elle
  *   est sous l'erreur du modèle, et sa bande nomme le corpus en panne (H5).
+ * - Un premier PDF qui s'indexe : ses extraits n'entrent dans la base qu'une fois tous ses embeddings
+ *   calculés, et la bibliographie, encore sans extrait, disait « 0 ». Elle dit « indexation en
+ *   cours » (E3).
  *
  * Vrai bouton, vrai canal `fusion:chat:*`, vrai fournisseur Ollama, vraie recherche, devant un faux
  * Ollama local.
@@ -16,11 +19,15 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { launchApp } from './_helpers/launch';
 import { startFakeOllama, type FakeOllama } from './_helpers/fake-ollama';
 
 const FIRST = 'Début de la réponse du modèle,';
+
+/** Le PDF versionné du test d'extraction : deux pages de texte, « Les historiens étudient… ». */
+const PDF = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'backend/core/pdf/__tests__/fixtures/extraction-fixture.pdf');
 
 interface Session {
   app: ElectronApplication;
@@ -175,5 +182,42 @@ test('Ollama arrêté avant la question, coffre indexé : la bande nomme le coff
     await expect(corpora).toContainText('Bibliographie 0');
   } finally {
     await stop(session);
+  }
+});
+
+test('premier PDF en cours d’indexation : la bibliographie dit « indexation en cours », ni « 0 » ni « échec »', async () => {
+  // Les embeddings restent sans réponse, comme un Ollama lent : l'indexation du PDF ne finit pas.
+  const session = await start({ hangEmbed: true });
+  if (!session) return;
+  const { app, window, ollama } = session;
+  const ofPdf = () => ollama.embedRequests().filter((request) => request.texts.some((text) => /historiens|seconde page/.test(text)));
+
+  try {
+    // Le canal des boutons « Indexer » de la bibliographie, sans attendre sa fin.
+    await window.evaluate((filePath) => {
+      void window.electron.pdf.index(filePath);
+    }, PDF);
+    // Extrait, découpé : ses embeddings sont partis, aucun extrait n'est encore dans la base.
+    await expect.poll(() => ofPdf().length, { timeout: 30_000 }).toBeGreaterThan(0);
+
+    const question = 'Que disent mes PDF des fichiers officiels ?';
+    await ask(window, question);
+    await expect(answer(window)).toContainText(FIRST, { timeout: 30_000 });
+
+    const band = answer(window).locator('.retrieval-warning');
+    await expect(band).toContainText('Corpus en cours d’indexation, pas encore interrogé : Bibliographie.', {
+      timeout: 15_000,
+    });
+    await expect(band).not.toContainText('échou');
+    const corpora = await perCorpus(window);
+    await expect(corpora).toContainText('Bibliographie indexation en cours');
+    await expect(corpora).not.toContainText('échec');
+    // La bibliographie n'avait encore rien à chercher : la question n'est pas embarquée.
+    expect(ollama.embedRequests().filter((request) => request.texts.some((text) => text.includes(question)))).toEqual([]);
+  } finally {
+    // Ollama d'abord : ses embeddings retenus échouent, l'indexation finit, et l'app quitte sans
+    // attendre le délai de fermeture.
+    await ollama.close();
+    await app.close();
   }
 });

@@ -88,11 +88,13 @@ describe.skipIf(!sqliteAvailable)('EnhancedVectorStore : un index qui se constru
     await expect(store.search('la grève', embeddingOf(0), 3)).resolves.not.toHaveLength(0);
   });
 
-  // La première moitié de la décision E3, réglée par L02-7 (#257) : `PDFIndexer` écrivait les
-  // extraits dans SQLite un à un, pendant les embeddings, et HNSW ne les recevait qu'à la fin. Une
-  // question posée entre-temps voyait des extraits hors d'atteinte. Depuis, SQLite les reçoit d'un
-  // bloc, et HNSW dans la foulée, sans rendre la main : aucune question ne passe entre les deux. Le
-  // test le tient ; s'il tombe, l'ajout à HNSW rend la main avant d'avoir tout ajouté.
+  // Ce que L02-7 (#257) a réglé de la première indexation : `PDFIndexer` écrivait les extraits dans
+  // SQLite un à un, pendant les embeddings, et HNSW ne les recevait qu'à la fin. Une question posée
+  // entre-temps voyait des extraits hors d'atteinte. Depuis, SQLite les reçoit d'un bloc, et HNSW
+  // dans la foulée, sans rendre la main : aucune question ne passe entre les deux. Le test le tient ;
+  // s'il tombe, l'ajout à HNSW rend la main avant d'avoir tout ajouté. Avant ce bloc, pendant les
+  // embeddings, la bibliographie n'a aucun extrait : `retrievalService` la dit alors « en
+  // indexation », d'après `pdfService` (`retrieval-first-pdf-indexing.test.ts`).
   it('première indexation d’un PDF : aucune question ne voit les extraits dans SQLite sans HNSW (L02-7)', async () => {
     const store = open();
     await store.initialize();
