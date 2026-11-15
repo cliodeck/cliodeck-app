@@ -1203,7 +1203,9 @@ class RetrievalService {
     captured: SearchCapture
   ): Promise<ReadingNoteMappedSearchResult[]> {
     const store = readingNotesIndexService.getSearchStore();
-    if (!store) return [];
+    // Aucune note indexée : rien à trouver, donc rien à embarquer. Lu avant l'embedding, sinon un
+    // fournisseur en panne ferait passer pour en échec un corpus vide (H6).
+    if (!store || !store.hasChunks()) return [];
     // Cadrage sur une sélection : aucune clé, aucune note — inutile d'embarquer.
     const scoped = options.readingNoteCitekeys ? new Set(options.readingNoteCitekeys) : null;
     if (scoped && scoped.size === 0) return [];
@@ -1288,7 +1290,9 @@ class RetrievalService {
     captured: SearchCapture
   ): Promise<VaultMappedSearchResult[]> {
     const store = this.getVaultStore();
-    if (!store) return [];
+    // Un projet sans coffre a ce magasin dès que `brain.db` existe : sans extrait, la question
+    // n'est pas embarquée, et un fournisseur en panne ne dit plus « échec » (H6).
+    if (!store || !store.hasChunks()) return [];
     const embedding = await this.getQueryEmbedding(query, captured);
     const hits = this.withoutAuthorText(
       store.search(embedding, query, options.topK),
@@ -1394,7 +1398,8 @@ class RetrievalService {
     captured: SearchCapture
   ): Promise<ManuscriptMappedSearchResult[]> {
     const store = this.getManuscriptStore();
-    if (!store) return [];
+    // Rien d'indexé : rien à embarquer (H6), comme le coffre.
+    if (!store || !store.hasChunks()) return [];
     const embedding = await this.getQueryEmbedding(query, captured);
     const hits = store.search(embedding, query, options.topK);
     const mapped = hits.map(
@@ -1468,6 +1473,10 @@ class RetrievalService {
     },
     captured: SearchCapture
   ): Promise<SearchResult[]> {
+    // Aucun PDF indexé : rien à trouver, donc aucune variante de la question à embarquer. Lu avant
+    // l'embedding : un fournisseur en panne faisait dire « Bibliographie échec » à une bibliographie
+    // vide (H6). Une base qui ne se lit plus lève ici, et reste un échec.
+    if (!captured.store.hasEmbeddedChunks()) return [];
     const ragConfig = configManager.getRAGConfig();
     const topK = options?.topK || ragConfig.topK;
     const threshold = options?.threshold || ragConfig.similarityThreshold;

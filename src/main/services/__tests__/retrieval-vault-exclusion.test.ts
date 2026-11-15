@@ -62,6 +62,7 @@ describe('RetrievalService — coffre qui contient le projet', () => {
 
   it('un extrait reading-notes/ ou document.md d’un index existant n’atteint pas le résultat', async () => {
     vi.spyOn(internals, 'getVaultStore').mockReturnValue({
+      hasChunks: () => true,
       search: () => [
         vaultHit('these/reading-notes/Braudel_1949.md', vault),
         vaultHit('these/document.md', vault),
@@ -86,6 +87,7 @@ describe('RetrievalService — coffre qui contient le projet', () => {
       JSON.stringify({ schema_version: 2, vault: { path: vault } })
     );
     vi.spyOn(internals, 'getVaultStore').mockReturnValue({
+      hasChunks: () => true,
       search: () => [
         vaultHit('these/reading-notes/Braudel_1949.md', ancien),
         vaultHit('these/document.md', ancien),
@@ -110,6 +112,7 @@ describe('RetrievalService — coffre qui contient le projet', () => {
       JSON.stringify({ schema_version: 2, vault: { path: ancien } })
     );
     vi.spyOn(internals, 'getVaultStore').mockReturnValue({
+      hasChunks: () => true,
       search: () => [
         vaultHit('these/reading-notes/Braudel_1949.md', ancien),
         vaultHit('these/document.md', ancien),
@@ -129,6 +132,7 @@ describe('RetrievalService — coffre qui contient le projet', () => {
     const other = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-autre-coffre-'));
     try {
       vi.spyOn(internals, 'getVaultStore').mockReturnValue({
+        hasChunks: () => true,
         search: () => [vaultHit('reading-notes/a.md', other), vaultHit('document.md', other)],
       });
       const { hits } = await retrievalService.search({ query: 'q', sourceType: 'vault' });

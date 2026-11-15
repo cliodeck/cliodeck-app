@@ -107,6 +107,7 @@ describe('RetrievalService — contrat de pertinence des corpus', () => {
       [0.4, 0.39, 0.38, 0.37, 0.36].map((s, i) => secondaryHit(`pdf-${i}`, s))
     );
     vi.spyOn(internals, 'getVaultStore').mockReturnValue({
+      hasChunks: () => true,
       search: () => [vaultHit('vichy', { dense: 0.55, lexical: 3, lexicalRank: 2 })],
     });
 
@@ -123,6 +124,7 @@ describe('RetrievalService — contrat de pertinence des corpus', () => {
 
   it('une note trouvée seulement par mot-clé reçoit la pertinence de son rang', async () => {
     vi.spyOn(internals, 'getVaultStore').mockReturnValue({
+      hasChunks: () => true,
       search: () => [vaultHit('kaqg', { dense: 0.02, lexical: 5, lexicalRank: 1 })],
     });
 
@@ -134,6 +136,7 @@ describe('RetrievalService — contrat de pertinence des corpus', () => {
 
   it('le vault se tait quand aucune note ne franchit le seuil (pas de repli)', async () => {
     vi.spyOn(internals, 'getVaultStore').mockReturnValue({
+      hasChunks: () => true,
       search: () => [
         vaultHit('bruit-1', { dense: 0.05, lexical: 0, lexicalRank: null }),
         vaultHit('bruit-2', { dense: 0.04, lexical: 0, lexicalRank: null }),
@@ -155,6 +158,7 @@ describe('RetrievalService — contrat de pertinence des corpus', () => {
       [0.5, 0.45, 0.4, 0.35, 0.3].map((s, i) => secondaryHit(`pdf-${i}`, s))
     );
     vi.spyOn(internals, 'getManuscriptStore').mockReturnValue({
+      hasChunks: () => true,
       search: () => [manuscriptHit('hors-sujet', { dense: 0.03, lexical: 0, lexicalRank: null })],
     });
 
@@ -170,6 +174,7 @@ describe('RetrievalService — contrat de pertinence des corpus', () => {
 
   it('un passage du manuscrit trouvé par mot-clé garde sa place', async () => {
     vi.spyOn(internals, 'getManuscriptStore').mockReturnValue({
+      hasChunks: () => true,
       search: () => [manuscriptHit('passage', { dense: 0, lexical: 4, lexicalRank: 1 })],
     });
 
@@ -187,6 +192,7 @@ describe('RetrievalService — contrat de pertinence des corpus', () => {
       [0.5, 0.45, 0.4, 0.35, 0.3].map((s, i) => secondaryHit(`pdf-${i}`, s))
     );
     vi.spyOn(readingNotesIndexService, 'getSearchStore').mockReturnValue({
+      hasChunks: () => true,
       search: () => [
         readingNoteHit('longue-duree', { dense: 0.2, lexical: 4, lexicalRank: 1 }),
         readingNoteHit('hors-sujet', { dense: 0.03, lexical: 0, lexicalRank: null }),

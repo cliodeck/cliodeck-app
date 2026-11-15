@@ -20,6 +20,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { sqliteAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
+import type { EnhancedVectorStore } from '../../../../backend/core/vector-store/EnhancedVectorStore.js';
 
 const state = vi.hoisted(() => ({ sent: [] as string[] }));
 
@@ -87,6 +88,7 @@ const { pdfService } = await import('../pdf-service.js');
 const { retrievalService } = await import('../retrieval-service.js');
 const { usageJournalService } = await import('../usage-journal-service.js');
 const { PdfVectorStore } = await import('../pdf/PdfVectorStore.js');
+const { seedPdf } = await import('./helpers/seed-corpora.js');
 const { ACADEMIC_TERMS_FR_TO_EN } = await import(
   '../../../../backend/core/rag/retrievers/secondary-retriever.js'
 );
@@ -131,6 +133,8 @@ describe.skipIf(!sqliteAvailable)('ouvrir un projet, au journal d’usage (J11)'
     expect(state.sent.filter((text) => DICTIONARY.includes(text))).toEqual([]);
     expect(journalEvents().filter((e) => e.kind === 'embedding')).toEqual([]);
 
+    // Un PDF indexé : une bibliographie vide n'embarque pas la question (H6).
+    await seedPdf(pdfService.getVectorStore() as EnhancedVectorStore, project, 8);
     await retrievalService.search({ query: 'Les grèves des dockers de Nantes en 1955', sourceType: 'secondary' });
 
     expect(journalEvents().map((e) => [e.kind, e.chunkCount, e.status])).toEqual([['embedding', 1, 'ok']]);

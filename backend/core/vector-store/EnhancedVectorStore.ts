@@ -800,6 +800,11 @@ export class EnhancedVectorStore {
     return this.vectorStore.saveTopicAnalysis(result, options);
   }
 
+  /** Au moins un extrait embarqué dans SQLite (cf. `VectorStore.hasEmbeddedChunks`). */
+  hasEmbeddedChunks(): boolean {
+    return this.vectorStore.hasEmbeddedChunks();
+  }
+
   getStatistics(): VectorStoreStatistics {
     return this.vectorStore.getStatistics();
   }

@@ -869,6 +869,17 @@ export class VectorStore {
   }
 
   /**
+   * Au moins un extrait embarqué. Pour la recherche, qui le lit à chaque question avant d'embarquer
+   * celle-ci (H6) : une première ligne trouvée, quand `getStatistics` compte toute la table trois fois.
+   */
+  hasEmbeddedChunks(): boolean {
+    return (
+      this.db.prepare('SELECT 1 FROM pdf_chunks WHERE embedding IS NOT NULL LIMIT 1').get() !==
+      undefined
+    );
+  }
+
+  /**
    * Date d'indexation du dernier PDF indexé, `null` sur une base vide. Une réindexation remplace le
    * document (`mergeDocumentsInto`) : le nombre de documents reste, cette date change.
    */

@@ -291,6 +291,15 @@ export class ObsidianVaultStore {
     return row.n === 3;
   }
 
+  /**
+   * Au moins un extrait, lu par la recherche avant d'embarquer la question (H6) : un projet sans
+   * coffre a ce magasin dès que `brain.db` existe. Tables effacées par « Détacher » : aucun extrait.
+   */
+  hasChunks(): boolean {
+    if (!this.hasSchema()) return false;
+    return this.db.prepare('SELECT 1 FROM obsidian_chunks LIMIT 1').get() !== undefined;
+  }
+
   stats(): { noteCount: number; chunkCount: number } {
     const n = this.db.prepare('SELECT COUNT(*) AS c FROM obsidian_notes').get() as {
       c: number;

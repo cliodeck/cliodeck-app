@@ -10,7 +10,9 @@
  * Vrai `retrievalService`, vrai `EnhancedVectorStore` sur un vrai projet vide,
  * vrais magasins du coffre, du manuscrit et des notes de lecture sur le même
  * `brain.db` ; seuls les fournisseurs (embeddings, modèle) sont simulés. Le
- * témoin : des embeddings qui lèvent restent un échec.
+ * témoin : des embeddings qui lèvent restent un échec, pour une bibliographie
+ * qui a des extraits. Vide, elle n'embarque plus la question (H6,
+ * `retrieval-empty-no-embedding.test.ts`).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
@@ -60,6 +62,7 @@ import { manuscriptIndexService } from '../manuscript-index-service.js';
 import { readingNotesIndexService } from '../reading-notes-index-service.js';
 import { ObsidianVaultStore } from '../../../../backend/integrations/obsidian/ObsidianVaultStore.js';
 import { ManuscriptStore } from '../../../../backend/core/vector-store/ManuscriptStore.js';
+import { seedPdf } from './helpers/seed-corpora.js';
 
 let project = '';
 let store: EnhancedVectorStore | null = null;
@@ -137,6 +140,7 @@ describe.skipIf(!sqliteAvailable)('un corpus vide n’est pas un corpus en éche
   });
 
   it('témoin : des embeddings qui lèvent restent un échec de la bibliographie', async () => {
+    await seedPdf(store as EnhancedVectorStore, project);
     state.embedFails = true;
     const map = await outcomeOf({ query: question(), sourceType: 'secondary' });
     expect(map.secondary).toMatchObject({ attempted: true, ok: false });

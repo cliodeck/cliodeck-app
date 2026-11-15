@@ -227,7 +227,12 @@ export class ReadingNotesIndexService {
     previous.close();
   }
 
-  private getStore(): ReadingNotesStore | null {
+  /**
+   * `rethrow` : la recherche veut l'échec d'un magasin qui ne s'ouvre pas (base abîmée, verrou), pour
+   * dire le corpus en échec ; rendre `null` le faisait passer pour vide, « Notes de lecture 0 »
+   * (S04-1-3, H6). Rien n'est gardé de l'échec : l'appel suivant réessaie.
+   */
+  private getStore(rethrow = false): ReadingNotesStore | null {
     if (!this.workspaceRoot) return null;
     if (this.store) return this.store;
     // `.cliodeck` lié hors du projet (D18) : la base est celle d'un autre, rien ne s'y écrit.
@@ -241,6 +246,7 @@ export class ReadingNotesIndexService {
       return this.store;
     } catch (e) {
       console.warn('[reading-notes-index] cannot open store:', e);
+      if (rethrow) throw e;
       return null;
     }
   }
@@ -561,9 +567,12 @@ export class ReadingNotesIndexService {
     return this.getStore()?.stats() ?? null;
   }
 
-  /** Le store à interroger, ou `null` si le corpus est désactivé ou sans projet. */
+  /**
+   * Le store à interroger, ou `null` si le corpus est désactivé ou sans projet. Un store qui ne
+   * s'ouvre pas lève : le corpus est en échec, pas vide.
+   */
   getSearchStore(): ReadingNotesStore | null {
-    return this.isEnabled() ? this.getStore() : null;
+    return this.isEnabled() ? this.getStore(true) : null;
   }
 
   /** Les vecteurs d'une note, ou ce qui a empêché le fournisseur de les rendre. */

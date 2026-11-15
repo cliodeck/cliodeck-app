@@ -270,6 +270,11 @@ export class ManuscriptStore {
     return rows.map(rowToChapter);
   }
 
+  /** Au moins un extrait, lu par la recherche avant d'embarquer la question (H6). */
+  hasChunks(): boolean {
+    return this.db.prepare('SELECT 1 FROM manuscript_chunks LIMIT 1').get() !== undefined;
+  }
+
   stats(): {
     chapterCount: number;
     chunkCount: number;
