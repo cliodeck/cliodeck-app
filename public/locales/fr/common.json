@@ -1567,7 +1567,7 @@
   },
   "vault": {
     "title": "Vault Obsidian",
-    "hint": "Liez un vault Obsidian — un dossier de notes Markdown — pour que le chat Brainstorm puisse citer vos notes en plus de votre bibliographie. Les notes sont indexées localement, dans .cliodeck/obsidian-vectors.db.",
+    "hint": "Liez un vault Obsidian — un dossier de notes Markdown — pour que le chat Brainstorm puisse citer vos notes en plus de votre bibliographie. Les notes sont indexées localement, dans .cliodeck/brain.db.",
     "errors": {
       "noFusionApi": "Fusion API non exposée par le preload.",
       "noProject": "Ouvrez un projet pour configurer le vault.",
@@ -1685,7 +1685,7 @@
   },
   "mcp": {
     "title": "Clients MCP",
-    "hint": "Serveurs MCP (Model Context Protocol) externes consommés par ClioDeck. Transport stdio (processus local) ou sse (HTTP SSE distant). L'utilisation des outils MCP depuis le chat Brainstorm (tool-use) arrive dans une vague suivante — pour l'instant cette section sert à configurer les clients et vérifier que leurs outils s'exposent correctement.",
+    "hint": "Serveurs MCP (Model Context Protocol) externes consommés par ClioDeck. Transport stdio (processus local) ou sse (HTTP SSE distant). Quand le modèle du chat sait appeler des outils, les outils des serveurs à l'état « ready » lui sont proposés : il peut les appeler en leur transmettant des éléments de la conversation. Par défaut, les outils que leur nom désigne comme de lecture (search_…, get_…, list_…) sont activés ; les autres (écriture, réseau) s'activent à la demande, dans la ligne « outils MCP actifs », au-dessus du chat. N'ajoutez qu'un serveur auquel vous faites confiance.",
     "errors": {
       "noFusionApi": "Fusion API non exposée.",
       "listFailed": "Liste indisponible.",
@@ -1707,7 +1707,7 @@
       "transportStdio": "stdio (processus local)",
       "transportSse": "sse (HTTP SSE distant)",
       "command": "Commande",
-      "commandPlaceholder": "/usr/bin/python, npx, cliodeck-mcp-server…",
+      "commandPlaceholder": "npx, uvx, /chemin/absolu/vers/commande",
       "args": "Arguments (séparés par espaces)",
       "argsPlaceholder": "--stdio --workspace /path/to/ws",
       "url": "URL",

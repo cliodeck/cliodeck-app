@@ -1567,7 +1567,7 @@
   },
   "vault": {
     "title": "Obsidian Vault",
-    "hint": "Link an Obsidian vault — a folder of Markdown notes — so the Brainstorm chat can cite your notes alongside your bibliography. Notes are indexed locally, in .cliodeck/obsidian-vectors.db.",
+    "hint": "Link an Obsidian vault — a folder of Markdown notes — so the Brainstorm chat can cite your notes alongside your bibliography. Notes are indexed locally, in .cliodeck/brain.db.",
     "errors": {
       "noFusionApi": "Fusion API not exposed by the preload.",
       "noProject": "Open a project to configure the vault.",
@@ -1685,7 +1685,7 @@
   },
   "mcp": {
     "title": "MCP Clients",
-    "hint": "External MCP (Model Context Protocol) servers consumed by ClioDeck. Transport stdio (local process) or sse (remote HTTP SSE). Using MCP tools from the Brainstorm chat (tool-use) is coming in a later wave — for now this section is for configuring clients and verifying that their tools expose correctly.",
+    "hint": "External MCP (Model Context Protocol) servers consumed by ClioDeck. Transport stdio (local process) or sse (remote HTTP SSE). When the chat model can call tools, the tools of servers in the “ready” state are offered to it: it may call them and pass them parts of the conversation. By default, tools whose name marks them as reads (search_…, get_…, list_…) are enabled; the others (write, network) are enabled on request, in the “MCP tools active” line above the chat. Only add a server you trust.",
     "errors": {
       "noFusionApi": "Fusion API not exposed.",
       "listFailed": "List unavailable.",
@@ -1707,7 +1707,7 @@
       "transportStdio": "stdio (local process)",
       "transportSse": "sse (remote HTTP SSE)",
       "command": "Command",
-      "commandPlaceholder": "/usr/bin/python, npx, cliodeck-mcp-server…",
+      "commandPlaceholder": "npx, uvx, /absolute/path/to/command",
       "args": "Arguments (space-separated)",
       "argsPlaceholder": "--stdio --workspace /path/to/ws",
       "url": "URL",

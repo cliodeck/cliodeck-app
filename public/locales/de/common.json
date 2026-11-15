@@ -1567,7 +1567,7 @@
   },
   "vault": {
     "title": "Obsidian-Vault",
-    "hint": "Verknüpfen Sie einen Obsidian-Vault — einen Ordner mit Markdown-Notizen —, damit der Brainstorm-Chat neben Ihrer Bibliographie auch Ihre Notizen zitieren kann. Die Notizen werden lokal indexiert, in .cliodeck/obsidian-vectors.db.",
+    "hint": "Verknüpfen Sie einen Obsidian-Vault — einen Ordner mit Markdown-Notizen —, damit der Brainstorm-Chat neben Ihrer Bibliographie auch Ihre Notizen zitieren kann. Die Notizen werden lokal indexiert, in .cliodeck/brain.db.",
     "errors": {
       "noFusionApi": "Fusion-API nicht durch das Preload-Skript exponiert.",
       "noProject": "Öffnen Sie ein Projekt, um den Vault zu konfigurieren.",
@@ -1685,7 +1685,7 @@
   },
   "mcp": {
     "title": "MCP-Clients",
-    "hint": "Externe MCP-Server (Model Context Protocol), die ClioDeck konsumiert. Transport stdio (lokaler Prozess) oder sse (entfernter HTTP-SSE). Die Verwendung von MCP-Tools aus dem Brainstorm-Chat (Tool-Use) folgt in einer späteren Welle — derzeit dient dieser Bereich der Konfiguration der Clients und der Überprüfung, dass deren Tools korrekt exponiert werden.",
+    "hint": "Externe MCP-Server (Model Context Protocol), die ClioDeck konsumiert. Transport stdio (lokaler Prozess) oder sse (entfernter HTTP-SSE). Wenn das Chat-Modell Tools aufrufen kann, werden ihm die Tools der Server im Zustand „ready“ angeboten: Es kann sie aufrufen und ihnen dabei Teile der Unterhaltung übergeben. Standardmäßig sind die Tools aktiviert, die ihr Name als lesend ausweist (search_…, get_…, list_…); die übrigen (schreibend, Netzwerk) werden auf Wunsch in der Zeile „MCP-Tools aktiv“ über dem Chat aktiviert. Fügen Sie nur Server hinzu, denen Sie vertrauen.",
     "errors": {
       "noFusionApi": "Fusion-API nicht exponiert.",
       "listFailed": "Liste nicht verfügbar.",
@@ -1707,7 +1707,7 @@
       "transportStdio": "stdio (lokaler Prozess)",
       "transportSse": "sse (entfernter HTTP-SSE)",
       "command": "Befehl",
-      "commandPlaceholder": "/usr/bin/python, npx, cliodeck-mcp-server…",
+      "commandPlaceholder": "npx, uvx, /absoluter/pfad/zum/befehl",
       "args": "Argumente (durch Leerzeichen getrennt)",
       "argsPlaceholder": "--stdio --workspace /path/to/ws",
       "url": "URL",

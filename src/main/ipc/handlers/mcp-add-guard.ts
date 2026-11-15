@@ -134,7 +134,7 @@ export async function confirmMcpAdd(
     message: `Add MCP server "${req.name}"?`,
     detail:
       detail +
-      '\n\nThis will spawn a local process with the above command on every project load. Only confirm if you trust this source.',
+      '\n\nThis will spawn a local process with the above command now, and again whenever you restart this server. Only confirm if you trust this source.',
   });
   return res.response === 1;
 }
