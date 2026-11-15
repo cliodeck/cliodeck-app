@@ -91,6 +91,30 @@ describe('chunkPreview — le passage, sans l’en-tête', () => {
     expect(Math.max(...sectors)).toBeLessThan(40);
   });
 
+  // Deuxième revue de L11-3 : un champ de l'en-tête peut finir par un point (une initiale, un titre
+  // fini par un point). Le mot qui suit prenait la prime « début de phrase », et la fenêtre de
+  // l'en-tête battait celle du milieu. Cette prime ne vaut qu'à moins d'une fenêtre de la fenêtre
+  // la plus centrée.
+  it.each([
+    ['un auteur avec une initiale', 'Titre: Télégrammes du préfet\n\nAuteur: Chiappe, J.\n'],
+    ['un titre fini par un point', 'Titre: Rapport sur les grèves.\n\n'],
+  ])('un champ de l’en-tête fini par un point (%s) : la fenêtre du milieu', (_name, header) => {
+    const content =
+      '[Doc: Télégrammes du préfet]\n\n' +
+      header +
+      'Date: 1934-02-06\nArchive: AN F7 13305\n\n' +
+      Array.from({ length: 60 }, (_, n) => `ARRIVEE TROUPES SECTEUR ${n} CALME SIGNALE PREFET STOP`).join(' ');
+
+    const preview = chunkPreview(content, 'Was the strike widespread?');
+
+    expect(preview).not.toContain('Date:');
+    expect(preview).not.toContain('Archive:');
+    const sectors = [...preview.matchAll(/SECTEUR (\d+)/g)].map((m) => Number(m[1]));
+    expect(sectors.length).toBeGreaterThan(0);
+    expect(Math.min(...sectors)).toBeGreaterThan(20);
+    expect(Math.max(...sectors)).toBeLessThan(40);
+  });
+
   it('sans en-tête (source primaire) : le texte tel quel', () => {
     expect(chunkPreview('Titre: Rapport du préfet\nArchive: AN F7', 'préfet')).toBe(
       'Titre: Rapport du préfet Archive: AN F7'

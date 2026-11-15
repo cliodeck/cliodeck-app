@@ -11,9 +11,11 @@
  * L'aperçu est donc une fenêtre d'environ 35 mots prise dans le texte de l'extrait : celle qui
  * contient le plus de mots différents de la requête (`tokenize`, mots vides écartés, accents
  * repliés). À égalité, et quand la requête n'a aucun mot dans l'extrait (une requête dans une
- * autre langue), la fenêtre qui commence une phrase, hors du premier mot, puis la plus proche du
- * milieu : le milieu d'un extrait d'environ 1 800 caractères tombe hors de l'en-tête et du
- * recouvrement. Si les mots de la requête sont dans le recouvrement, la fenêtre peut y tomber : ce
+ * autre langue), la fenêtre qui commence une phrase, hors du premier mot et à moins d'une fenêtre
+ * de la plus centrée, puis la plus proche du milieu : le milieu d'un extrait d'environ 1 800
+ * caractères tombe hors de l'en-tête et du recouvrement. Plus loin, un « début de phrase » n'est
+ * souvent que le champ suivant d'un en-tête de source primaire fini par un point (« Auteur:
+ * Chiappe, J. »). Si les mots de la requête sont dans le recouvrement, la fenêtre peut y tomber : ce
  * texte fait partie de l'extrait embarqué.
  */
 import { stripChunkHeader } from './chunk-text';
@@ -64,7 +66,7 @@ export function chunkPreview(content: string, query: string, maxChars = PREVIEW_
   // et le nombre de termes différents de la requête qu'elle contient.
   const center = text.length / 2;
   const counts = new Map<string, number>();
-  let best = { first: 0, end: 1, distinct: -1, startsSentence: false, offCenter: Infinity };
+  const windows: Window[] = [];
   let end = 0;
   for (let first = 0; first < words.length; first++) {
     if (end <= first) {
@@ -73,32 +75,51 @@ export function chunkPreview(content: string, query: string, maxChars = PREVIEW_
     }
     while (end < words.length && words[end].end - words[first].start <= maxChars) add(words[end++], counts);
 
-    const candidate = {
+    const middle = (words[first].start + words[end - 1].end) / 2;
+    windows.push({
       first,
       end,
       distinct: counts.size,
       startsSentence: words[first].startsSentence,
-      offCenter: Math.abs((words[first].start + words[end - 1].end) / 2 - center),
-    };
-    if (isBetter(candidate, best)) best = candidate;
+      middle,
+      offCenter: Math.abs(middle - center),
+    });
     remove(words[first], counts);
   }
 
+  const best = pickWindow(windows, maxChars);
   const preview = text.slice(words[best.first].start, words[best.end - 1].end);
   return `${best.first > 0 ? '… ' : ''}${preview}${best.end < words.length ? ' …' : ''}`;
 }
 
 interface Window {
+  /** Le premier mot de la fenêtre, et celui qui la suit. */
+  first: number;
+  end: number;
+  /** Les termes différents de la requête qu'elle contient. */
   distinct: number;
   startsSentence: boolean;
+  middle: number;
   offCenter: number;
 }
 
-/** Plus de termes de la requête ; à égalité, le début d'une phrase ; puis le plus près du milieu. */
-function isBetter(a: Window, b: Window): boolean {
-  if (a.distinct !== b.distinct) return a.distinct > b.distinct;
-  if (a.startsSentence !== b.startsSentence) return a.startsSentence;
-  return a.offCenter < b.offCenter;
+/**
+ * Les fenêtres qui portent le plus de termes de la requête ; parmi elles, celle qui commence une
+ * phrase à moins de `reach` caractères de la plus centrée ; puis la plus proche du milieu. La
+ * distance se mesure à la plus centrée de ces fenêtres, pas au milieu de l'extrait : quand les mots
+ * de la requête sont loin du milieu, la phrase qui les porte garde sa prime.
+ */
+function pickWindow(windows: readonly Window[], reach: number): Window {
+  const top = windows.reduce((max, w) => Math.max(max, w.distinct), 0);
+  const tied = windows.filter((w) => w.distinct === top);
+  const centered = closestToCenter(tied);
+  const aligned = tied.filter((w) => w.startsSentence && Math.abs(w.middle - centered.middle) <= reach);
+  return closestToCenter(aligned.length > 0 ? aligned : tied);
+}
+
+/** La fenêtre la plus proche du milieu ; à égalité, la première. */
+function closestToCenter(windows: readonly Window[]): Window {
+  return windows.reduce((best, w) => (w.offCenter < best.offCenter ? w : best));
 }
 
 function add(word: Word, counts: Map<string, number>): void {

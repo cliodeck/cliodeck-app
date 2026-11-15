@@ -222,10 +222,32 @@ const BEFORE_CAPITAL_ABBREVIATIONS: ReadonlySet<string> = new Set(['etc', 'usw',
  * phrase possibles : en allemand, tout nom prend une capitale, et un ordinal devant un nom
  * (« der 2. Weltkrieg ») s'écrit comme une phrase qui finit sur un nombre (« … auf Seite 12. Kriege
  * brachen aus. »).
+ *
+ * « Jh. » et « Jahrhundert » ne s'écrivent qu'en allemand : ils suffisent (« Ende 19. Jh. »). Un
+ * mois, non : « April », « August », « September » et « November » sont aussi anglais, et « Mai »
+ * ouvre une phrase française (« … p. 45. Mai 68 marque une rupture. »). Devant un mois, le nombre
+ * n'est un ordinal qu'après une préposition ou un article allemands (« am 9. November », « seit
+ * dem 1. Mai », « Berlin, den 9. November ») ; ailleurs, il finit la phrase.
  */
 const ORDINAL_NUMBER = /^\d{1,2}$/;
-const GERMAN_DATE_AHEAD =
-  /^\s+(?:Januar|Jänner|Februar|Feber|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember|Jh\.|Jahrhunderts?)(?=[\s,.;:)\]]|$)/u;
+const GERMAN_CENTURY_AHEAD = /^\s+(?:Jh\.|Jahrhunderts?)(?=[\s,.;:)\]]|$)/u;
+const GERMAN_MONTH_AHEAD =
+  /^\s+(?:Januar|Jänner|Februar|Feber|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)(?=[\s,.;:)\]]|$)/u;
+const GERMAN_DATE_LEADS: ReadonlySet<string> = new Set([
+  'am', 'im', 'vom', 'zum', 'bis', 'seit', 'ab', 'den', 'dem', 'des', 'der',
+]);
+
+/** Le dernier mot entier d'un texte, suivi d'un blanc : celui qui précède le nombre. */
+const LEAD_WORD = /(?<![\p{L}\p{N}])(\p{L}+)\s+$/u;
+
+/** Vrai si le nombre qui finit en `dot` est un ordinal allemand de date ou de siècle. */
+function isGermanOrdinal(text: string, dot: number, word: string, ahead: string): boolean {
+  if (GERMAN_CENTURY_AHEAD.test(ahead)) return true;
+  if (!GERMAN_MONTH_AHEAD.test(ahead)) return false;
+  const start = dot - word.length;
+  const lead = LEAD_WORD.exec(text.slice(Math.max(0, start - 16), start))?.[1]?.toLowerCase();
+  return lead !== undefined && GERMAN_DATE_LEADS.has(lead);
+}
 
 /** Le mot qui précède un point : ce qui suit le dernier blanc ou la dernière ouverture (« ( », « « »…). */
 const WORD_BEFORE = /[^\s«"“‘([]*$/u;
@@ -248,7 +270,7 @@ function isAbbreviationDot(text: string, dot: number): boolean {
     return NUMBER_AHEAD.test(ahead) || ((lower === 'p' || lower === 'pp') && LOWER_ROMAN_AHEAD.test(ahead));
   }
   if (BEFORE_CAPITAL_ABBREVIATIONS.has(lower)) return !/^\s+\p{Lu}/u.test(ahead);
-  if (ORDINAL_NUMBER.test(word)) return GERMAN_DATE_AHEAD.test(ahead);
+  if (ORDINAL_NUMBER.test(word)) return isGermanOrdinal(text, dot, word, ahead);
 
   // « z. B. » : au premier point, la lettre qui suit ; au second, celle qui précède.
   const next = /^\s(\p{L})\./u.exec(ahead)?.[1]?.toLowerCase();

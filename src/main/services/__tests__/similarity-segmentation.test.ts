@@ -176,7 +176,45 @@ describe('découpage en phrases — allemand', () => {
       'Im 18. Jahrhundert wuchs die Stadt.',
       'Sie wurde reich.',
     ]],
+    ['« seit dem 1. Mai »', 'Seit dem 1. Mai wird gestreikt. Die Lage ist ernst.', [
+      'Seit dem 1. Mai wird gestreikt.',
+      'Die Lage ist ernst.',
+    ]],
+    ['« Berlin, den 9. November »', 'Berlin, den 9. November 1989. Lieber Freund, die Mauer ist offen.', [
+      'Berlin, den 9. November 1989.',
+      'Lieber Freund, die Mauer ist offen.',
+    ]],
+    ['« Ende 19. Jh. » : le siècle, sans article', 'Gegen Ende 19. Jh. entstand die Bewegung. Sie wuchs schnell.', [
+      'Gegen Ende 19. Jh. entstand die Bewegung.',
+      'Sie wuchs schnell.',
+    ]],
   ])('un ordinal de date ou de siècle ne coupe pas : %s', (_name, text, expected) => {
+    expect(contents(text)).toEqual(expected);
+  });
+
+  // Deuxième revue de L11-3 : « April », « August », « September », « November » s'écrivent aussi
+  // en anglais, et « Mai » ouvre une phrase française (« Mai 68 »). Un mois ne fait un ordinal du
+  // nombre qui le précède qu'après une préposition ou un article allemands (« am », « vom »,
+  // « den »…), comme sur `main` ailleurs.
+  it.each([
+    ['un renvoi de page, puis « Mai 68 »', 'Voir Dupont, op. cit., p. 45. Mai 68 marque une rupture.', [
+      'Voir Dupont, op. cit., p. 45.',
+      'Mai 68 marque une rupture.',
+    ]],
+    ['un renvoi de page, puis « August 1914 »', 'See Smith, p. 12. August 1914 marked a turning point.', [
+      'See Smith, p. 12.',
+      'August 1914 marked a turning point.',
+    ]],
+    ['un résultat de vote, puis « November »', 'The vote was 52 to 48. November elections followed soon after.', [
+      'The vote was 52 to 48.',
+      'November elections followed soon after.',
+    ]],
+    ['un âge, puis « Mai 68 »', 'Il avait 20. Mai 68 arriva ensuite.', ['Il avait 20.', 'Mai 68 arriva ensuite.']],
+    ['« S. 12. », puis « Juli 1914 », en allemand', 'Siehe Müller, S. 12. Juli 1914 brachte die Krise.', [
+      'Siehe Müller, S. 12.',
+      'Juli 1914 brachte die Krise.',
+    ]],
+  ])('un nombre qui finit une phrase devant un mois, sans préposition allemande, coupe : %s', (_name, text, expected) => {
     expect(contents(text)).toEqual(expected);
   });
 
