@@ -1192,6 +1192,7 @@
     "controlS": "Presenter mode with notes",
     "controlF": "Fullscreen",
     "controlESC": "Overview",
+    "keyColon": ": ",
     "presentationTitle": "Presentation title",
     "titlePlaceholder": "My presentation",
     "author": "Author (optional)",

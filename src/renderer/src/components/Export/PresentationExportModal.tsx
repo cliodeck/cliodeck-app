@@ -233,11 +233,13 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
             <Lightbulb size={14} /> {t('presentation.info')}
             <br /><br />
             <strong>{t('presentation.controls')}</strong>
+            {/* Le deux-points vient de la traduction : « S : … » en français, « S: … » en
+                anglais et en allemand, comme la ligne des flèches. */}
             <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
               <li>{t('presentation.controlArrows')}</li>
-              <li><code style={{ color: 'var(--color-success)' }}>S</code> : {t('presentation.controlS')}</li>
-              <li><code style={{ color: 'var(--color-success)' }}>F</code> : {t('presentation.controlF')}</li>
-              <li><code style={{ color: 'var(--color-success)' }}>ESC</code> : {t('presentation.controlESC')}</li>
+              <li><code style={{ color: 'var(--color-success)' }}>S</code>{t('presentation.keyColon')}{t('presentation.controlS')}</li>
+              <li><code style={{ color: 'var(--color-success)' }}>F</code>{t('presentation.keyColon')}{t('presentation.controlF')}</li>
+              <li><code style={{ color: 'var(--color-success)' }}>ESC</code>{t('presentation.keyColon')}{t('presentation.controlESC')}</li>
             </ul>
           </div>
 

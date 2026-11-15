@@ -10,10 +10,12 @@
  *   fenêtre le dit par sa phrase, avec le nom du fichier.
  * - Les touches de reveal.js : la lettre, puis ce qu'elle fait. Un `.replace` ne retirait que le
  *   préfixe anglais de la traduction, d'où « S : Touche S : … » en français et « S : S-Taste: … »
- *   en allemand (S12-2-7).
+ *   en allemand (S12-2-7). Le deux-points entre les deux vient de la traduction
+ *   (`presentation.keyColon`) : écrit en dur, il imposait la typographie française à l'anglais
+ *   et à l'allemand.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { DEFAULT_BOOK_SETTINGS } from '@backend/types/book';
 import fr from '../../../../../../public/locales/fr/common.json';
 import en from '../../../../../../public/locales/en/common.json';
@@ -134,20 +136,31 @@ describe('la phrase sur le frontmatter nomme le fichier exporté', () => {
 });
 
 describe('les touches de reveal.js : la lettre, puis ce qu’elle fait, une seule fois', () => {
+  // Toute la liste, ligne des flèches comprise : le deux-points suit la typographie de la
+  // langue (espace avant en français, aucune en anglais ni en allemand), le même sur
+  // chaque ligne. Écrit en dur dans le composant, il donnait « Arrows: Navigation » puis
+  // « S : Presenter mode with notes ».
   it.each([
-    ['fr', ['S : Mode présentateur avec notes', 'F : Plein écran', "ESC : Vue d'ensemble"]],
-    ['de', ['S : Präsentationsmodus mit Notizen', 'F : Vollbild', 'ESC : Übersicht']],
-    ['en', ['S : Presenter mode with notes', 'F : Fullscreen', 'ESC : Overview']],
+    [
+      'fr',
+      ['Flèches : Navigation', 'S : Mode présentateur avec notes', 'F : Plein écran', "ESC : Vue d'ensemble"],
+    ],
+    [
+      'de',
+      ['Pfeiltasten: Navigation', 'S: Präsentationsmodus mit Notizen', 'F: Vollbild', 'ESC: Übersicht'],
+    ],
+    ['en', ['Arrows: Navigation', 'S: Presenter mode with notes', 'F: Fullscreen', 'ESC: Overview']],
   ] as const)('%s', (lng, expected) => {
     ui.lng = lng;
     openProject('presentation');
     render(<PresentationExportModal isOpen onClose={() => undefined} />);
 
-    const keyLines = screen
+    const controls = screen.getByText('S').closest('ul');
+    expect(controls).not.toBeNull();
+    const lines = within(controls as HTMLElement)
       .getAllByRole('listitem')
-      .filter((item) => item.querySelector('code') !== null)
       .map((item) => item.textContent);
-    expect(keyLines).toEqual(expected);
+    expect(lines).toEqual(expected);
   });
 });
 

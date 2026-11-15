@@ -1192,6 +1192,7 @@
     "controlS": "Mode présentateur avec notes",
     "controlF": "Plein écran",
     "controlESC": "Vue d'ensemble",
+    "keyColon": " : ",
     "presentationTitle": "Titre de la présentation",
     "titlePlaceholder": "Ma présentation",
     "author": "Auteur (optionnel)",
