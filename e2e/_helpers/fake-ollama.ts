@@ -62,6 +62,9 @@ const OTHER_EMBEDDING_DIMENSION = 1024;
  *
  * `hangEmbed` : `/api/embed` ne répond jamais, comme un modèle d'embeddings qui se charge sans fin ;
  * seule l'app peut couper la demande (J9). Sans l'option, il répond tout de suite, comme avant.
+ *
+ * `embedError` : `/api/embed` répond 404 avec ce message, comme Ollama pour un modèle d'embeddings
+ * absent ; le chat, lui, répond (H6). Les textes demandés restent comptés (`embeddedTexts`).
  */
 export async function startFakeOllama(
   answer: string,
@@ -73,6 +76,7 @@ export async function startFakeOllama(
     doneReason?: 'stop' | 'length';
     chatError?: string;
     hangEmbed?: boolean;
+    embedError?: string;
   } = {},
 ): Promise<FakeOllama> {
   const MODEL = 'faux:latest';
@@ -107,6 +111,10 @@ export async function startFakeOllama(
           const count = Array.isArray(input) ? input.length : 1;
           const texts = (Array.isArray(input) ? input : [input]).map(String);
           embedded.set(model ?? '', [...(embedded.get(model ?? '') ?? []), ...texts]);
+          if (options.embedError !== undefined) {
+            res.statusCode = 404;
+            return json({ error: options.embedError });
+          }
           if (options.hangEmbed) {
             const request = { texts, aborted: false };
             embedRequests.push(request);
