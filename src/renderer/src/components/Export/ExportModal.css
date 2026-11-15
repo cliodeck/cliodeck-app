@@ -58,6 +58,12 @@
   font-size: var(--font-size-sm);
 }
 
+/* Les listes gardent les marges que leur donnait la feuille du panneau Projets : les mêmes en
+   densité confortable, 4 px sur les côtés au lieu de 2 en densité compacte. */
+:where(.export-modal) .form-field select {
+  padding: var(--item-padding-vertical) var(--item-padding-horizontal);
+}
+
 :where(.export-modal) .form-field input:focus,
 :where(.export-modal) .form-field select:focus {
   outline: none;
