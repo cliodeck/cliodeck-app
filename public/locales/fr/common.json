@@ -943,6 +943,7 @@
     "emptyCorpus": "Corpus vide",
     "indexDocuments": "Indexez au moins 2 documents PDF pour visualiser le graphe de connaissances.",
     "resetFilters": "Réinitialiser filtres",
+    "noDocumentMatchesFilters": "Aucun document ne correspond aux filtres.",
     "topic": "Topic:",
     "allTopics": "Tous",
     "statistics": "Statistiques",

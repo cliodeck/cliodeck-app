@@ -57,7 +57,9 @@ export const CorpusExplorerPanel: React.FC = () => {
     );
   }
 
-  if (!data.statistics || !data.graphData || data.graphData.nodes.length === 0) {
+  // Le corpus lui-même, pas le graphe filtré : une combinaison de filtres sans document garde le
+  // panneau et ses filtres (S18-1-6).
+  if (!data.statistics || !data.graphData || !data.fullGraphData || data.fullGraphData.nodes.length === 0) {
     return (
       <div className="corpus-explorer-panel">
         <div className="corpus-empty">
@@ -230,19 +232,28 @@ export const CorpusExplorerPanel: React.FC = () => {
 
       {/* Knowledge Graph */}
       <CollapsibleSection title={t('corpus.knowledgeGraph')} defaultExpanded={true}>
-        <CorpusGraphSection
-          graphData={data.graphData}
-          graphRef={data.graphRef as React.MutableRefObject<unknown>}
-          selectedNode={data.selectedNode}
-          setSelectedNode={data.setSelectedNode}
-          graphSimilarityThreshold={data.graphSimilarityThreshold}
-          setGraphSimilarityThreshold={data.setGraphSimilarityThreshold}
-          includeAuthorNodes={data.includeAuthorNodes}
-          setIncludeAuthorNodes={data.setIncludeAuthorNodes}
-          regeneratingGraph={data.regeneratingGraph}
-          onRegenerateGraph={() => data.regenerateGraph(t)}
-          onExportGEXF={() => data.fullGraphData && exportGraphAsGEXF(data.fullGraphData)}
-        />
+        {data.graphData.nodes.length === 0 ? (
+          <div className="corpus-no-match">
+            <p>{t('corpus.noDocumentMatchesFilters')}</p>
+            <button onClick={data.clearFilters} className="clear-filters-btn">
+              {t('corpus.resetFilters')}
+            </button>
+          </div>
+        ) : (
+          <CorpusGraphSection
+            graphData={data.graphData}
+            graphRef={data.graphRef as React.MutableRefObject<unknown>}
+            selectedNode={data.selectedNode}
+            setSelectedNode={data.setSelectedNode}
+            graphSimilarityThreshold={data.graphSimilarityThreshold}
+            setGraphSimilarityThreshold={data.setGraphSimilarityThreshold}
+            includeAuthorNodes={data.includeAuthorNodes}
+            setIncludeAuthorNodes={data.setIncludeAuthorNodes}
+            regeneratingGraph={data.regeneratingGraph}
+            onRegenerateGraph={() => data.regenerateGraph(t)}
+            onExportGEXF={() => data.fullGraphData && exportGraphAsGEXF(data.fullGraphData)}
+          />
+        )}
       </CollapsibleSection>
 
       {/* Graph info footer */}

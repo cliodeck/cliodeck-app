@@ -1,4 +1,5 @@
 import type { GraphData, GraphNode, TopicAnalysisResult } from './corpus-types';
+import { edgeEndpointId } from './corpus-filters';
 
 function downloadBlob(content: string, filename: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -154,8 +155,8 @@ export function exportGraphAsGEXF(fullGraphData: GraphData): void {
 
   gexf += `    <edges>\n`;
   fullGraphData.edges.forEach((edge, index) => {
-    const sourceId = typeof edge.source === 'object' ? (edge.source as unknown as GraphNode).id : edge.source;
-    const targetId = typeof edge.target === 'object' ? (edge.target as unknown as GraphNode).id : edge.target;
+    const sourceId = edgeEndpointId(edge.source);
+    const targetId = edgeEndpointId(edge.target);
     gexf += `      <edge id="${index}" source="${sourceId}" target="${targetId}">\n`;
     gexf += `        <attvalues>\n`;
     gexf += `          <attvalue for="0" value="${edge.type}"/>\n`;

@@ -943,6 +943,7 @@
     "emptyCorpus": "Leerer Korpus",
     "indexDocuments": "Indexieren Sie mindestens 2 PDF-Dokumente, um den Wissensgraphen zu visualisieren.",
     "resetFilters": "Filter zurücksetzen",
+    "noDocumentMatchesFilters": "Kein Dokument entspricht den Filtern.",
     "topic": "Thema:",
     "allTopics": "Alle",
     "statistics": "Statistiken",

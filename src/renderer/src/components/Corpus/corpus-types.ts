@@ -15,8 +15,10 @@ export interface GraphNode {
 }
 
 export interface GraphEdge {
-  source: string;
-  target: string;
+  // Des identifiants à la réception ; d3-force les remplace en place par les nœuds dès que le graphe
+  // s'affiche. Lire par `edgeEndpointId` (corpus-filters.ts).
+  source: string | GraphNode;
+  target: string | GraphNode;
   type: 'citation' | 'similarity' | 'co-citation';
   weight: number;
   metadata?: {
@@ -28,6 +30,14 @@ export interface GraphEdge {
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+}
+
+/** Les filtres de l'explorateur ; `null` : pas de filtre. */
+export interface CorpusFilters {
+  year: number | null;
+  author: string | null;
+  language: string | null;
+  topic: number | null;
 }
 
 export interface CorpusStatistics {

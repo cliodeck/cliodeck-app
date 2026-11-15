@@ -943,6 +943,7 @@
     "emptyCorpus": "Empty corpus",
     "indexDocuments": "Index at least 2 PDF documents to visualize the knowledge graph.",
     "resetFilters": "Reset filters",
+    "noDocumentMatchesFilters": "No document matches the filters.",
     "topic": "Topic:",
     "allTopics": "All",
     "statistics": "Statistics",
