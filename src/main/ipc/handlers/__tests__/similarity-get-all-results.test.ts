@@ -1,9 +1,11 @@
 /**
- * `similarity:get-all-results` reçoit le texte du document ouvert (S13-1-3).
+ * `similarity:get-all-results` reçoit le document ouvert, son texte et son fichier (S13-1-3).
  *
  * Le canal ne prenait rien, et rendait l'analyse du dernier texte analysé à chaque ouverture du
  * panneau : dans un livre, les segments du chapitre 1 sur le chapitre 2. Il reçoit maintenant le
- * texte, et ne rend que ses segments ; sans texte, rien.
+ * texte, et ne rend que ses segments ; sans texte, rien. Et le fichier, que `similarity:analyze`
+ * reçoit aussi : deux chapitres partagent leurs intertitres, segments identiques, et seul le
+ * chapitre analysé retrouve les siens.
  *
  * Vrais handlers, vrai service, vrai fichier de cache dans un projet temporaire. La recherche et
  * l'état des corpus sont simulés.
@@ -40,7 +42,13 @@ vi.mock('../../../services/pdf-service.js', () => ({
     search: async () => [
       { sourceType: 'secondary', similarity: 0.5, document: { id: 'pdf-a', title: 'A' }, chunk: { content: 'Extrait' } },
     ],
-    getIndexFreshness: () => ({ documentCount: 1, chunkCount: 1, lastIndexedAt: '2026-11-14T09:00:00.000Z', rebuildDue: false }),
+    getIndexFreshness: () => ({
+      documentCount: 1,
+      chunkCount: 1,
+      lastIndexedAt: '2026-11-14T09:00:00.000Z',
+      rebuildDue: false,
+      collectionDocumentIds: null,
+    }),
   },
 }));
 vi.mock('../../../services/tropy-service.js', () => ({ tropyService: { getIndexFreshness: () => null } }));
@@ -51,6 +59,11 @@ setupSimilarityHandlers();
 
 const CHAPTER_1 = '# Chapitre 1\n\nLe préfet Chiappe est muté au Maroc en février 1934.';
 const CHAPTER_2 = '# Chapitre 2\n\nLe Front populaire gagne les élections de mai 1936.';
+/** Deux chapitres, une même introduction et une même conclusion. */
+const WITH_HEADINGS_1 = `## Introduction\n\n${CHAPTER_1}\n\n* * *\n\n## Conclusion`;
+const WITH_HEADINGS_2 = `## Introduction\n\n${CHAPTER_2}\n\n* * *\n\n## Conclusion`;
+
+const chapter = (n: number) => path.join(h.projectPath, 'chapters', `0${n}.md`);
 
 type Response = { success: boolean; results?: Array<{ segmentId: string }>; error?: string };
 
@@ -73,14 +86,32 @@ afterEach(() => {
 
 describe('similarity:get-all-results', () => {
   it('ne rend que les segments du texte reçu', async () => {
-    const analysed = await invoke('similarity:analyze', CHAPTER_1, { useReranking: false });
+    const analysed = await invoke('similarity:analyze', CHAPTER_1, { useReranking: false }, chapter(1));
     expect(analysed.success).toBe(true);
 
-    const same = await invoke('similarity:get-all-results', CHAPTER_1);
-    const other = await invoke('similarity:get-all-results', CHAPTER_2);
+    const same = await invoke('similarity:get-all-results', CHAPTER_1, chapter(1));
+    const other = await invoke('similarity:get-all-results', CHAPTER_2, chapter(2));
 
     expect(same.results?.map((r) => r.segmentId)).toEqual(analysed.results?.map((r) => r.segmentId));
     expect(other).toEqual({ success: true, results: [] });
+  });
+
+  it('deux chapitres aux mêmes intertitres : le chapitre analysé retrouve les siens, l’autre rien', async () => {
+    const analysed = await invoke('similarity:analyze', WITH_HEADINGS_1, { useReranking: false }, chapter(1));
+    expect(analysed.success).toBe(true);
+    const edited = `${WITH_HEADINGS_1}\n\nUn paragraphe ajouté depuis l’analyse, pas encore cherché.`;
+
+    const same = await invoke('similarity:get-all-results', edited, chapter(1));
+    const other = await invoke('similarity:get-all-results', WITH_HEADINGS_2, chapter(2));
+
+    // Le chapitre retouché garde toute son analyse, intertitres compris ; l'autre n'en a rien.
+    expect(same.results?.map((r) => r.segmentId)).toEqual(analysed.results?.map((r) => r.segmentId));
+    expect(other).toEqual({ success: true, results: [] });
+  });
+
+  it('un fichier qui n’est pas une chaîne : refusé', async () => {
+    const response = await invoke('similarity:get-all-results', CHAPTER_1, 42);
+    expect(response.success).toBe(false);
   });
 
   it('sans texte : une liste vide', async () => {

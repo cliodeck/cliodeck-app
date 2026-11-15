@@ -84,7 +84,8 @@ interface SimilarityState {
   isPanelOpen: boolean;
 
   // Actions
-  analyze: (text: string) => Promise<void>;
+  /** Analyse `text`, le document ouvert dans `documentPath` (`null` sans nom). */
+  analyze: (text: string, documentPath: string | null) => Promise<void>;
   cancelAnalysis: () => void;
   clearResults: () => void;
   selectSegment: (segmentId: string | null) => void;
@@ -92,8 +93,11 @@ interface SimilarityState {
   togglePanel: () => void;
   openPanel: () => void;
   closePanel: () => void;
-  /** Les résultats en cache pour `text`, le texte du document ouvert : ils remplacent toujours la liste. */
-  loadCachedResults: (text: string) => Promise<void>;
+  /**
+   * Les résultats en cache pour le document ouvert, `text` dans `documentPath` (`null` sans nom) :
+   * ils remplacent toujours la liste.
+   */
+  loadCachedResults: (text: string, documentPath: string | null) => Promise<void>;
 
   // Internal
   setProgress: (progress: AnalysisProgress) => void;
@@ -129,8 +133,8 @@ let analyses = 0;
  * analyse partie avant elle n'affiche pas ses résultats tels quels, ceux d'un autre document.
  */
 let views = 0;
-/** Le texte de la dernière relecture : celui du document ouvert. */
-let viewedText = '';
+/** Le document de la dernière relecture : celui qui est ouvert. */
+let viewed: { text: string; documentPath: string | null } = { text: '', documentPath: null };
 
 const DONE_PROGRESS: AnalysisProgress = {
   ...DEFAULT_PROGRESS,
@@ -151,7 +155,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
   isPanelOpen: false,
 
   // Actions
-  analyze: async (text: string) => {
+  analyze: async (text: string, documentPath: string | null) => {
     logger.store('Similarity', 'Starting analysis', { textLength: text.length });
     const { options } = get();
     // L'analyse vaut pour le projet où elle est partie : ni sa progression, ni ses résultats, ni son
@@ -182,7 +186,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
 
       // Call IPC
       logger.ipc('similarity.analyze', { textLength: text.length, options });
-      const result = await window.electron.similarity.analyze(text, options);
+      const result = await window.electron.similarity.analyze(text, options, documentPath);
       logger.ipc('similarity.analyze response', { success: result.success });
 
       // Remove listener
@@ -194,7 +198,7 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
         // analysé. Le cache, qu'elle vient d'écrire, est relu pour le document ouvert.
         if (view !== views) {
           set({ isAnalyzing: false, progress: DONE_PROGRESS });
-          void get().loadCachedResults(viewedText);
+          void get().loadCachedResults(viewed.text, viewed.documentPath);
           return;
         }
 
@@ -289,14 +293,14 @@ export const useSimilarityStore = create<SimilarityState>((set, get) => ({
     set({ isPanelOpen: false, selectedSegmentId: null });
   },
 
-  loadCachedResults: async (text: string) => {
+  loadCachedResults: async (text: string, documentPath: string | null) => {
     logger.store('Similarity', 'Loading cached results');
     const handle = projectLifecycle.capture();
     const view = ++views;
-    viewedText = text;
+    viewed = { text, documentPath };
     const resultsMap = new Map<string, SimilarityResult>();
     try {
-      const result = await window.electron.similarity.getAllResults(text);
+      const result = await window.electron.similarity.getAllResults(text, documentPath);
       if (result.success && result.results) {
         for (const r of result.results) {
           resultsMap.set(r.segmentId, r);

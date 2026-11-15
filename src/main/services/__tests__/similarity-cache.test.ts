@@ -8,6 +8,14 @@
  * chaque ouverture du panneau, rendait l'analyse du dernier texte analysé, quel que soit le document
  * ouvert : dans un livre, les segments et les lignes du chapitre 3 sur le chapitre 5.
  *
+ * La relecture gardait tout segment dont le contenu figurait dans le cache : deux chapitres ont
+ * presque toujours des intertitres en commun (« ## Introduction », « ## Conclusion », un astérisme),
+ * et le chapitre jamais analysé s'affichait « 2 segments analysés, 0 recommandations », ou avec les
+ * recommandations cherchées pour l'autre chapitre. Le cache est donc lié au document analysé.
+ *
+ * Avec un filtre de collections, l'empreinte ne voyait pas une appartenance changée par une
+ * synchronisation Zotero, qui ne réindexe rien.
+ *
  * Vrai service, vrai fichier de cache dans un projet temporaire. La recherche et l'état des corpus
  * sont simulés : ce qui compte ici, c'est quand le service cherche de nouveau, et ce qu'il rend.
  */
@@ -33,6 +41,8 @@ interface PrimaryCorpus {
 const h = vi.hoisted(() => ({
   projectPath: null as string | null,
   pdf: null as unknown as PdfCorpus,
+  /** Les documents de chaque collection Zotero, sous-collections comprises. */
+  members: {} as Record<string, string[]>,
   primary: null as PrimaryCorpus | null,
   /** Le magasin des PDF n'est pas ouvert : ses lectures lèvent, comme `ensureStore`. */
   unreadable: false,
@@ -52,9 +62,13 @@ vi.mock('../pdf-service.js', () => {
         const { documentCount, chunkCount } = h.pdf;
         return { documentCount, chunkCount, embeddingCount: chunkCount, databasePath: '/brain.db' };
       },
-      getIndexFreshness: () => {
+      // Comme le vrai : avec un filtre, les documents qu'il retient (`getDocumentIdsInCollections`).
+      getIndexFreshness: (collectionKeys?: readonly string[] | null) => {
         readable();
-        return { ...h.pdf };
+        const collectionDocumentIds = collectionKeys?.length
+          ? [...new Set(collectionKeys.flatMap((key) => h.members[key] ?? []))].sort()
+          : null;
+        return { ...h.pdf, collectionDocumentIds };
       },
     },
   };
@@ -94,7 +108,46 @@ const CHAPTER_2 = [
   'Les grèves de juin occupent les usines dans une atmosphère de fête.',
 ].join('\n');
 
+/** Deux chapitres d'un livre : chacun son introduction, sa conclusion, son astérisme. */
+const SHARED_1 = [
+  '# Chapitre 1 : Le 6 février',
+  '',
+  '## Introduction',
+  '',
+  'Le préfet Chiappe est muté au Maroc en février 1934, et la rue gronde.',
+  '',
+  '## Sources et méthode de l’enquête',
+  '',
+  'Les rapports de police de la série F7 couvrent la nuit du 6 au 7 février.',
+  '',
+  '* * *',
+  '',
+  '## Conclusion',
+  '',
+  'La commission d’enquête siège tout le printemps sans rien conclure.',
+].join('\n');
+
+const SHARED_2 = [
+  '# Chapitre 2 : Le Front populaire',
+  '',
+  '## Introduction',
+  '',
+  'Le Front populaire gagne les élections de mai 1936 contre toute attente.',
+  '',
+  '## Sources et méthode de l’enquête',
+  '',
+  'Les archives syndicales racontent les occupations d’usines de juin.',
+  '',
+  '* * *',
+  '',
+  '## Conclusion',
+  '',
+  'Les grèves de juin occupent les usines dans une atmosphère de fête.',
+].join('\n');
+
 let project = '';
+/** Les fichiers des chapitres, dans le projet. */
+const chapter = (n: number) => path.join(project, 'chapters', `0${n}.md`);
 
 const hit = (id: string) => ({
   sourceType: 'secondary',
@@ -103,15 +156,23 @@ const hit = (id: string) => ({
   chunk: { content: `Extrait ${id}`, pageNumber: 1 },
 });
 
-const analyze = (text: string, options: Partial<SimilarityOptions> = {}) =>
-  similarityService.analyzeDocument(text, { ...BASE, ...options });
+const analyze = (text: string, options: Partial<SimilarityOptions> = {}, documentPath: string | null = chapter(1)) =>
+  similarityService.analyzeDocument(text, { ...BASE, ...options }, undefined, documentPath);
+
+/** La relecture du panneau, pour le document ouvert (le chapitre 1 sauf mention). */
+const reread = (text: string, documentPath: string | null = chapter(1)) =>
+  similarityService.getAllCachedResults(text, documentPath);
 
 const cachePath = () => path.join(project, '.cliodeck', 'similarity_cache.json');
 
 beforeEach(() => {
   project = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-similarite-cache-'));
   fs.mkdirSync(path.join(project, '.cliodeck'));
+  fs.mkdirSync(path.join(project, 'chapters'));
+  fs.writeFileSync(chapter(1), CHAPTER_1);
+  fs.writeFileSync(chapter(2), CHAPTER_2);
   h.projectPath = project;
+  h.members = {};
   h.pdf = { documentCount: 1, chunkCount: 4, lastIndexedAt: '2026-11-14T09:00:00.000Z', rebuildDue: false };
   h.primary = { sourceCount: 2, chunkCount: 6, lastIndexedAt: '2026-11-10T08:00:00.000Z', lastChunkId: 'c-6' };
   h.unreadable = false;
@@ -197,29 +258,29 @@ describe('cache de similarité — les options', () => {
 describe('cache de similarité — ce que rend la relecture, pour le document ouvert', () => {
   it('un autre chapitre : rien', async () => {
     await analyze(CHAPTER_1);
-    expect(await similarityService.getAllCachedResults(CHAPTER_2)).toEqual([]);
+    expect(await reread(CHAPTER_2, chapter(2))).toEqual([]);
   });
 
   it('le même chapitre : toute son analyse', async () => {
     const analysed = await analyze(CHAPTER_1);
-    expect(await similarityService.getAllCachedResults(CHAPTER_1)).toEqual(analysed);
+    expect(await reread(CHAPTER_1)).toEqual(analysed);
   });
 
   it('un paragraphe retouché et une ligne ajoutée en tête : les autres restent, à leurs lignes actuelles', async () => {
     const analysed = await analyze(CHAPTER_1);
     const edited = ['Une phrase ajoutée en tête.', '', CHAPTER_1.replace('sans rien conclure', 'et conclut')].join('\n');
 
-    const reread = await similarityService.getAllCachedResults(edited);
+    const found = await reread(edited);
 
     const kept = analysed.filter((r) => !r.segment.content.includes('commission'));
-    expect(reread.map((r) => r.segmentId)).toEqual(kept.map((r) => r.segmentId));
-    expect(reread.map((r) => r.segment.startLine)).toEqual(kept.map((r) => r.segment.startLine + 2));
+    expect(found.map((r) => r.segmentId)).toEqual(kept.map((r) => r.segmentId));
+    expect(found.map((r) => r.segment.startLine)).toEqual(kept.map((r) => r.segment.startLine + 2));
   });
 
   it('le corpus a changé depuis l’analyse : rien', async () => {
     await analyze(CHAPTER_1);
     h.pdf = { ...h.pdf, documentCount: 2 };
-    expect(await similarityService.getAllCachedResults(CHAPTER_1)).toEqual([]);
+    expect(await reread(CHAPTER_1)).toEqual([]);
   });
 
   it('une analyse de plus de 24 h : rien', async () => {
@@ -227,12 +288,12 @@ describe('cache de similarité — ce que rend la relecture, pour le document ou
     const cache = JSON.parse(fs.readFileSync(cachePath(), 'utf8'));
     cache.createdAt = Date.now() - 25 * 60 * 60 * 1000;
     fs.writeFileSync(cachePath(), JSON.stringify(cache));
-    expect(await similarityService.getAllCachedResults(CHAPTER_1)).toEqual([]);
+    expect(await reread(CHAPTER_1)).toEqual([]);
   });
 
   it('sans texte : rien', async () => {
     await analyze(CHAPTER_1);
-    expect(await similarityService.getAllCachedResults('')).toEqual([]);
+    expect(await reread('')).toEqual([]);
   });
 
   it('un fichier CRLF analysé, relu en CRLF (getValue) ou en LF (getDocText) : mêmes segments, sans \\r', async () => {
@@ -240,10 +301,103 @@ describe('cache de similarité — ce que rend la relecture, pour le document ou
     const analysed = await analyze(crlf);
 
     for (const text of [crlf, crlf.split('\r\n').join('\n')]) {
-      const reread = await similarityService.getAllCachedResults(text);
-      expect(reread.map((r) => r.segmentId)).toEqual(analysed.map((r) => r.segmentId));
-      expect(reread.some((r) => r.segment.content.includes('\r'))).toBe(false);
+      const found = await reread(text);
+      expect(found.map((r) => r.segmentId)).toEqual(analysed.map((r) => r.segmentId));
+      expect(found.some((r) => r.segment.content.includes('\r'))).toBe(false);
     }
+  });
+});
+
+describe('cache de similarité — le document analysé, pas seulement ses segments', () => {
+  it('deux chapitres aux mêmes intertitres et au même astérisme : rien sur celui qui n’a pas été analysé', async () => {
+    const analysed = await analyze(SHARED_1);
+    // Témoin : l'analyse a bien rendu les intertitres communs, trop courts pour être cherchés ou non.
+    expect(analysed.map((r) => r.segment.content)).toEqual(
+      expect.arrayContaining(['## Introduction', '## Sources et méthode de l’enquête', '* * *', '## Conclusion'])
+    );
+
+    expect(await reread(SHARED_2, chapter(2))).toEqual([]);
+  });
+
+  it('le même chapitre, dont ne restent que des segments trop courts pour avoir été cherchés : rien', async () => {
+    await analyze(SHARED_1);
+    expect(await reread('## Introduction\n\n* * *\n\n## Conclusion')).toEqual([]);
+  });
+
+  it('le même chapitre retouché : ses intertitres restent avec ses paragraphes encore là', async () => {
+    const analysed = await analyze(SHARED_1);
+    const edited = SHARED_1.replace('sans rien conclure', 'et conclut en juillet');
+
+    const found = await reread(edited);
+
+    const kept = analysed.filter((r) => !r.segment.content.includes('commission'));
+    expect(found.map((r) => r.segmentId)).toEqual(kept.map((r) => r.segmentId));
+  });
+
+  it('un autre fichier au texte identique (« Enregistrer sous ») : toute l’analyse revient', async () => {
+    const analysed = await analyze(CHAPTER_1);
+    expect(await reread(CHAPTER_1, path.join(project, 'chapters', '01-copie.md'))).toEqual(analysed);
+  });
+
+  it('un document sans nom : seul son texte exact le désigne', async () => {
+    const analysed = await analyze(CHAPTER_1, {}, null);
+    expect(await reread(CHAPTER_1, null)).toEqual(analysed);
+    expect(await reread(`${CHAPTER_1}\n\nUne phrase de plus.`, null)).toEqual([]);
+  });
+
+  it('le dossier du projet renommé : le chapitre retouché retrouve son analyse (chemin rangé relatif au projet)', async () => {
+    const analysed = await analyze(CHAPTER_1);
+    const renamed = `${project}-renomme`;
+    fs.renameSync(project, renamed);
+    project = renamed;
+    h.projectPath = renamed;
+
+    const found = await reread(CHAPTER_1.replace('sans rien conclure', 'et conclut'));
+
+    expect(found.map((r) => r.segmentId)).toEqual(
+      analysed.filter((r) => !r.segment.content.includes('commission')).map((r) => r.segmentId)
+    );
+  });
+
+  it('l’analyse du même texte pour un autre fichier ne cherche pas de nouveau', async () => {
+    await analyze(CHAPTER_1);
+    const before = h.search.mock.calls.length;
+    await analyze(CHAPTER_1, {}, path.join(project, 'chapters', '01-copie.md'));
+    expect(h.search.mock.calls.length).toBe(before);
+  });
+});
+
+describe('cache de similarité — filtre de collections', () => {
+  it('l’appartenance aux collections change (synchronisation Zotero, sans réindexation) : l’analyse cherche de nouveau', async () => {
+    h.members = { GUERRE: ['pdf-a'] };
+    await analyze(CHAPTER_1, { collectionFilter: ['GUERRE'] });
+    const before = h.search.mock.calls.length;
+
+    h.members = { GUERRE: ['pdf-a', 'pdf-b'] };
+    await analyze(CHAPTER_1, { collectionFilter: ['GUERRE'] });
+
+    expect(h.search.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('…et la relecture ne rend plus l’ancienne analyse', async () => {
+    h.members = { GUERRE: ['pdf-a'] };
+    await analyze(CHAPTER_1, { collectionFilter: ['GUERRE'] });
+    h.members = { GUERRE: [] };
+    expect(await reread(CHAPTER_1)).toEqual([]);
+  });
+
+  it('témoin : sans filtre, une autre appartenance ne jette pas l’analyse', async () => {
+    h.members = { GUERRE: ['pdf-a'] };
+    expect(await searchesAgainAfter(() => (h.members = { GUERRE: ['pdf-a', 'pdf-b'] }))).toBe(false);
+  });
+
+  it('témoin : une autre collection change, celle du filtre non : le cache sert', async () => {
+    h.members = { GUERRE: ['pdf-a'], FRONT: ['pdf-c'] };
+    await analyze(CHAPTER_1, { collectionFilter: ['GUERRE'] });
+    const before = h.search.mock.calls.length;
+    h.members = { GUERRE: ['pdf-a'], FRONT: ['pdf-c', 'pdf-d'] };
+    await analyze(CHAPTER_1, { collectionFilter: ['GUERRE'] });
+    expect(h.search.mock.calls.length).toBe(before);
   });
 });
 

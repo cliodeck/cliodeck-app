@@ -8,7 +8,8 @@
  * 300 ms de retard sur la frappe.
  *
  * Vrais panneau et stores ; le pont `window.electron.similarity` est simulé, et rend le cache d'un
- * texte comme le ferait le main : les segments de ce texte seulement.
+ * document comme le ferait le main : celui de son analyse seulement. Le même panneau devant le vrai
+ * main, sur deux chapitres aux intertitres communs : `SimilarityPanel.real-main.test.tsx`.
  */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -43,15 +44,18 @@ const result = (id: string) => ({
   analyzedAt: 1,
 });
 
+const CHAPTER_1_PATH = '/projets/livre/chapters/01.md';
+const CHAPTER_2_PATH = '/projets/livre/chapters/02.md';
+
 /**
- * Le cache du main : un seul par projet, celui de la dernière analyse. Il ne rend que les segments
- * du texte reçu ; appelé sans texte, comme avant S13-1-3, il rendait toute la dernière analyse.
+ * Le cache du main : un seul par projet, celui de la dernière analyse. Il ne rend que l'analyse du
+ * document reçu ; appelé sans rien, comme avant S13-1-3, il rendait toute la dernière analyse.
  */
-let cache: { text: string; results: unknown[] } | null = null;
-const cachedFor = (text?: string): unknown[] => {
+let cache: { text: string; documentPath: string | null; results: unknown[] } | null = null;
+const cachedFor = (text?: string, documentPath?: string | null): unknown[] => {
   if (!cache) return [];
   if (text === undefined) return cache.results;
-  return cache.text === text ? cache.results : [];
+  return cache.text === text && cache.documentPath === documentPath ? cache.results : [];
 };
 
 function held<T>(): { promise: Promise<T>; release: (value: T) => void } {
@@ -90,9 +94,12 @@ const shownSegments = () => [...useSimilarityStore.getState().results.keys()];
 beforeEach(() => {
   originalElectron = (window as unknown as { electron?: unknown }).electron;
   // Le chapitre 1 a été analysé.
-  cache = { text: CHAPTER_1, results: [result('seg-ch1')] };
+  cache = { text: CHAPTER_1, documentPath: CHAPTER_1_PATH, results: [result('seg-ch1')] };
   similarity = {
-    getAllResults: vi.fn(async (text?: string) => ({ success: true, results: cachedFor(text) })),
+    getAllResults: vi.fn(async (text?: string, documentPath?: string | null) => ({
+      success: true,
+      results: cachedFor(text, documentPath),
+    })),
     analyze: vi.fn(async () => ({ success: true, results: [] })),
     onProgress: vi.fn(() => () => undefined),
     cancel: vi.fn(async () => ({ success: true })),
@@ -103,7 +110,7 @@ beforeEach(() => {
   projectLifecycle.enter(PROJECT.path);
   useProjectStore.setState({ currentProject: PROJECT });
   useEditorStore.setState({
-    filePath: '/projets/livre/chapters/01.md',
+    filePath: CHAPTER_1_PATH,
     content: CHAPTER_1,
     isDirty: false,
     editorFacade: facade(CHAPTER_1),
@@ -125,20 +132,20 @@ it('ouvrir un autre chapitre, panneau ouvert : relu avec le texte du chapitre, l
   render(<SimilarityPanel />);
   await waitFor(() => expect(shownSegments()).toEqual(['seg-ch1']));
 
-  await openChapter('/projets/livre/chapters/02.md', CHAPTER_2);
+  await openChapter(CHAPTER_2_PATH, CHAPTER_2);
 
-  await waitFor(() => expect(similarity.getAllResults).toHaveBeenLastCalledWith(CHAPTER_2));
+  await waitFor(() => expect(similarity.getAllResults).toHaveBeenLastCalledWith(CHAPTER_2, CHAPTER_2_PATH));
   expect(shownSegments()).toEqual([]);
 
   // Retour au chapitre 1 : son analyse revient.
-  await openChapter('/projets/livre/chapters/01.md', CHAPTER_1);
+  await openChapter(CHAPTER_1_PATH, CHAPTER_1);
   await waitFor(() => expect(shownSegments()).toEqual(['seg-ch1']));
 });
 
 it('« Analyser » envoie le texte de l’éditeur vivant, plus récent que le miroir du store', async () => {
   const typed = `${CHAPTER_2}\n\nUne phrase tapée à l’instant.`;
   cache = null;
-  useEditorStore.setState({ filePath: '/projets/livre/chapters/02.md', content: CHAPTER_2, editorFacade: facade(typed) });
+  useEditorStore.setState({ filePath: CHAPTER_2_PATH, content: CHAPTER_2, editorFacade: facade(typed) });
   render(<SimilarityPanel />);
   await waitFor(() => expect(similarity.getAllResults).toHaveBeenCalled());
 
@@ -146,6 +153,8 @@ it('« Analyser » envoie le texte de l’éditeur vivant, plus récent que le m
 
   await waitFor(() => expect(similarity.analyze).toHaveBeenCalledTimes(1));
   expect(similarity.analyze.mock.calls[0][0]).toBe(typed);
+  // Et le fichier du document analysé : le cache n'en rendra les segments qu'à lui.
+  expect(similarity.analyze.mock.calls[0][2]).toBe(CHAPTER_2_PATH);
 });
 
 it('une analyse du chapitre 1 finie après l’ouverture du chapitre 2 ne s’y affiche pas', async () => {
@@ -157,10 +166,10 @@ it('une analyse du chapitre 1 finie après l’ouverture du chapitre 2 ne s’y 
   fireEvent.click(screen.getByText('similarity.analyze'));
   await waitFor(() => expect(useSimilarityStore.getState().isAnalyzing).toBe(true));
 
-  await openChapter('/projets/livre/chapters/02.md', CHAPTER_2);
-  await waitFor(() => expect(similarity.getAllResults).toHaveBeenLastCalledWith(CHAPTER_2));
+  await openChapter(CHAPTER_2_PATH, CHAPTER_2);
+  await waitFor(() => expect(similarity.getAllResults).toHaveBeenLastCalledWith(CHAPTER_2, CHAPTER_2_PATH));
   // Le main a fini, et écrit le cache du chapitre 1.
-  cache = { text: CHAPTER_1, results: [result('seg-ch1')] };
+  cache = { text: CHAPTER_1, documentPath: CHAPTER_1_PATH, results: [result('seg-ch1')] };
   await act(async () => {
     analysis.release({ success: true, results: [result('seg-ch1')] });
   });
@@ -169,6 +178,6 @@ it('une analyse du chapitre 1 finie après l’ouverture du chapitre 2 ne s’y 
   expect(shownSegments()).toEqual([]);
 
   // De retour sur le chapitre 1, son analyse est là.
-  await openChapter('/projets/livre/chapters/01.md', CHAPTER_1);
+  await openChapter(CHAPTER_1_PATH, CHAPTER_1);
   await waitFor(() => expect(shownSegments()).toEqual(['seg-ch1']));
 });

@@ -1131,10 +1131,14 @@ const api = {
       collectionFilter?: string[] | null;
       useReranking?: boolean;
       useContextualEmbedding?: boolean;
-    }) => ipcRenderer.invoke('similarity:analyze', text, options),
+    }, documentPath?: string | null) => ipcRenderer.invoke('similarity:analyze', text, options, documentPath),
     cancel: () => ipcRenderer.invoke('similarity:cancel'),
-    /** Les résultats en cache pour ce texte, celui du document ouvert (S13-1-3). */
-    getAllResults: (text: string) => ipcRenderer.invoke('similarity:get-all-results', text),
+    /**
+     * Les résultats en cache pour le document ouvert, son texte et son fichier (`null` sans nom) :
+     * ceux de son analyse seulement (S13-1-3).
+     */
+    getAllResults: (text: string, documentPath: string | null) =>
+      ipcRenderer.invoke('similarity:get-all-results', text, documentPath),
     clearCache: () => ipcRenderer.invoke('similarity:clear-cache'),
     onProgress: (callback: (progress: {
       current: number;

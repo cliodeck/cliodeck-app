@@ -95,7 +95,7 @@ describe('similarityStore — changement de projet', () => {
   it('le cache de A, lu avant le passage à B et arrivé après, ne s’inscrit pas', async () => {
     const response = held<unknown>();
     similarity.getAllResults.mockReturnValueOnce(response.promise);
-    const loading = useSimilarityStore.getState().loadCachedResults('# Texte de A');
+    const loading = useSimilarityStore.getState().loadCachedResults('# Texte de A', '/projets/A/document.md');
 
     switchTo('/projets/B');
     response.release({ success: true, results: [RESULT_A] });
@@ -112,7 +112,7 @@ describe('similarityStore — changement de projet', () => {
     });
     const response = held<unknown>();
     similarity.analyze.mockReturnValueOnce(response.promise);
-    const analysing = useSimilarityStore.getState().analyze('# Texte de A');
+    const analysing = useSimilarityStore.getState().analyze('# Texte de A', '/projets/A/document.md');
     expect(useSimilarityStore.getState().isAnalyzing).toBe(true);
 
     switchTo('/projets/B');
@@ -131,7 +131,7 @@ describe('similarityStore — changement de projet', () => {
   it('l’analyse de A annulée par la bascule : son échec ne s’affiche pas dans B', async () => {
     const response = held<unknown>();
     similarity.analyze.mockReturnValueOnce(response.promise);
-    const analysing = useSimilarityStore.getState().analyze('# Texte de A');
+    const analysing = useSimilarityStore.getState().analyze('# Texte de A', '/projets/A/document.md');
 
     switchTo('/projets/B');
     response.release({ success: false, error: 'Analysis cancelled by user' });
@@ -145,7 +145,7 @@ describe('similarityStore — changement de projet', () => {
     useSimilarityStore.setState({ results: new Map() });
     similarity.getAllResults.mockResolvedValueOnce({ success: true, results: [RESULT_A] });
 
-    await useSimilarityStore.getState().loadCachedResults('La grève de 1934');
+    await useSimilarityStore.getState().loadCachedResults('La grève de 1934', '/projets/A/document.md');
 
     expect(useSimilarityStore.getState().results.size).toBe(1);
   });
@@ -158,8 +158,8 @@ describe('similarityStore — le document ouvert (S13-1-3)', () => {
     const chapter2 = held<unknown>();
     similarity.getAllResults.mockReturnValueOnce(chapter1.promise).mockReturnValueOnce(chapter2.promise);
 
-    const first = useSimilarityStore.getState().loadCachedResults('# Chapitre 1');
-    const second = useSimilarityStore.getState().loadCachedResults('# Chapitre 2');
+    const first = useSimilarityStore.getState().loadCachedResults('# Chapitre 1', '/projets/A/chapters/01.md');
+    const second = useSimilarityStore.getState().loadCachedResults('# Chapitre 2', '/projets/A/chapters/02.md');
     chapter2.release({ success: true, results: [] });
     await second;
     chapter1.release({ success: true, results: [RESULT_A] });
@@ -168,10 +168,38 @@ describe('similarityStore — le document ouvert (S13-1-3)', () => {
     expect(useSimilarityStore.getState().results.size).toBe(0);
   });
 
+  it('le fichier du document part au main avec son texte, à l’analyse comme à la relecture', async () => {
+    await useSimilarityStore.getState().analyze('# Chapitre 1', '/projets/A/chapters/01.md');
+    await useSimilarityStore.getState().loadCachedResults('# Chapitre 1', '/projets/A/chapters/01.md');
+    await useSimilarityStore.getState().loadCachedResults('Sans nom', null);
+
+    expect(similarity.analyze).toHaveBeenCalledWith('# Chapitre 1', expect.any(Object), '/projets/A/chapters/01.md');
+    expect(similarity.getAllResults.mock.calls).toEqual([
+      ['# Chapitre 1', '/projets/A/chapters/01.md'],
+      ['Sans nom', null],
+    ]);
+  });
+
+  it('une analyse finie après l’ouverture d’un autre document relit le cache pour celui-ci, texte et fichier', async () => {
+    const response = held<unknown>();
+    similarity.analyze.mockReturnValueOnce(response.promise);
+    const analysing = useSimilarityStore.getState().analyze('# Chapitre 1', '/projets/A/chapters/01.md');
+    await useSimilarityStore.getState().loadCachedResults('# Chapitre 2', '/projets/A/chapters/02.md');
+    similarity.getAllResults.mockClear();
+
+    response.release({ success: true, results: [RESULT_A] });
+    await analysing;
+
+    await vi.waitFor(() =>
+      expect(similarity.getAllResults).toHaveBeenCalledWith('# Chapitre 2', '/projets/A/chapters/02.md')
+    );
+    expect(useSimilarityStore.getState().results.size).toBe(0);
+  });
+
   it('une relecture qui échoue vide la liste : les résultats d’un autre document ne restent pas', async () => {
     similarity.getAllResults.mockResolvedValueOnce({ success: false, error: 'Validation failed' });
 
-    await useSimilarityStore.getState().loadCachedResults('# Chapitre 2');
+    await useSimilarityStore.getState().loadCachedResults('# Chapitre 2', '/projets/A/chapters/02.md');
 
     expect(useSimilarityStore.getState().results.size).toBe(0);
   });

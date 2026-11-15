@@ -12,6 +12,8 @@ import { tropyService } from './tropy-service.js';
 import { projectManager } from './project-manager.js';
 import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-guard.js';
 import { assertProjectRoot } from '../../../backend/core/workspace/project-root.js';
+import { sameFile } from '../../../backend/core/vector-store/file-identity.js';
+import { toStoredPath } from '../../../backend/core/bibliography/stored-path.js';
 
 // MARK: - Types
 
@@ -70,6 +72,11 @@ export interface SimilarityResult {
 
 export interface SimilarityCache {
   documentHash: string;
+  /**
+   * Le document analysé, rangé relatif au projet (`toStoredPath`) ; `null` pour un document sans
+   * nom. Absent d'un cache écrit avant L11-2.
+   */
+  documentPath?: string | null;
   vectorStoreHash: string;
   segments: Record<string, SimilarityResult>;
   createdAt: number;
@@ -117,6 +124,11 @@ const UNKNOWN_CORPUS = 'unknown';
 /** Un cache vaut 24 heures. */
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+/** En deçà, un segment (un intertitre, un astérisme) n'est pas cherché : il n'a aucune recommandation. */
+const MIN_SEARCHED_LENGTH = 20;
+
+const isSearched = (segment: TextSegment): boolean => segment.content.trim().length >= MIN_SEARCHED_LENGTH;
+
 /**
  * Les fins de ligne ramenées à `\n`. L'éditeur rend le texte d'un fichier CRLF avec ses `\r\n`
  * (`getValue`), les segments se coupent sur `\n`, et l'id d'un segment est le hash de son contenu :
@@ -162,12 +174,14 @@ class SimilarityService {
   }
 
   /**
-   * Analyze a document and find similar PDFs for each segment
+   * Analyze a document and find similar PDFs for each segment. `documentPath` est le fichier du
+   * document analysé (`null` sans nom) : le cache n'en rend les segments qu'à lui (S13-1-3).
    */
   async analyzeDocument(
     documentText: string,
     options: Partial<SimilarityOptions> = {},
-    onProgress?: (progress: AnalysisProgress) => void
+    onProgress?: (progress: AnalysisProgress) => void,
+    documentPath: string | null = null
   ): Promise<SimilarityResult[]> {
     const projectPath = projectManager.getCurrentProjectPath();
     if (!projectPath) {
@@ -190,7 +204,7 @@ class SimilarityService {
 
     // Compute hashes for caching
     const documentHash = this.computeHash(text);
-    const vectorStoreHash = this.computeVectorStoreHash(opts.sourceType);
+    const vectorStoreHash = this.computeVectorStoreHash(opts.sourceType, opts.collectionFilter);
 
     // Try to load from cache
     const cache = await this.loadCache(projectPath);
@@ -274,6 +288,7 @@ class SimilarityService {
     // Save to cache
     await this.saveCache(projectPath, {
       documentHash,
+      documentPath: documentPath ? toStoredPath(documentPath, projectPath) : null,
       vectorStoreHash,
       segments: Object.fromEntries(results.map((r) => [r.segmentId, r])),
       createdAt: Date.now(),
@@ -625,7 +640,7 @@ class SimilarityService {
     context: DocumentContext = { title: null, currentSection: null }
   ): Promise<PDFRecommendation[]> {
     // Skip very short segments (less than 20 characters)
-    if (segment.content.trim().length < 20) {
+    if (!isSearched(segment)) {
       return [];
     }
 
@@ -969,12 +984,14 @@ Your ranking:`;
    * `stats.chunks`, que `getStatistics` ne rend pas : elle ne changeait jamais, et des PDF indexés
    * après une analyse restaient invisibles 24 h. Une reconstruction de l'index ne la change pas : les
    * extraits et leurs vecteurs restent les mêmes. Sauf si elle était due (J8) : l'index servi avant
-   * elle pouvait en manquer, et une analyse faite alors est à refaire.
+   * elle pouvait en manquer, et une analyse faite alors est à refaire. Avec un filtre de collections,
+   * les documents qu'il retient en sont aussi : une synchronisation Zotero change l'appartenance sans
+   * rien réindexer.
    */
-  private computeVectorStoreHash(sourceType: SourceType): string {
+  private computeVectorStoreHash(sourceType: SourceType, collectionFilter: string[] | null): string {
     try {
       const corpora = {
-        secondary: sourceType === 'primary' ? null : pdfService.getIndexFreshness(),
+        secondary: sourceType === 'primary' ? null : pdfService.getIndexFreshness(collectionFilter),
         primary: sourceType === 'secondary' ? null : tropyService.getIndexFreshness(),
       };
       return this.computeHash(JSON.stringify(corpora));
@@ -1001,14 +1018,20 @@ Your ranking:`;
   }
 
   /**
-   * Les résultats en cache pour le texte du document ouvert (S13-1-3). Le cache est unique par
-   * projet, et il était rendu quel que soit ce texte : dans un livre, les segments et les lignes de
-   * l'analyse du chapitre 3 s'affichaient sur le chapitre 5. Le texte est resegmenté comme à
-   * l'analyse, et seuls reviennent les segments qui y sont encore, à leurs lignes actuelles : un
-   * autre chapitre ne rend rien, un paragraphe retouché ne fait pas perdre les autres. Un cache trop
-   * vieux, ou fait sur un autre état des corpus, ne rend rien.
+   * Les résultats en cache pour le document ouvert, `text` dans `documentPath` (S13-1-3). Le cache
+   * est unique par projet, et il était rendu quel que soit ce document : dans un livre, les segments
+   * et les lignes de l'analyse du chapitre 3 s'affichaient sur le chapitre 5.
+   *
+   * Le texte exact de l'analyse la rend toute, quel que soit le fichier (« Enregistrer sous »).
+   * Sinon, il faut le document analysé : un autre chapitre ne rend rien, même s'il partage avec lui
+   * ses intertitres (« ## Introduction ») ou un astérisme, segments identiques d'un chapitre à
+   * l'autre. Le texte est alors resegmenté comme à l'analyse, et seuls reviennent les segments qui y
+   * sont encore, à leurs lignes actuelles : un paragraphe retouché ne fait pas perdre les autres. S'il
+   * n'en reste que de trop courts pour avoir été cherchés, rien : « 2 segments analysés » mentirait.
+   * Un document sans nom n'a que son texte exact. Un cache trop vieux, ou fait sur un autre état des
+   * corpus, ne rend rien.
    */
-  async getAllCachedResults(text: string): Promise<SimilarityResult[]> {
+  async getAllCachedResults(text: string, documentPath: string | null = null): Promise<SimilarityResult[]> {
     const projectPath = projectManager.getCurrentProjectPath();
     if (!projectPath || text.trim() === '') {
       return [];
@@ -1018,17 +1041,32 @@ Your ranking:`;
     if (!cache || this.isExpired(cache)) {
       return [];
     }
-    const vectorStoreHash = this.computeVectorStoreHash(cache.options.sourceType);
+    const vectorStoreHash = this.computeVectorStoreHash(cache.options.sourceType, cache.options.collectionFilter);
     if (vectorStoreHash === UNKNOWN_CORPUS || vectorStoreHash !== cache.vectorStoreHash) {
       return [];
     }
 
+    const lf = toLf(text);
+    const sameText = this.computeHash(lf) === cache.documentHash;
+    if (!sameText && !this.isAnalysedDocument(projectPath, cache, documentPath)) {
+      return [];
+    }
+
     const results: SimilarityResult[] = [];
-    for (const segment of this.segmentText(toLf(text), cache.options.granularity)) {
+    for (const segment of this.segmentText(lf, cache.options.granularity)) {
       const cached = cache.segments[segment.id];
       if (cached) results.push({ ...cached, segment });
     }
+    if (!sameText && !results.some((r) => isSearched(r.segment))) {
+      return [];
+    }
     return results;
+  }
+
+  /** `documentPath` est-il le fichier de l'analyse en cache ? Sans nom de part ou d'autre, non. */
+  private isAnalysedDocument(projectPath: string, cache: SimilarityCache, documentPath: string | null): boolean {
+    if (!cache.documentPath || !documentPath) return false;
+    return sameFile(path.resolve(projectPath, cache.documentPath), documentPath);
   }
 }
 
