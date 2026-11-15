@@ -1176,6 +1176,8 @@
     "noSessionsRecorded": "No sessions recorded",
     "sessionsAutoCreated": "Sessions are created automatically when you open a project.",
     "active": "Active",
+    "estimatedDuration": "{{minutes}} min (estimated duration)",
+    "estimatedDurationTitle": "The app did not close this session: its end is set to its last recorded event.",
     "exportMD": "Export MD",
     "exportJSON": "Export JSON",
     "exportLaTeX": "Export LaTeX",

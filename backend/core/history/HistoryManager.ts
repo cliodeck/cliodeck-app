@@ -139,6 +139,29 @@ function markRepaired(metadata: string | null): string | null {
   return metadata;
 }
 
+/**
+ * Fermée par `closeOrphanSessions` (`endedBy: 'repair'`) : sa fin et sa durée sont estimées, pas
+ * mesurées, et un rapport le dit (J18). Les rapports Markdown et LaTeX sont écrits en anglais.
+ */
+function isRepaired(session: Session): boolean {
+  return session.metadata?.endedBy === 'repair';
+}
+
+const ESTIMATED_DURATION_NOTE =
+  ' (estimated: the app did not close this session; it ends at its last recorded event)';
+
+/** La fin et la durée d'une session, telles que les rapports Markdown et LaTeX les écrivent. */
+function reportEndAndDuration(session: Session): { ended: string; duration: string } {
+  const estimated = isRepaired(session);
+  return {
+    ended: session.endedAt ? session.endedAt.toLocaleString() + (estimated ? ' (estimated)' : '') : 'Active',
+    duration:
+      session.totalDurationMs != null
+        ? Math.round(session.totalDurationMs / 1000 / 60) + ' minutes' + (estimated ? ESTIMATED_DURATION_NOTE : '')
+        : 'N/A',
+  };
+}
+
 // ============================================================================
 // HistoryManager Class
 // ============================================================================
@@ -1186,11 +1209,12 @@ export class HistoryManager {
     docOps: DocumentOperation[],
     pdfOps: PDFOperation[]
   ): string {
+    const { ended, duration } = reportEndAndDuration(session);
     let md = `# Research Session Report\n\n`;
     md += `**Session ID:** ${session.id}\n`;
     md += `**Started:** ${session.startedAt.toLocaleString()}\n`;
-    md += `**Ended:** ${session.endedAt ? session.endedAt.toLocaleString() : 'Active'}\n`;
-    md += `**Duration:** ${session.totalDurationMs != null ? Math.round(session.totalDurationMs / 1000 / 60) + ' minutes' : 'N/A'}\n`;
+    md += `**Ended:** ${ended}\n`;
+    md += `**Duration:** ${duration}\n`;
     md += `**Total Events:** ${session.eventCount}\n\n`;
     md += `---\n\n`;
 
@@ -1279,13 +1303,14 @@ export class HistoryManager {
     docOps: DocumentOperation[],
     pdfOps: PDFOperation[]
   ): string {
+    const { ended, duration } = reportEndAndDuration(session);
     let latex = `\\section{Research Session Report}\n\n`;
     latex += `\\subsection{Session Information}\n\n`;
     latex += `\\begin{itemize}\n`;
     latex += `  \\item Session ID: \\texttt{${session.id}}\n`;
     latex += `  \\item Started: ${session.startedAt.toLocaleString()}\n`;
-    latex += `  \\item Ended: ${session.endedAt ? session.endedAt.toLocaleString() : 'Active'}\n`;
-    latex += `  \\item Duration: ${session.totalDurationMs != null ? Math.round(session.totalDurationMs / 1000 / 60) + ' minutes' : 'N/A'}\n`;
+    latex += `  \\item Ended: ${ended}\n`;
+    latex += `  \\item Duration: ${duration}\n`;
     latex += `  \\item Total Events: ${session.eventCount}\n`;
     latex += `\\end{itemize}\n\n`;
 

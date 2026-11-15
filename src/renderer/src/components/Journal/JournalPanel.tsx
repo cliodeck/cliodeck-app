@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
-import { useJournalStore } from '../../stores/journalStore';
+import { useJournalStore, type Session } from '../../stores/journalStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { SessionTimeline } from './SessionTimeline';
@@ -9,6 +9,12 @@ import { AIOperationsTable } from './AIOperationsTable';
 import { ChatHistoryView } from './ChatHistoryView';
 import { HelperTooltip } from '../Methodology/HelperTooltip';
 import './JournalPanel.css';
+
+/**
+ * L'app n'a pas fermé la session : `closeOrphanSessions` l'a close à son dernier événement, à la
+ * réouverture du projet. Sa durée est estimée, pas mesurée (J18).
+ */
+const isRepaired = (session: Session): boolean => session.metadata?.endedBy === 'repair';
 
 export const JournalPanel: React.FC = () => {
   const { t } = useTranslation('common');
@@ -252,10 +258,15 @@ export const JournalPanel: React.FC = () => {
                     </span>
                   </div>
                   <div className="session-info">
-                    <span className="session-duration">
-                      {session.totalDurationMs != null
-                        ? `${Math.round(session.totalDurationMs / 1000 / 60)} min`
-                        : t('journal.active')}
+                    <span
+                      className="session-duration"
+                      title={isRepaired(session) ? t('journal.estimatedDurationTitle') : undefined}
+                    >
+                      {session.totalDurationMs == null
+                        ? t('journal.active')
+                        : isRepaired(session)
+                          ? t('journal.estimatedDuration', { minutes: Math.round(session.totalDurationMs / 1000 / 60) })
+                          : `${Math.round(session.totalDurationMs / 1000 / 60)} min`}
                     </span>
                     <span className="session-events">{session.eventCount} {t('journal.events')}</span>
                   </div>
