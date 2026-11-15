@@ -263,8 +263,10 @@ export function computeLiveDecorations(
 
         // ---- Citations pandoc (Phase 3b) ---------------------------------
         // Pastille sur le cluster ; `[`, `]`, `@` masqués hors nœud actif
-        // (les `;` restent : ils séparent les clés d'un cluster). Clé non
-        // résolue → soulignement ondulé, sans bloquer.
+        // (les `;` restent : ils séparent les clés d'un cluster ; le `-` de
+        // `[-@clef]` aussi : il retire l'auteur du rendu, et masqué, la
+        // pastille serait celle de `[@clef]`). Clé non résolue → soulignement
+        // ondulé, sans bloquer.
         if (name === 'PandocCitation') {
           out.push({
             kind: 'mark',
@@ -278,7 +280,7 @@ export function computeLiveDecorations(
             do {
               if (cursor.name === 'CitationMark' && !revealed) {
                 const ch = doc.sliceString(cursor.from, cursor.to);
-                if (ch !== ';') hide(cursor.from, cursor.to);
+                if (ch !== ';' && ch !== '-') hide(cursor.from, cursor.to);
               } else if (
                 cursor.name === 'CitationKey' &&
                 options.resolveCitation &&

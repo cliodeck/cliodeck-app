@@ -24,6 +24,11 @@ import type { ScholarlyLabels } from './types';
  * La popup montre le corps sans ce retrait et le remet à l'enregistrement : un second paragraphe
  * tapé reste dans la note, et une note qui en a deux revient octet pour octet. Une tabulation
  * vaut quatre colonnes : elle s'ôte, et revient en quatre espaces.
+ *
+ * Cela ne vaut qu'au niveau du document (`DefinitionRange.topLevel`). Dans une citation en bloc ou
+ * une liste, le retrait se compte depuis le conteneur (`>` puis quatre colonnes, ou le retrait de
+ * l'élément plus quatre) : quatre espaces posés devant un `>` feraient sortir le paragraphe de la
+ * note et de la citation. La popup écrit alors le corps tel quel, comme avant.
  */
 const CONTINUATION = '    ';
 
@@ -66,9 +71,8 @@ function popupTooltip(
       dom.className = 'cm-scholarly-popup';
 
       const def = findDefinition(view.state, value.label);
-      const initial = def
-        ? bodyToPopup(view.state.sliceDoc(def.contentFrom, def.contentTo))
-        : '';
+      const body = def ? view.state.sliceDoc(def.contentFrom, def.contentTo) : '';
+      const initial = def?.topLevel ? bodyToPopup(body) : body;
 
       const title = document.createElement('div');
       title.className = 'cm-scholarly-popup-title';
@@ -98,11 +102,11 @@ function popupTooltip(
       };
 
       const save = () => {
-        const text = popupToBody(textarea.value);
         // Relocaliser la définition au moment du save : le document a pu
         // bouger pendant que le popup était ouvert.
         const current = findDefinition(view.state, value.label);
         if (current) {
+          const text = current.topLevel ? popupToBody(textarea.value) : textarea.value;
           view.dispatch({
             changes: {
               from: current.contentFrom,
@@ -112,6 +116,8 @@ function popupTooltip(
             annotations: changeOrigin.of('programmatic'),
           });
         } else {
+          // Créée en fin de document, après une ligne vide et en colonne 0 : au niveau du document.
+          const text = popupToBody(textarea.value);
           const doc = view.state.doc;
           const tail = doc.sliceString(Math.max(0, doc.length - 2));
           const sep =

@@ -114,3 +114,33 @@ describe('popup de note : un second paragraphe reste dans la note', () => {
     expect(extractManualFootnotes(doc).footnotes.map((f) => f.text)).toEqual([TWO_PARAGRAPHS]);
   });
 });
+
+/**
+ * Une définition dans une citation en bloc ou dans un élément de liste : son retrait de suite se
+ * compte depuis le conteneur (`> ` puis quatre colonnes, ou le retrait de l'élément plus quatre),
+ * pas depuis la colonne 0. La popup ne sait pas encore reconstruire ces préfixes : elle écrit ces
+ * définitions telles quelles, comme avant S14-1-7, plutôt que de poser quatre espaces devant un `>`.
+ */
+describe('popup de note : une définition dans un conteneur s’écrit telle quelle', () => {
+  it('dans une citation en bloc, enregistrer sans rien changer rend le fichier à l’identique', () => {
+    const source = '> Texte[^1].\n>\n> [^1]: a\n>\n>     b\n';
+    expect(definitionText(source)).toContain('b');
+    const view = makeView(source);
+
+    openPopup(view, '1');
+    save(view);
+
+    expect(readDocText(view.state)).toBe(source);
+  });
+
+  it('dans un élément de liste, une note à deux paragraphes revient à l’identique', () => {
+    const source = '- item[^1]\n\n  [^1]: a\n\n      b\n';
+    expect(definitionText(source)).toContain('b');
+    const view = makeView(source);
+
+    openPopup(view, '1');
+    save(view);
+
+    expect(readDocText(view.state)).toBe(source);
+  });
+});
