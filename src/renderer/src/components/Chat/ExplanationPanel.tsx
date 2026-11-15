@@ -41,21 +41,46 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
     contextChars && contextChars.total > 0
       ? Math.round((contextChars.manuscript / contextChars.total) * 100)
       : 0;
+  /** Les noms des corpus retenus, dans l'ordre de la ligne « Par corpus ». */
+  const corpusNames = (keep: (entry: NonNullable<typeof corpora>[number]) => boolean): string[] =>
+    CORPORA.filter((c) => corpora?.some((entry) => entry.source === c.source && keep(entry))).map((c) =>
+      t(c.key, c.fallback)
+    );
+  const status = explanation.search.retrievalStatus;
+  // Les corpus en panne, nommés dans la bande : seule la ligne « Par corpus », repliée, les disait
+  // (H5). Ni ceux restés à 0, ni ceux non interrogés, ni ceux dont l'index se construit.
+  const failed =
+    status === 'partial' || status === 'failed'
+      ? corpusNames((entry) => entry.attempted && !entry.ok && !entry.indexing && entry.selectedCount === 0)
+      : [];
+  // Un corpus dont l'index se construit n'a pas été interrogé, sans être en panne (E3) : la bande le
+  // nomme, comme une information, même quand les autres corpus ont répondu.
+  const indexing = corpusNames((entry) => entry.attempted && entry.indexing === true);
+  const bandStatus = status ?? (indexing.length > 0 ? 'indexing' : undefined);
+  const bandText = [
+    status === 'empty'
+      ? t('chat.explanation.retrievalEmpty', 'Aucune source pertinente trouvée.')
+      : status === 'partial'
+        ? t('chat.explanation.retrievalPartial', 'Certaines recherches ont échoué ; les sources peuvent être incomplètes.')
+        : status === 'failed'
+          ? t('chat.explanation.retrievalFailed', 'La recherche de sources a échoué.')
+          : null,
+    failed.length > 0
+      ? t('chat.explanation.failedCorpora', { count: failed.length, corpora: failed.join(', ') })
+      : null,
+    indexing.length > 0
+      ? t('chat.explanation.indexingCorpora', { count: indexing.length, corpora: indexing.join(', ') })
+      : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(' ');
 
   return (
     <div className="message-explanation">
-      {explanation.search.retrievalStatus && (
-        <div
-          role="status"
-          className="retrieval-warning"
-          data-status={explanation.search.retrievalStatus}
-        >
+      {bandStatus && (
+        <div role="status" className="retrieval-warning" data-status={bandStatus}>
           <AlertTriangle size={14} aria-hidden="true" />
-          {explanation.search.retrievalStatus === 'empty'
-            ? t('chat.explanation.retrievalEmpty', 'Aucune source pertinente trouvée.')
-            : explanation.search.retrievalStatus === 'partial'
-              ? t('chat.explanation.retrievalPartial', 'Certaines recherches ont échoué ; les sources peuvent être incomplètes.')
-              : t('chat.explanation.retrievalFailed', 'La recherche de sources a échoué.')}
+          {bandText}
         </div>
       )}
       {/* Des extraits trouvés, aucun lu : la fenêtre du modèle les a tous retirés (L08-4). Le panneau
@@ -105,12 +130,15 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
                     const entry = corpora.find((x) => x.source === c.source);
                     // Absent ou non tenté : non interrogé. Tenté mais en
                     // échec : un zéro ferait croire qu'il n'avait rien à dire.
+                    // Son index en construction : ni l'un ni l'autre (E3).
                     const value =
                       !entry || !entry.attempted
                         ? t('chat.explanation.corpusNotSearched', 'non interrogé')
-                        : entry.ok || entry.selectedCount > 0
-                          ? String(entry.selectedCount)
-                          : t('chat.explanation.corpusFailed', 'échec');
+                        : entry.indexing
+                          ? t('chat.explanation.corpusIndexing', 'indexation en cours')
+                          : entry.ok || entry.selectedCount > 0
+                            ? String(entry.selectedCount)
+                            : t('chat.explanation.corpusFailed', 'échec');
                     return (
                       <React.Fragment key={c.source}>
                         {i > 0 && ' · '}

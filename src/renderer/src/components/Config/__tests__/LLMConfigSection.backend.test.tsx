@@ -25,7 +25,8 @@ import type { LLMConfig } from '../ConfigPanel';
 import { useDialogStore } from '../../../stores/dialogStore';
 
 const INVALIDATES = 'embeddedEmbedding.providerChangeConfirm';
-const CONSENT = 'llm.cloudEmbeddings.consent';
+// La question du changement de backend, pas celle de la case (E4) : le simulacre rend la clé seule.
+const CONSENT = 'llm.backend.cloudEmbeddingsConsent';
 
 const initial: LLMConfig = {
   backend: 'mistral',

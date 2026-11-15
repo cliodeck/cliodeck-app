@@ -407,9 +407,13 @@ export async function runChatTurn<TSource = unknown>(
     if (typeof m.content === 'string') promptSize += m.content.length;
   }
 
+  // Une fois par tour : un échec qui suivrait une fin déjà expliquée ne la redit pas.
+  let explanationSent = false;
   const emitExplanation = (): void => {
+    if (explanationSent) return;
     if (!hooks.onExplanation) return;
     if (!retrievalExplanation || !retrievalExplanation.search) return;
+    explanationSent = true;
     const totalMs = Date.now() - startedAt;
     const llmStats: ChatEngineLLMStats = {
       provider: args.provider.id,
@@ -451,6 +455,17 @@ export async function runChatTurn<TSource = unknown>(
     } catch {
       // UI hook failure must not abort the stream.
     }
+  };
+
+  /**
+   * Le modèle a échoué : l'explication part d'abord, comme au plafond des outils (H5). Ollama arrêté,
+   * la recherche tombe avant le modèle, et la bande qui nomme les corpus en panne restait cachée
+   * derrière « Le modèle a échoué : fetch failed » : l'explication ne partait qu'en fin de réponse.
+   */
+  const fail = (code: string, message: string): void => {
+    generationMs = Date.now() - generationStart;
+    emitExplanation();
+    emitError(code, message);
   };
 
   // --- Agent loop ----------------------------------------------------------
@@ -562,9 +577,8 @@ export async function runChatTurn<TSource = unknown>(
         if (chunk.done && chunk.finishReason === 'error') {
           terminalDone = true;
           finalFinishReason = 'error';
-          generationMs = Date.now() - generationStart;
           const status = args.provider.getStatus();
-          emitError(
+          fail(
             status.lastError?.code ?? 'provider_error',
             status.lastError?.message ??
               'Le fournisseur a interrompu la réponse sans donner de cause.'
@@ -625,7 +639,7 @@ export async function runChatTurn<TSource = unknown>(
 
       if (!terminalDone) {
         finalFinishReason = 'error';
-        emitError(
+        fail(
           'stream_incomplete',
           'LLM stream ended without a terminal chunk'
         );
@@ -635,7 +649,7 @@ export async function runChatTurn<TSource = unknown>(
 
       if (!args.toolHandler) {
         finalFinishReason = 'error';
-        emitError(
+        fail(
           'no_tool_handler',
           'Provider requested a tool call but no toolHandler was configured'
         );
@@ -739,7 +753,7 @@ export async function runChatTurn<TSource = unknown>(
     logTurnDone();
   } catch (e) {
     finalFinishReason = 'error';
-    emitError('stream_error', e instanceof Error ? e.message : String(e));
+    fail('stream_error', e instanceof Error ? e.message : String(e));
     logTurnDone();
   }
 }

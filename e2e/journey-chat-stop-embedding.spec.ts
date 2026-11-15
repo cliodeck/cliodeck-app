@@ -12,9 +12,10 @@
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { launchApp } from './_helpers/launch';
 import { startFakeOllama, type FakeOllama } from './_helpers/fake-ollama';
+import { ObsidianVaultStore } from '../backend/integrations/obsidian/ObsidianVaultStore';
 
 const toClean: string[] = [];
 
@@ -47,6 +48,35 @@ function makeArticle(vault?: string): string {
   return projectJson;
 }
 
+/**
+ * Une note de coffre déjà indexée dans le `brain.db` du projet. Depuis H6, un corpus sans extrait
+ * n'embarque pas la question : sans elle, aucune demande d'embedding ne part, et il n'y a rien à
+ * arrêter.
+ */
+function seedVaultExtract(projectJson: string): void {
+  const store = new ObsidianVaultStore({ dbPath: join(dirname(projectJson), '.cliodeck', 'brain.db'), dimension: 768 });
+  try {
+    store.upsertNote({
+      id: 'note-0',
+      relativePath: 'danzig.md',
+      vaultPath: join(dirname(projectJson), 'coffre'),
+      title: 'Danzig',
+      tags: [],
+      frontmatter: {},
+      wikilinks: [],
+      fileHash: 'hash-0',
+      fileMtime: 0,
+      indexedAt: new Date().toISOString(),
+    });
+    store.addChunk(
+      { id: 'note-0-c0', noteId: 'note-0', chunkIndex: 0, content: 'Le corridor de Danzig.', startPosition: 0, endPosition: 22 },
+      new Float32Array(768).fill(0.1),
+    );
+  } finally {
+    store.close();
+  }
+}
+
 const panel = (window: Page) => window.locator('.right-panel');
 const stopButton = (window: Page) => panel(window).locator('.cancel-btn');
 const answers = (window: Page) => panel(window).locator('.message-bubble.assistant');
@@ -68,6 +98,7 @@ test('« Arrêter » pendant l’embedding de la question coupe sa requête ; fe
 
   try {
     const projectJson = makeArticle();
+    seedVaultExtract(projectJson);
     await app.evaluate(({ dialog }, filePath) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
     }, projectJson);

@@ -21,6 +21,10 @@ const { vaultSearch } = vi.hoisted(() => ({ vaultSearch: vi.fn() }));
 vi.mock('../../../../backend/integrations/obsidian/ObsidianVaultStore.js', () => ({
   ObsidianVaultStore: class {
     search = vaultSearch;
+    /** Des notes indexées : la recherche les cherche (H6). */
+    hasChunks(): boolean {
+      return true;
+    }
     close(): void {
       /* rien d'ouvert */
     }

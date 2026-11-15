@@ -300,6 +300,11 @@ export class ReadingNotesStore {
     return rows.map(rowToNote);
   }
 
+  /** Au moins un extrait, lu par la recherche avant d'embarquer la question (H6). */
+  hasChunks(): boolean {
+    return this.db.prepare('SELECT 1 FROM reading_notes_chunks LIMIT 1').get() !== undefined;
+  }
+
   stats(): { noteCount: number; chunkCount: number; lastIndexedAt: string | null } {
     const notes = this.db.prepare('SELECT COUNT(*) AS c FROM reading_notes').get() as { c: number };
     const chunks = this.db.prepare('SELECT COUNT(*) AS c FROM reading_notes_chunks').get() as { c: number };

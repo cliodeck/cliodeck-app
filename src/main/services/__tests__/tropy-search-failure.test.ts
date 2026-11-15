@@ -462,7 +462,8 @@ describe.skipIf(!sqliteAvailable)('recherche multi-corpus : la panne des archive
   });
 
   it('projet sans Tropy, Ollama arrêté : « primary » réussit avec 0 extrait, seule la bibliographie tombe', async () => {
-    await openBibliography();
+    // Des PDF indexés : une bibliographie vide rend 0 sans embarquer la question (H6).
+    await openBibliography(DIMENSION);
     provider.mode = 'down';
 
     const { map } = await outcomeOf({ query: question(), sourceType: 'both' });

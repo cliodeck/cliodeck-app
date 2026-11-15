@@ -4,8 +4,8 @@
  * bge-m3, la même question reposée recevait le vecteur de l'ancien modèle, comparé à un index
  * réembarqué avec le nouveau, sans aucune erreur.
  *
- * Vrai `retrievalService`, vrai `EnhancedVectorStore` sur un projet vide ; seuls les fournisseurs
- * d'embeddings sont simulés, avec le même id et deux modèles différents.
+ * Vrai `retrievalService`, vrai `EnhancedVectorStore` sur un projet qui a un extrait par corpus ;
+ * seuls les fournisseurs d'embeddings sont simulés, avec le même id et deux modèles différents.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
@@ -54,6 +54,7 @@ import { configManager } from '../config-manager.js';
 import { retrievalService } from '../retrieval-service.js';
 import { manuscriptIndexService } from '../manuscript-index-service.js';
 import { readingNotesIndexService } from '../reading-notes-index-service.js';
+import { seedManuscript, seedPdf, seedVault } from './helpers/seed-corpora.js';
 
 let project = '';
 let store: EnhancedVectorStore | null = null;
@@ -67,6 +68,11 @@ beforeEach(async () => {
   vi.spyOn(console, 'log').mockImplementation(() => undefined);
   store = new EnhancedVectorStore(project);
   await store.initialize();
+  // Une bibliographie, un coffre et un manuscrit qui ont chacun un extrait : un corpus vide
+  // n'embarque plus la question (H6), et ce cache ne servirait à rien.
+  await seedPdf(store, project);
+  seedVault(project);
+  seedManuscript(project);
 });
 
 afterEach(() => {

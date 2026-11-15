@@ -66,8 +66,11 @@ class PDFService {
    * store : l'indexeur garde sa propre référence SQLite et une bascule de
    * projet en plein `await` d'extraction le laissait écrire sur un handle
    * fermé (« database connection is not open »).
+   *
+   * Chacune avec le magasin où elle écrit : la recherche demande si un PDF entre dans le sien
+   * (`isIndexingInto`), pas dans celui d'un projet fermé dont l'indexation a survécu à son délai.
    */
-  private inFlightIndexing = new Set<Promise<unknown>>();
+  private inFlightIndexing = new Map<Promise<unknown>, VectorStore | EnhancedVectorStore | null>();
 
   /**
    * Celui du magasin installé, né avec lui. Abandonné quand le magasin est rendu (`close`, reprise de
@@ -198,6 +201,7 @@ class PDFService {
       retrievalService.configure({
         vectorStore: this.vectorStore,
         workspaceRoot: projectPath,
+        isIndexing: (target) => this.isIndexingInto(target),
       });
 
       console.log('✅ PDF Service initialized for project');
@@ -469,7 +473,7 @@ class PDFService {
       bibliographyMetadata,
       collectionKeys
     );
-    this.inFlightIndexing.add(job);
+    this.inFlightIndexing.set(job, store);
     void job
       .catch(() => undefined)
       .finally(() => {
@@ -479,6 +483,19 @@ class PDFService {
         this.scheduleIndexRebuild(store);
       });
     return job;
+  }
+
+  /**
+   * Un PDF est en train d'entrer dans ce magasin : une indexation lancée sur lui n'a pas encore fini.
+   * Ses extraits n'arrivent dans SQLite qu'une fois tous ses embeddings calculés (L02-7) : pendant la
+   * toute première indexation, la bibliographie n'a aucun extrait, mais elle n'est pas vide pour
+   * autant. La recherche la dit alors « en indexation », pas « 0 » (E3).
+   */
+  isIndexingInto(store: VectorStore | EnhancedVectorStore): boolean {
+    for (const target of this.inFlightIndexing.values()) {
+      if (target === store) return true;
+    }
+    return false;
   }
 
   /**
@@ -573,7 +590,7 @@ class PDFService {
     const timeout = new Promise<'timeout'>((resolve) => {
       timer = setTimeout(() => resolve('timeout'), timeoutMs);
     });
-    const drained = Promise.allSettled([...this.inFlightIndexing]).then(
+    const drained = Promise.allSettled([...this.inFlightIndexing.keys()]).then(
       () => 'drained' as const
     );
     const outcome = await Promise.race([drained, timeout]);

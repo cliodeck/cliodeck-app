@@ -15,6 +15,7 @@
 import fs from 'fs';
 import { VectorStore } from '../../../backend/core/vector-store/VectorStore.js';
 import { EnhancedVectorStore } from '../../../backend/core/vector-store/EnhancedVectorStore.js';
+import { SearchIndexBuildingError } from '../../../backend/core/vector-store/search-index-building.js';
 import {
   SecondaryRetriever,
   createExpandQueryFrEn,
@@ -325,6 +326,8 @@ export interface RetrievalSearchStats {
       ok: boolean;
       hitCount: number;
       selectedCount: number;
+      /** Pas interrogé, son index se construit (E3). */
+      indexing?: boolean;
     }>;
     /** Posé par l'appelant qui construit le prompt (`fusion-chat-service`). */
     contextChars?: {
@@ -474,11 +477,18 @@ export function documentsOfHits(hits: MultiSourceSearchResult[]): ConsultedDocum
  * l'utilisateur ne pouvait pas voir (docs/poids-du-manuscrit.md).
  */
 export function withSelectedCounts<
-  C extends { source: string; attempted: boolean; ok: boolean; hitCount: number },
+  C extends { source: string; attempted: boolean; ok: boolean; hitCount: number; indexing?: boolean },
 >(
   corpora: C[],
   selected: Array<{ sourceType: string }>
-): Array<{ source: C['source']; attempted: boolean; ok: boolean; hitCount: number; selectedCount: number }> {
+): Array<{
+  source: C['source'];
+  attempted: boolean;
+  ok: boolean;
+  hitCount: number;
+  selectedCount: number;
+  indexing?: boolean;
+}> {
   const selectedBySource = new Map<string, number>();
   for (const r of selected) {
     selectedBySource.set(r.sourceType, (selectedBySource.get(r.sourceType) ?? 0) + 1);
@@ -489,11 +499,18 @@ export function withSelectedCounts<
     ok: c.ok,
     hitCount: c.hitCount,
     selectedCount: selectedBySource.get(c.source) ?? 0,
+    // Seulement quand il l'est : un corpus ordinaire garde la forme d'avant.
+    ...(c.indexing ? { indexing: true } : {}),
   }));
 }
 
 class RetrievalService {
   private vectorStore: VectorStore | EnhancedVectorStore | null = null;
+  /**
+   * Un PDF entre-t-il dans ce magasin ? `pdfService` suit ses indexations (E3), mais il importe ce
+   * module : l'importer ici ferait un cycle. Il passe donc la question à `configure`.
+   */
+  private pdfIndexingInto: ((store: VectorStore | EnhancedVectorStore) => boolean) | null = null;
   /**
    * Typed embedding provider (fusion 1.2b). Owned by this service: the
    * registry built in `configure()` is disposed in `clear()`. We keep the
@@ -548,10 +565,13 @@ class RetrievalService {
   configure(deps: {
     vectorStore: VectorStore | EnhancedVectorStore;
     workspaceRoot?: string;
+    /** Vrai quand une indexation de PDF écrit dans ce magasin (E3). */
+    isIndexing?: (store: VectorStore | EnhancedVectorStore) => boolean;
   }): void {
     this.releaseStore();
     this.vectorStore = deps.vectorStore;
     this.workspaceRoot = deps.workspaceRoot ?? null;
+    this.pdfIndexingInto = deps.isIndexing ?? null;
 
     // Build the typed embedding provider from the active config. Dispose
     // any previous registry to release HTTP agents / native handles.
@@ -709,6 +729,7 @@ class RetrievalService {
   clear(): void {
     this.releaseStore();
     this.vectorStore = null;
+    this.pdfIndexingInto = null;
     void this.disposePreviousRegistry();
     // Embedding cache persists across clear() — see constructor comment.
     this.workspaceRoot = null;
@@ -1203,7 +1224,9 @@ class RetrievalService {
     captured: SearchCapture
   ): Promise<ReadingNoteMappedSearchResult[]> {
     const store = readingNotesIndexService.getSearchStore();
-    if (!store) return [];
+    // Aucune note indexée : rien à trouver, donc rien à embarquer. Lu avant l'embedding, sinon un
+    // fournisseur en panne ferait passer pour en échec un corpus vide (H6).
+    if (!store || !store.hasChunks()) return [];
     // Cadrage sur une sélection : aucune clé, aucune note — inutile d'embarquer.
     const scoped = options.readingNoteCitekeys ? new Set(options.readingNoteCitekeys) : null;
     if (scoped && scoped.size === 0) return [];
@@ -1288,7 +1311,9 @@ class RetrievalService {
     captured: SearchCapture
   ): Promise<VaultMappedSearchResult[]> {
     const store = this.getVaultStore();
-    if (!store) return [];
+    // Un projet sans coffre a ce magasin dès que `brain.db` existe : sans extrait, la question
+    // n'est pas embarquée, et un fournisseur en panne ne dit plus « échec » (H6).
+    if (!store || !store.hasChunks()) return [];
     const embedding = await this.getQueryEmbedding(query, captured);
     const hits = this.withoutAuthorText(
       store.search(embedding, query, options.topK),
@@ -1394,7 +1419,8 @@ class RetrievalService {
     captured: SearchCapture
   ): Promise<ManuscriptMappedSearchResult[]> {
     const store = this.getManuscriptStore();
-    if (!store) return [];
+    // Rien d'indexé : rien à embarquer (H6), comme le coffre.
+    if (!store || !store.hasChunks()) return [];
     const embedding = await this.getQueryEmbedding(query, captured);
     const hits = store.search(embedding, query, options.topK);
     const mapped = hits.map(
@@ -1468,6 +1494,21 @@ class RetrievalService {
     },
     captured: SearchCapture
   ): Promise<SearchResult[]> {
+    // Aucun PDF indexé : rien à trouver, donc aucune variante de la question à embarquer. Lu avant
+    // l'embedding : un fournisseur en panne faisait dire « Bibliographie échec » à une bibliographie
+    // vide (H6). Une base qui ne se lit plus lève ici, et reste un échec.
+    if (!captured.store.hasEmbeddedChunks()) {
+      // Sauf si un PDF est en train d'y entrer : la toute première indexation calcule tous ses
+      // embeddings avant d'écrire le moindre extrait (L02-7). La bibliographie n'est pas vide, elle
+      // s'indexe : « indexation en cours », pas « 0 », et le modèle ne conclut pas qu'elle se tait
+      // (E3).
+      if (this.pdfIndexingInto?.(captured.store)) {
+        throw new SearchIndexBuildingError(
+          'A PDF is being indexed: the bibliography has no searchable extract yet.'
+        );
+      }
+      return [];
+    }
     const ragConfig = configManager.getRAGConfig();
     const topK = options?.topK || ragConfig.topK;
     const threshold = options?.threshold || ragConfig.similarityThreshold;

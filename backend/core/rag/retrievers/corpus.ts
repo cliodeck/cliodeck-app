@@ -16,6 +16,8 @@
  * bloc. Désormais le service construit une liste de retrievers et la parcourt.
  */
 
+import { SearchIndexBuildingError } from '../../vector-store/search-index-building.js';
+
 /** Les corpus connus, dans l'ordre où leurs résultats sont rapportés. */
 export type CorpusId = 'secondary' | 'primary' | 'vault' | 'manuscript' | 'readingNotes';
 
@@ -115,6 +117,11 @@ export interface RetrievalSourceOutcome {
   durationMs?: number;
   /** Message d'erreur quand `ok === false`. */
   error?: string;
+  /**
+   * Vrai quand le corpus n'a pas pu être interrogé parce que son index se construit (E3) : `ok`
+   * reste faux, mais ce n'est pas une panne. Le chat dit « indexation en cours », pas « échec ».
+   */
+  indexing?: boolean;
 }
 
 export interface FanOutResult<THit> {
@@ -165,7 +172,9 @@ export async function fanOutCorpora<THit extends { similarity: number }>(
       outcome.hitCount = found.length;
     } catch (error: unknown) {
       outcome.error = error instanceof Error ? error.message : String(error);
-      onError?.(corpus, error);
+      // Un index qui se construit n'est pas une panne : rien au journal des échecs (E3).
+      if (error instanceof SearchIndexBuildingError) outcome.indexing = true;
+      else onError?.(corpus, error);
     } finally {
       outcome.durationMs = Date.now() - t0;
     }
