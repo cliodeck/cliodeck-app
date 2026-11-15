@@ -1322,7 +1322,6 @@
     "sourceType.secondary": "Secondary",
     "sourceType.primary": "Primary",
     "sourceType.both": "Both",
-    "help.sourceType": "Choose which sources to search: secondary sources (PDFs from bibliography) or primary sources (Tropy archives).",
     "badge.primary": "Primary",
     "badge.secondary": "Secondary",
     "openSource": "Open",
@@ -1341,13 +1340,14 @@
     "contextualDisabled": "Disabled",
     "help": {
       "collections": "Restricts the search to the chosen Zotero collections. Empty = all collections.",
-      "panel": "Compares the text you are writing with the indexed corpus and surfaces close passages. Useful for spotting what you have already written or read on a point."
+      "panel": "Compares the text you are writing with the indexed corpus and surfaces close passages. Useful for spotting what you have already written or read on a point.",
+      "granularity": "Determines how your text is split for analysis. 'Section' analyzes by headings, 'Paragraph' by text blocks, 'Sentence' for fine-grained analysis.",
+      "sourceType": "Choose which sources to search: secondary sources (PDFs from bibliography) or primary sources (Tropy archives).",
+      "maxResults": "Limits the number of suggested PDFs per text segment. Higher numbers give more choices but may include less relevant results.",
+      "threshold": "Filters out results below a certain similarity score. 'Auto' lets the system decide automatically.",
+      "reranking": "After initial search, AI reorders results by comparing the meaning of your text with each source. Slower but more accurate.",
+      "contextualEmbedding": "Enriches the search with document context (title, current section) to find sources more relevant to the topic being discussed."
     },
-    "help.granularity": "Determines how your text is split for analysis. 'Section' analyzes by headings, 'Paragraph' by text blocks, 'Sentence' for fine-grained analysis.",
-    "help.maxResults": "Limits the number of suggested PDFs per text segment. Higher numbers give more choices but may include less relevant results.",
-    "help.threshold": "Filters out results below a certain similarity score. 'Auto' lets the system decide automatically.",
-    "help.reranking": "After initial search, AI reorders results by comparing the meaning of your text with each source. Slower but more accurate.",
-    "help.contextualEmbedding": "Enriches the search with document context (title, current section) to find sources more relevant to the topic being discussed.",
     "type": {
       "section": "Section",
       "paragraph": "Paragraph",

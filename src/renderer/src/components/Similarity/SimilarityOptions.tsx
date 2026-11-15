@@ -124,7 +124,7 @@ export const SimilarityOptions: React.FC<SimilarityOptionsProps> = ({ onClose })
               <label className="similarity-option-label">
                 {t('similarity.sourceType', 'Source Type')}
               </label>
-              <HelperTooltip content={t('similarity.help.sourceType', 'Choose which sources to search: secondary sources (PDFs from bibliography) or primary sources (Tropy archives).')} />
+              <HelperTooltip content={t('similarity.help.sourceType')} />
             </div>
             <p className="similarity-option-description">
               {t('similarity.sourceTypeDescription', 'Select which type of sources to search')}

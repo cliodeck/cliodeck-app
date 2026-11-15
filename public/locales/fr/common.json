@@ -1322,7 +1322,6 @@
     "sourceType.secondary": "Secondaires",
     "sourceType.primary": "Primaires",
     "sourceType.both": "Les deux",
-    "help.sourceType": "Choisissez les sources à interroger : sources secondaires (PDFs de la bibliographie) ou sources primaires (archives Tropy).",
     "badge.primary": "Primaire",
     "badge.secondary": "Secondaire",
     "openSource": "Ouvrir",
@@ -1341,13 +1340,14 @@
     "contextualDisabled": "Désactivé",
     "help": {
       "collections": "Restreint la recherche aux collections Zotero choisies. Vide = toutes les collections.",
-      "panel": "Compare le texte en cours d'écriture au corpus indexé et signale les passages proches. Utile pour repérer ce que vous avez déjà écrit ou lu sur un point."
+      "panel": "Compare le texte en cours d'écriture au corpus indexé et signale les passages proches. Utile pour repérer ce que vous avez déjà écrit ou lu sur un point.",
+      "granularity": "Détermine comment votre texte est découpé pour l'analyse. 'Section' analyse par titres, 'Paragraphe' par blocs de texte, 'Phrase' pour une analyse fine.",
+      "sourceType": "Choisissez les sources à interroger : sources secondaires (PDFs de la bibliographie) ou sources primaires (archives Tropy).",
+      "maxResults": "Limite le nombre de PDFs suggérés par segment de texte. Un nombre plus élevé donne plus de choix mais peut inclure des résultats moins pertinents.",
+      "threshold": "Filtre les résultats en dessous d'un certain score de similarité. 'Auto' laisse le système décider automatiquement.",
+      "reranking": "Après la recherche initiale, l'IA réordonne les résultats en comparant le sens de votre texte avec chaque source. Plus lent mais plus précis.",
+      "contextualEmbedding": "Enrichit la recherche avec le contexte du document (titre, section actuelle) pour trouver des sources plus pertinentes au sujet traité."
     },
-    "help.granularity": "Détermine comment votre texte est découpé pour l'analyse. 'Section' analyse par titres, 'Paragraphe' par blocs de texte, 'Phrase' pour une analyse fine.",
-    "help.maxResults": "Limite le nombre de PDFs suggérés par segment de texte. Un nombre plus élevé donne plus de choix mais peut inclure des résultats moins pertinents.",
-    "help.threshold": "Filtre les résultats en dessous d'un certain score de similarité. 'Auto' laisse le système décider automatiquement.",
-    "help.reranking": "Après la recherche initiale, l'IA réordonne les résultats en comparant le sens de votre texte avec chaque source. Plus lent mais plus précis.",
-    "help.contextualEmbedding": "Enrichit la recherche avec le contexte du document (titre, section actuelle) pour trouver des sources plus pertinentes au sujet traité.",
     "type": {
       "section": "Section",
       "paragraph": "Paragraphe",

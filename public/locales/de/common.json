@@ -1322,7 +1322,6 @@
     "sourceType.secondary": "Sekundär",
     "sourceType.primary": "Primär",
     "sourceType.both": "Beide",
-    "help.sourceType": "Wählen Sie, welche Quellen durchsucht werden sollen: Sekundärquellen (PDFs aus der Bibliographie) oder Primärquellen (Tropy-Archive).",
     "badge.primary": "Primär",
     "badge.secondary": "Sekundär",
     "openSource": "Öffnen",
@@ -1341,13 +1340,14 @@
     "contextualDisabled": "Deaktiviert",
     "help": {
       "collections": "Beschränkt die Suche auf die gewählten Zotero-Sammlungen. Leer = alle Sammlungen.",
-      "panel": "Vergleicht den entstehenden Text mit dem indexierten Korpus und weist auf verwandte Passagen hin. Hilfreich, um zu sehen, was Sie zu einem Punkt bereits geschrieben oder gelesen haben."
+      "panel": "Vergleicht den entstehenden Text mit dem indexierten Korpus und weist auf verwandte Passagen hin. Hilfreich, um zu sehen, was Sie zu einem Punkt bereits geschrieben oder gelesen haben.",
+      "granularity": "Bestimmt, wie Ihr Text für die Analyse aufgeteilt wird. 'Abschnitt' analysiert nach Überschriften, 'Absatz' nach Textblöcken, 'Satz' für feinkörnige Analyse.",
+      "sourceType": "Wählen Sie, welche Quellen durchsucht werden sollen: Sekundärquellen (PDFs aus der Bibliographie) oder Primärquellen (Tropy-Archive).",
+      "maxResults": "Begrenzt die Anzahl der vorgeschlagenen PDFs pro Textsegment. Höhere Zahlen geben mehr Auswahl, können aber weniger relevante Ergebnisse enthalten.",
+      "threshold": "Filtert Ergebnisse unter einem bestimmten Ähnlichkeitswert heraus. 'Auto' lässt das System automatisch entscheiden.",
+      "reranking": "Nach der ersten Suche ordnet KI die Ergebnisse neu, indem sie den Sinn Ihres Textes mit jeder Quelle vergleicht. Langsamer aber genauer.",
+      "contextualEmbedding": "Reichert die Suche mit Dokumentkontext (Titel, aktueller Abschnitt) an, um Quellen zu finden, die relevanter für das behandelte Thema sind."
     },
-    "help.granularity": "Bestimmt, wie Ihr Text für die Analyse aufgeteilt wird. 'Abschnitt' analysiert nach Überschriften, 'Absatz' nach Textblöcken, 'Satz' für feinkörnige Analyse.",
-    "help.maxResults": "Begrenzt die Anzahl der vorgeschlagenen PDFs pro Textsegment. Höhere Zahlen geben mehr Auswahl, können aber weniger relevante Ergebnisse enthalten.",
-    "help.threshold": "Filtert Ergebnisse unter einem bestimmten Ähnlichkeitswert heraus. 'Auto' lässt das System automatisch entscheiden.",
-    "help.reranking": "Nach der ersten Suche ordnet KI die Ergebnisse neu, indem sie den Sinn Ihres Textes mit jeder Quelle vergleicht. Langsamer aber genauer.",
-    "help.contextualEmbedding": "Reichert die Suche mit Dokumentkontext (Titel, aktueller Abschnitt) an, um Quellen zu finden, die relevanter für das behandelte Thema sind.",
     "type": {
       "section": "Abschnitt",
       "paragraph": "Absatz",
