@@ -148,6 +148,28 @@ describe('useCorpusData : une nouvelle analyse des thèmes refiltre le graphe (S
     expect(hook.result.current.filters).toEqual({ year: 1990, author: null, language: null, topic: null });
     expect(ids(hook.result.current.graphData)).toEqual(['a1', 'a2']);
   });
+
+  it('sans filtre de thème, une nouvelle analyse garde le graphe affiché tel quel (même objet)', async () => {
+    // force-graph relance sa simulation à chaque nouvel objet `graphData` : une analyse qui ne
+    // change rien à ce qui est montré ne doit pas faire repartir un graphe stabilisé.
+    installCorpus(async () => ({
+      success: true,
+      topics: [topic(0), topic(1)],
+      topicAssignments: { a1: 0, a2: 1, a3: 1 },
+    }));
+    const hook = renderHook(() => useCorpusData());
+    await act(async () => undefined);
+    await act(async () => {
+      hook.result.current.setFilters({ ...hook.result.current.filters, year: 1990 });
+    });
+    const before = hook.result.current.graphData;
+    expect(ids(before)).toEqual(['a1', 'a2']);
+
+    await reanalyze(hook);
+
+    expect(hook.result.current.topicAnalysis?.topicAssignments).toEqual({ a1: 0, a2: 1, a3: 1 });
+    expect(hook.result.current.graphData).toBe(before);
+  });
 });
 
 describe('useCorpusData : un graphe affiché garde ses liens quand on filtre (S13-2-1)', () => {

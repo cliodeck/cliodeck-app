@@ -31,11 +31,14 @@ export function useCorpusData() {
   });
 
   // Le graphe affiché : le graphe complet réduit aux filtres, recalculé quand l'un d'eux, le graphe
-  // ou l'analyse des thèmes change (S13-1-30). Mémorisé : son identité ne change qu'avec eux, et
-  // force-graph ne relance sa simulation qu'à un nouvel objet.
+  // ou, sous un filtre de thème, les affectations de l'analyse changent (S13-1-30). Mémorisé : son
+  // identité ne change qu'avec eux, et force-graph ne relance sa simulation qu'à un nouvel objet.
+  // Sans filtre de thème, les affectations ne servent pas : une nouvelle analyse ne refait pas le
+  // graphe, et ne fait pas repartir un graphe stabilisé.
+  const topicAssignments = filters.topic !== null ? topicAnalysis?.topicAssignments : undefined;
   const graphData = useMemo(
-    () => (fullGraphData ? filterCorpusGraph(fullGraphData, filters, topicAnalysis?.topicAssignments) : null),
-    [fullGraphData, filters, topicAnalysis]
+    () => (fullGraphData ? filterCorpusGraph(fullGraphData, filters, topicAssignments) : null),
+    [fullGraphData, filters, topicAssignments]
   );
 
   const graphRef = useRef<unknown>();
