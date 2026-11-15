@@ -19,8 +19,11 @@ import { changeOrigin } from '../change-origin';
  */
 
 const TRIGGER = /(^|[\s([;>])-?@([A-Za-z0-9_:-]*)$/;
-/** Les caractères de clé qui suivent le curseur : la fin de la clé remplacée. */
-const KEY_TAIL = /^[A-Za-z0-9_:-]*/;
+/**
+ * Les caractères de clé qui suivent le curseur, quand un délimiteur de citation (`]`, `;`, `,`)
+ * les termine : la fin d'une clé existante, remplacée avec elle.
+ */
+const KEY_TAIL = /^[A-Za-z0-9_:-]+(?=[\];,])/;
 const MAX_RESULTS = 12;
 
 interface CompletionOptions {
@@ -52,13 +55,16 @@ function rank(
 
 function applyCitation(candidate: CitationCandidate) {
   return (view: EditorView, _c: Completion, from: number, to: number) => {
-    // La clé entière est remplacée, pas seulement sa partie avant le curseur (S14-2-1).
     const line = view.state.doc.lineAt(from);
-    const end = to + (KEY_TAIL.exec(view.state.sliceDoc(to, line.to))?.[0].length ?? 0);
     // Un crochet ouvert et pas encore fermé sur la ligne → on le ferme. Ouvert : le dernier `[`
     // avant la clé n'est suivi d'aucun `]`. Fermé : un `]` vient après la clé avant tout `[`.
     const before = view.state.sliceDoc(line.from, from);
     const opened = before.lastIndexOf('[') > before.lastIndexOf(']');
+    // Dans une citation entre crochets, la clé entière est remplacée, pas seulement sa partie
+    // avant le curseur (S14-2-1). Ailleurs, ou sans délimiteur après elle, la suite reste : une clé
+    // tapée collée devant du texte (« Voir @jo|Smith », « [@jo|p. 4] ») ne doit rien effacer.
+    const tail = opened ? (KEY_TAIL.exec(view.state.sliceDoc(to, line.to))?.[0].length ?? 0) : 0;
+    const end = to + tail;
     const after = view.state.sliceDoc(end, line.to);
     const close = after.indexOf(']');
     const reopen = after.indexOf('[');

@@ -129,6 +129,17 @@ describe('autocomplétion @ : la clé choisie remplace la clé entière, et le c
   it('cas sain : reprendre la même clé ne change rien', async () => {
     expect(await choose('Voir [@smith2020|].', 'smith2020')).toBe('Voir [@smith2020].');
   });
+
+  // Une clé tapée collée devant du texte : rien ne dit que la suite est la fin d'une clé.
+  // Remplacer jusqu'au bout des caractères de clé effaçait le mot de l'historienne.
+  it.each([
+    ['Voir @jo|Smith a écrit.', 'Voir @jones1990Smith a écrit.'],
+    ['[@jo|p. 4]', '[@jones1990p. 4]'],
+    ['Voir (@jo|p. 4).', 'Voir (@jones1990p. 4).'],
+    ['[@jo|smith2020 p. 4]', '[@jones1990smith2020 p. 4]'],
+  ])('le texte qui suit reste : %s', async (doc, expected) => {
+    expect(await choose(doc, 'jones1990')).toBe(expected);
+  });
 });
 
 describe('autocomplétion @ : bibliographie vide', () => {
