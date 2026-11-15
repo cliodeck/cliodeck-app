@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { ArrowDownToLine, Check, FolderInput, GripVertical, Inbox, Trash2, X } from 'lucide-react';
 import {
   useDraftsStore,
+  draftPreview,
   draftTitle,
   draftsForProject,
   draftsOfMissingProjects,
@@ -60,7 +61,7 @@ const DraftCard: React.FC<{ draft: BrainstormDraft }> = ({ draft }) => {
           })}
         </span>
       </div>
-      <p className="drafts-panel__card-snippet">{draft.content.slice(0, 220)}</p>
+      <p className="drafts-panel__card-snippet">{draftPreview(draft)}</p>
       <div className="drafts-panel__card-actions">
         <button
           type="button"
@@ -113,7 +114,7 @@ const OtherProjectDraftCard: React.FC<{ draft: BrainstormDraft; projectPath: str
           {new Date(draft.createdAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
         </span>
       </div>
-      <p className="drafts-panel__card-snippet">{draft.content.slice(0, 220)}</p>
+      <p className="drafts-panel__card-snippet">{draftPreview(draft)}</p>
       <p className="drafts-panel__card-origin">
         {t('drafts.formerLocation')} <span className="drafts-panel__card-path">{draft.projectPath}</span>
       </p>

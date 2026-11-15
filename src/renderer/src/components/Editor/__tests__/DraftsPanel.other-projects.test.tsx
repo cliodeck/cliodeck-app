@@ -21,6 +21,7 @@ import { useDraftsStore, type BrainstormDraft } from '../../../stores/draftsStor
 import { useEditorStore } from '../../../stores/editorStore';
 import { useProjectStore } from '../../../stores/projectStore';
 import { useDialogStore } from '../../../stores/dialogStore';
+import { messageToDraft } from '../../Brainstorm/messageToDraft';
 
 vi.mock('../CodeMirrorEditor', async () => {
   const React = await import('react');
@@ -199,6 +200,22 @@ describe('la section « Brouillons d’autres projets »', () => {
     expect(useDraftsStore.getState().drafts.map((d) => d.id)).toEqual(['mien']);
     expect(section()).toBeNull();
     expect(cards()).toEqual(['Réponse du projet ouvert']);
+  });
+
+  it('une réponse mise de côté depuis le chat se reconnaît à son texte, pas au marqueur de provenance', async () => {
+    // Ce que « Mettre en brouillon » met en file : le marqueur, le texte, le marqueur de fin.
+    const fromChat = (id: string, text: string, projectPath: string): BrainstormDraft =>
+      draft(id, messageToDraft({ id: `m-${id}`, role: 'assistant', content: text }, { at: '2026-11-09T10:00:00.000Z' }), projectPath);
+
+    await show(OPEN, [
+      fromChat('mien', 'Le port de Danzig en 1920', OPEN),
+      fromChat('orphelin', 'Les quais de la ville libre', GONE),
+    ]);
+
+    expect(cards()).toEqual(['Le port de Danzig en 1920']);
+    expect(others()).toEqual(['Les quais de la ville libre']);
+    const snippets = Array.from(document.querySelectorAll('.drafts-panel__card-snippet')).map((p) => p.textContent);
+    expect(snippets).toEqual(['Le port de Danzig en 1920', 'Les quais de la ville libre']);
   });
 });
 

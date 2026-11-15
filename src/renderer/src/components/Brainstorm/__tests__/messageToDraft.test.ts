@@ -1,7 +1,19 @@
 import { describe, it, expect } from 'vitest';
-import { insertDraftAtOffset, messageToDraft } from '../messageToDraft';
+import { insertDraftAtOffset, isDraftMarkerLine, messageToDraft } from '../messageToDraft';
 
 describe('messageToDraft (3.3)', () => {
+  it('isDraftMarkerLine reconnaît les deux marqueurs qu’il pose, et eux seuls', () => {
+    const out = messageToDraft(
+      { id: 'a-1', role: 'assistant', content: 'Le port.\n\n<!-- une note de l’auteur -->\n\nVoir <!-- cliodeck:brainstorm-draft -->.' },
+      { at: '2026-04-13T12:00:00Z', citations: [{ sourceId: 'zotero:ABCD', label: 'Mémoires', quote: 'Une idée' }] }
+    );
+    const lines = out.split('\n');
+
+    expect(lines.filter(isDraftMarkerLine)).toEqual([lines[0], lines[lines.length - 1]]);
+    expect(isDraftMarkerLine('  <!-- /cliodeck:brainstorm-draft -->\r')).toBe(true);
+    expect(isDraftMarkerLine('<!-- cliodeck:brainstorm-drafts -->')).toBe(false);
+  });
+
   it('formats an assistant turn with markers', () => {
     const out = messageToDraft(
       { id: 'a-1', role: 'assistant', content: 'Hello world.' },

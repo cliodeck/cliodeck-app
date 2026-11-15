@@ -17,6 +17,7 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { isDraftMarkerLine } from '../components/Brainstorm/messageToDraft';
 
 export interface BrainstormDraft {
   id: string;
@@ -216,12 +217,30 @@ export function useLocateDraftProjects(projectPath: string | null, refresh: unkn
   }, [projectPath, paths, refresh]);
 }
 
-/** Première ligne non vide, tronquée — le « titre » d'un brouillon. */
+/**
+ * Le texte d'un brouillon, sans les lignes du marqueur de provenance que pose « Mettre en
+ * brouillon » (`messageToDraft`) : le titre et l'aperçu prenaient le marqueur pour le texte, et
+ * toutes les cartes s'intitulaient « <!-- cliodeck:brainstorm-d… ».
+ */
+function draftText(draft: BrainstormDraft): string {
+  return draft.content
+    .split('\n')
+    .filter((line) => !isDraftMarkerLine(line))
+    .join('\n')
+    .trim();
+}
+
+/** Première ligne non vide du texte, tronquée — le « titre » d'un brouillon. */
 export function draftTitle(draft: BrainstormDraft): string {
   const line =
-    draft.content
+    draftText(draft)
       .split('\n')
       .map((l) => l.replace(/^#+\s*/, '').trim())
       .find((l) => l.length > 0) ?? '';
   return line.length > 60 ? `${line.slice(0, 57)}…` : line || '(vide)';
+}
+
+/** Le début du texte d'un brouillon, que montre sa carte. */
+export function draftPreview(draft: BrainstormDraft): string {
+  return draftText(draft).slice(0, 220);
 }
