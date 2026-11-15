@@ -832,6 +832,8 @@
       "retrievalEmpty": "No relevant sources found.",
       "retrievalPartial": "Some searches failed; the available sources may be incomplete.",
       "retrievalFailed": "Source search failed.",
+      "failedCorpora_one": "Failed corpus: {{corpora}}.",
+      "failedCorpora_other": "Failed corpora: {{corpora}}.",
       "contextLabel": "Context:",
       "contextManuscriptShare": "of which manuscript",
       "documentsConsulted": "Documents consulted",

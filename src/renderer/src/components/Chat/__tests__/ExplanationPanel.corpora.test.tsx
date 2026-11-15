@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 /**
- * Un corpus dont l'index se construit se dit « indexation en cours », jamais « échec » (E3).
+ * La bande de la recherche nomme les corpus en cause (H5), et un corpus dont l'index se construit
+ * se dit « indexation en cours », jamais « échec » (E3).
  *
- * Pendant une reconstruction des index, la bibliographie valait « échec » dans la ligne « Par
- * corpus », et la bande disait « La recherche de sources a échoué. ». Vrai panneau, vraies locales :
- * le simulacre commun rend la clé seule, et ne verrait ni l'interpolation ni le pluriel.
+ * La bande disait « La recherche de sources a échoué. » sans dire où : seule la ligne « Par corpus »,
+ * repliée, nommait le corpus. Pendant une reconstruction des index, la bibliographie y valait
+ * « échec ». Vrai panneau, vraies locales : le simulacre commun rend la clé seule, et ne verrait ni
+ * l'interpolation ni le pluriel.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -41,6 +43,7 @@ type Source = Corpus['source'];
 const ok = (source: Source, count = 0): Corpus => ({ source, attempted: true, ok: true, hitCount: count, selectedCount: count });
 const failed = (source: Source): Corpus => ({ source, attempted: true, ok: false, hitCount: 0, selectedCount: 0 });
 const indexing = (source: Source): Corpus => ({ ...failed(source), indexing: true });
+const notSearched = (source: Source): Corpus => ({ source, attempted: false, ok: false, hitCount: 0, selectedCount: 0 });
 
 function explanation(
   retrievalStatus: RAGExplanation['search']['retrievalStatus'],
@@ -73,6 +76,42 @@ const band = (): HTMLElement => screen.getByRole('status');
 afterEach(async () => {
   cleanup();
   await h.i18n?.changeLanguage('fr');
+});
+
+describe('la bande de la recherche nomme les corpus en échec (H5)', () => {
+  it('recherche en échec : la bande nomme chaque corpus tombé, pas ceux restés à 0 ni ceux non interrogés', () => {
+    render(
+      <ExplanationPanel
+        explanation={explanation('failed', [failed('secondary'), ok('primary'), failed('vault'), notSearched('manuscript')])}
+      />
+    );
+    expect(band().textContent).toBe('La recherche de sources a échoué. Corpus en échec : Bibliographie, Notes (vault).');
+    expect(band().getAttribute('data-status')).toBe('failed');
+  });
+
+  it('panne partielle : la bande nomme le corpus tombé', () => {
+    render(<ExplanationPanel explanation={explanation('partial', [failed('primary'), ok('secondary', 3)])} />);
+    expect(band().textContent).toBe(
+      'Certaines recherches ont échoué ; les sources peuvent être incomplètes. Corpus en échec : Archives.'
+    );
+  });
+
+  it.each([
+    ['en', 'Source search failed. Failed corpus: Bibliography.', 'Source search failed. Failed corpora: Bibliography, Reading notes.'],
+    ['de', 'Die Quellensuche ist fehlgeschlagen. Fehlgeschlagenes Korpus: Bibliografie.', 'Die Quellensuche ist fehlgeschlagen. Fehlgeschlagene Korpora: Bibliografie, Lesenotizen.'],
+  ] as const)('%s : singulier et pluriel', async (lng, one, many) => {
+    await inLanguage(lng);
+    render(<ExplanationPanel explanation={explanation('failed', [failed('secondary')])} />);
+    expect(band().textContent).toBe(one);
+    cleanup();
+    render(<ExplanationPanel explanation={explanation('failed', [failed('secondary'), failed('readingNotes')])} />);
+    expect(band().textContent).toBe(many);
+  });
+
+  it('témoin : aucune panne, aucune source pertinente : la bande d’avant, sans corpus nommé', () => {
+    render(<ExplanationPanel explanation={explanation('empty', [ok('secondary'), ok('vault')])} />);
+    expect(band().textContent).toBe('Aucune source pertinente trouvée.');
+  });
 });
 
 describe('un corpus dont l’index se construit : « indexation en cours » (E3)', () => {

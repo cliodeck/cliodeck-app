@@ -47,6 +47,12 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
       t(c.key, c.fallback)
     );
   const status = explanation.search.retrievalStatus;
+  // Les corpus en panne, nommés dans la bande : seule la ligne « Par corpus », repliée, les disait
+  // (H5). Ni ceux restés à 0, ni ceux non interrogés, ni ceux dont l'index se construit.
+  const failed =
+    status === 'partial' || status === 'failed'
+      ? corpusNames((entry) => entry.attempted && !entry.ok && !entry.indexing && entry.selectedCount === 0)
+      : [];
   // Un corpus dont l'index se construit n'a pas été interrogé, sans être en panne (E3) : la bande le
   // nomme, comme une information, même quand les autres corpus ont répondu.
   const indexing = corpusNames((entry) => entry.attempted && entry.indexing === true);
@@ -59,6 +65,9 @@ export const ExplanationPanel: React.FC<{ explanation: RAGExplanation }> = ({
         : status === 'failed'
           ? t('chat.explanation.retrievalFailed', 'La recherche de sources a échoué.')
           : null,
+    failed.length > 0
+      ? t('chat.explanation.failedCorpora', { count: failed.length, corpora: failed.join(', ') })
+      : null,
     indexing.length > 0
       ? t('chat.explanation.indexingCorpora', { count: indexing.length, corpora: indexing.join(', ') })
       : null,

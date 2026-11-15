@@ -1055,3 +1055,86 @@ describe('chat-engine — le résumé du compacteur appartient au tour (S06-1-18
     expect(done).toEqual([{ delta: '', done: true, finishReason: 'error' }]);
   });
 });
+
+/**
+ * Le modèle échoue, la recherche aussi : l'explication part quand même, avant l'erreur (H5). Ollama
+ * arrêté, la panne de recherche restait cachée derrière « Le modèle a échoué : fetch failed » :
+ * l'explication, donc la bande qui nomme les corpus en panne, ne partait qu'en fin de génération
+ * réussie, à l'annulation ou au plafond des outils. Trois chemins d'échec du modèle : le chunk
+ * terminal d'erreur d'un fournisseur, une exception (« fetch failed »), un flux coupé sans terminal
+ * au milieu d'appels d'outils.
+ */
+describe('chat-engine — l’explication malgré l’échec du modèle (H5)', () => {
+  const failingSearch = { search: async () => { throw new Error('connect ECONNREFUSED 127.0.0.1:11434'); } };
+
+  async function turnEvents(provider: LLMProvider, extra: Partial<Parameters<typeof runChatTurn>[0]> = {}) {
+    const events: string[] = [];
+    const explanations: RAGExplanation[] = [];
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'La grève des dockers de 1907' }],
+      retriever: failingSearch,
+      ...extra,
+      hooks: {
+        onExplanation: (value) => { explanations.push(value); events.push('explanation'); },
+        onError: (err) => events.push(`error:${err.code}`),
+        onDone: (chunk) => events.push(`done:${chunk.finishReason}`),
+      },
+    });
+    return { events, explanations };
+  }
+
+  it('chunk terminal d’erreur du fournisseur : l’explication part, une fois, avant l’erreur', async () => {
+    const provider = makeFakeProvider([
+      { delta: 'Début', done: false },
+      { delta: '', done: true, finishReason: 'error' },
+    ]);
+    provider.getStatus = () => ({ state: 'failed', lastError: { code: 'ollama_unreachable', message: 'fetch failed' } }) as never;
+    const { events, explanations } = await turnEvents(provider);
+    expect(events).toEqual(['explanation', 'error:ollama_unreachable', 'done:error']);
+    expect(explanations[0].search.retrievalStatus).toBe('failed');
+    expect(explanations[0].timing.generationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('le fournisseur lève (« fetch failed ») : l’explication part avant l’erreur', async () => {
+    const provider = makeFakeProvider([]);
+    provider.chat = async function* () {
+      yield* [];
+      throw new TypeError('fetch failed');
+    };
+    const { events, explanations } = await turnEvents(provider);
+    expect(events).toEqual(['explanation', 'error:stream_error', 'done:error']);
+    expect(explanations).toHaveLength(1);
+    expect(explanations[0].search.retrievalStatus).toBe('failed');
+  });
+
+  it('flux coupé sans terminal pendant un appel d’outil : l’explication part avant stream_incomplete', async () => {
+    const provider = makeFakeProvider([
+      { delta: '', toolCall: { id: 'c1', name: 'search', arguments: '{}' } },
+    ]);
+    const { events } = await turnEvents(provider, {
+      tools: [{ name: 'search', description: 'cherche', parameters: { type: 'object' } }],
+      toolHandler: { call: async () => ({ ok: true, result: {} }) },
+    });
+    expect(events).toEqual(['explanation', 'error:stream_incomplete', 'done:error']);
+  });
+
+  it('témoin : une réponse ordinaire n’émet l’explication qu’une fois', async () => {
+    const provider = makeFakeProvider([
+      { delta: 'Réponse', done: false },
+      { delta: '', done: true, finishReason: 'stop' },
+    ]);
+    const { events } = await turnEvents(provider);
+    expect(events).toEqual(['explanation', 'done:stop']);
+  });
+
+  it('témoin : sans recherche, l’échec du modèle n’invente aucune explication', async () => {
+    const provider = makeFakeProvider([]);
+    provider.chat = async function* () {
+      yield* [];
+      throw new TypeError('fetch failed');
+    };
+    const { events } = await turnEvents(provider, { retriever: undefined });
+    expect(events).toEqual(['error:stream_error', 'done:error']);
+  });
+});

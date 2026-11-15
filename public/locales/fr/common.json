@@ -832,6 +832,8 @@
       "retrievalEmpty": "Aucune source pertinente trouvée.",
       "retrievalPartial": "Certaines recherches ont échoué ; les sources peuvent être incomplètes.",
       "retrievalFailed": "La recherche de sources a échoué.",
+      "failedCorpora_one": "Corpus en échec : {{corpora}}.",
+      "failedCorpora_other": "Corpus en échec : {{corpora}}.",
       "contextLabel": "Contexte:",
       "contextManuscriptShare": "dont manuscrit",
       "documentsConsulted": "Documents consultés",

@@ -14,6 +14,7 @@ import { useChatStore } from '../../../stores/chatStore';
 import { useNotificationStore } from '../../../stores/notificationStore';
 import { projectLifecycle } from '../../../lifecycle/projectLifecycle';
 import i18n from '../../../i18n';
+import type { RAGExplanation } from '../../../stores/chatStore';
 
 type StartOpts = Record<string, unknown> | undefined;
 type ChunkEnvelope = {
@@ -23,10 +24,17 @@ type ChunkEnvelope = {
 };
 
 const chunkListeners: Array<(env: ChunkEnvelope) => void> = [];
+type ExplanationEnvelope = { sessionId: string; explanation: RAGExplanation };
+const explanationListeners: Array<(env: ExplanationEnvelope) => void> = [];
 
 /** Ce que le main enverrait sur `fusion:chat:chunk`, à tous les abonnés du moment. */
 function emit(env: ChunkEnvelope): void {
   for (const cb of [...chunkListeners]) cb(env);
+}
+
+/** Ce que le main enverrait sur `fusion:chat:explanation`. */
+function emitExplanation(env: ExplanationEnvelope): void {
+  for (const cb of [...explanationListeners]) cb(env);
 }
 
 /**
@@ -36,6 +44,7 @@ function emit(env: ChunkEnvelope): void {
  */
 function installFusionChat(): ReturnType<typeof vi.fn> {
   chunkListeners.length = 0;
+  explanationListeners.length = 0;
   const start: ReturnType<typeof vi.fn> = vi.fn(async (_messages: unknown[], opts?: StartOpts) => ({
     success: true,
     sessionId: (opts?.sessionId as string | undefined) ?? drawnByMain(start.mock.calls.length - 1),
@@ -53,7 +62,13 @@ function installFusionChat(): ReturnType<typeof vi.fn> {
     },
     onContext: () => unsub,
     onToolCall: () => unsub,
-    onExplanation: () => unsub,
+    onExplanation: (cb: (env: ExplanationEnvelope) => void) => {
+      explanationListeners.push(cb);
+      return () => {
+        const i = explanationListeners.indexOf(cb);
+        if (i >= 0) explanationListeners.splice(i, 1);
+      };
+    },
     onStatus: () => unsub,
   };
   const w = window as unknown as { electron: Record<string, unknown> };
@@ -255,6 +270,38 @@ describe('useBrainstormChat — transmission des réglages du panneau', () => {
       pending: false,
     });
     expect(last?.error).toContain('model runner has unexpectedly stopped');
+  });
+
+  // H5 : Ollama arrêté, le main émet l'explication juste avant l'erreur du modèle. La bulle en erreur
+  // la garde : la bande qui nomme les corpus en panne s'affiche sous « Le modèle a échoué ».
+  it('l’explication reçue juste avant l’erreur du modèle reste rattachée à la bulle en erreur', async () => {
+    const start = installFusionChat();
+    const { result } = renderHook(() => useBrainstormChat());
+    await act(async () => {
+      await result.current.send('bonjour');
+    });
+    const s1 = sessionOf(start);
+    const explanation = {
+      search: {
+        query: 'bonjour', totalResults: 0, searchDurationMs: 3, cacheHit: false, sourceType: 'both', documents: [],
+        corpora: [{ source: 'secondary', attempted: true, ok: false, hitCount: 0, selectedCount: 0 }],
+        retrievalStatus: 'failed',
+      },
+      llm: { provider: 'ollama', model: 'faux', contextWindow: 0, temperature: 0, promptSize: 10 },
+      timing: { searchMs: 3, generationMs: 1, totalMs: 4 },
+    } as RAGExplanation;
+    act(() => {
+      emitExplanation({ sessionId: s1, explanation });
+      emit({
+        sessionId: s1,
+        chunk: { delta: '', done: true, finishReason: 'error' },
+        error: { code: 'stream_error', message: 'fetch failed' },
+      });
+    });
+    const last = useChatStore.getState().messages.at(-1);
+    expect(last).toMatchObject({ role: 'assistant', isError: true, pending: false });
+    expect(last?.error).toContain('fetch failed');
+    expect(last?.explanation).toEqual(explanation);
   });
 
   it('n’envoie pas de modèle quand la génération est confiée au modèle embarqué', async () => {

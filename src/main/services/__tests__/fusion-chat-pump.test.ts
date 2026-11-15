@@ -792,6 +792,30 @@ describe('recherche en échec : le modèle et l’écran le disent (S04-2-1)', (
     expect(systemText()).not.toMatch(/Certaines recherches dans les sources ont échoué/);
   });
 
+  // H5 : Ollama arrêté, la recherche tombe, puis le modèle (« fetch failed »). L'explication, donc la
+  // bande qui nomme les corpus en panne, partait seulement à la fin d'une réponse : l'historien ne
+  // voyait que « Le modèle a échoué ». Elle part maintenant avant l'enveloppe d'erreur du tour, que
+  // le renderer rattache à la même bulle.
+  it('Ollama arrêté : la recherche et le modèle tombent, l’explication arrive avant l’erreur du tour', async () => {
+    bench.provider = async function* () {
+      yield* [];
+      throw new TypeError('fetch failed');
+    };
+    const corpora = [corpus('secondary', false), corpus('primary', true), corpus('vault', false)];
+    vi.mocked(retrievalService.searchWithStats).mockResolvedValueOnce(withCorpora(corpora));
+    const sent = await turn();
+
+    const explanationAt = sent.findIndex((e) => e.channel === 'fusion:chat:explanation');
+    const terminalAt = sent.findIndex(
+      (e) => e.channel === 'fusion:chat:chunk' && (e.payload as ChatStreamEnvelope).chunk.done
+    );
+    expect(terminal(sent)?.error).toMatchObject({ code: 'stream_error', message: 'fetch failed' });
+    expect(explanationAt).toBeGreaterThan(-1);
+    expect(explanationAt).toBeLessThan(terminalAt);
+    expect(explanationOf(sent)?.search.retrievalStatus).toBe('failed');
+    expect(explanationOf(sent)?.search.corpora).toEqual(corpora);
+  });
+
   it('témoin J9 : « Arrêter » pendant la recherche ne donne ni consigne, ni échec affiché, ni appel au modèle', async () => {
     let searching = false;
     vi.mocked(retrievalService.searchWithStats).mockImplementationOnce(
