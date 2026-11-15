@@ -1359,6 +1359,7 @@
     "showPreview": "Voir l'extrait",
     "hidePreview": "Masquer l'extrait",
     "page": "Page {{page}}",
+    "scoreTooltip": "Similarité entre votre texte et cet extrait. Avec le reranking intelligent, l'IA ordonne les sources : un pourcentage plus bas peut figurer au-dessus d'un plus haut.",
     "collections": "Collections",
     "collectionsDescription": "Limiter la recherche de similarités à certaines collections",
     "allCollections": "Toutes les collections"

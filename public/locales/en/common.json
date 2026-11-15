@@ -1359,6 +1359,7 @@
     "showPreview": "Show excerpt",
     "hidePreview": "Hide excerpt",
     "page": "Page {{page}}",
+    "scoreTooltip": "Similarity between your text and this excerpt. With smart reranking, the AI orders the sources: a lower percentage can appear above a higher one.",
     "collections": "Collections",
     "collectionsDescription": "Limit the similarity search to specific collections",
     "allCollections": "All collections"

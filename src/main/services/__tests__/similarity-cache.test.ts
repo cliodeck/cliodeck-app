@@ -16,6 +16,10 @@
  * Avec un filtre de collections, l'empreinte ne voyait pas une appartenance changée par une
  * synchronisation Zotero, qui ne réindexe rien.
  *
+ * Un changement de ce que le cache range (L11-3 : la similarité après reclassement, l'aperçu, le
+ * découpage en phrases) ne change ni le texte, ni les options, ni les corpus : sans version du
+ * contenu, un cache écrit avant restait servi jusqu'à 24 h, avec ses anciennes recommandations.
+ *
  * Vrai service, vrai fichier de cache dans un projet temporaire. La recherche et l'état des corpus
  * sont simulés : ce qui compte ici, c'est quand le service cherche de nouveau, et ce qu'il rend.
  */
@@ -80,7 +84,7 @@ vi.mock('../project-manager.js', () => ({
   projectManager: { getCurrentProjectPath: () => h.projectPath },
 }));
 
-import { similarityService, type SimilarityOptions } from '../similarity-service.js';
+import { SIMILARITY_CACHE_VERSION, similarityService, type SimilarityOptions } from '../similarity-service.js';
 
 const BASE: Partial<SimilarityOptions> = {
   granularity: 'paragraph',
@@ -412,5 +416,35 @@ describe('cache de similarité — projet disparu pendant l’analyse', () => {
     await analyze(CHAPTER_1);
 
     expect(fs.existsSync(project)).toBe(false);
+  });
+});
+
+describe('cache de similarité — la version de son contenu (L11-3)', () => {
+  /** Réécrit le cache de la dernière analyse avec une autre version ; `undefined` : sans version, comme avant L11-3. */
+  const rewriteVersion = (version: number | undefined) => {
+    const cache = JSON.parse(fs.readFileSync(cachePath(), 'utf8'));
+    if (version === undefined) delete cache.version;
+    else cache.version = version;
+    fs.writeFileSync(cachePath(), JSON.stringify(cache));
+  };
+
+  it.each([
+    ['écrit avant L11-3, sans version', undefined],
+    ['de la version précédente', SIMILARITY_CACHE_VERSION - 1],
+  ])('un cache %s n’est pas servi à l’analyse', async (_name, version) => {
+    expect(await searchesAgainAfter(() => rewriteVersion(version))).toBe(true);
+  });
+
+  it.each([
+    ['écrit avant L11-3, sans version', undefined],
+    ['de la version précédente', SIMILARITY_CACHE_VERSION - 1],
+  ])('…ni rendu à la relecture (cache %s)', async (_name, version) => {
+    await analyze(CHAPTER_1);
+    rewriteVersion(version);
+    expect(await reread(CHAPTER_1)).toEqual([]);
+  });
+
+  it('témoin : un cache réécrit à la version courante sert', async () => {
+    expect(await searchesAgainAfter(() => rewriteVersion(SIMILARITY_CACHE_VERSION))).toBe(false);
   });
 });

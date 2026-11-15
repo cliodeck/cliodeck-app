@@ -14,6 +14,7 @@ import { workspaceLinkOutsideSync } from '../../../backend/core/workspace/link-g
 import { assertProjectRoot } from '../../../backend/core/workspace/project-root.js';
 import { sameFile } from '../../../backend/core/vector-store/file-identity.js';
 import { toStoredPath } from '../../../backend/core/bibliography/stored-path.js';
+import { chunkPreview } from '../../../backend/core/chunking/chunk-preview.js';
 
 // MARK: - Types
 
@@ -77,6 +78,8 @@ export interface SimilarityCache {
    * nom. Absent d'un cache écrit avant L11-2.
    */
   documentPath?: string | null;
+  /** La version du contenu rangé (`SIMILARITY_CACHE_VERSION`). Absente d'un cache écrit avant L11-3. */
+  version?: number;
   vectorStoreHash: string;
   segments: Record<string, SimilarityResult>;
   createdAt: number;
@@ -124,6 +127,17 @@ const UNKNOWN_CORPUS = 'unknown';
 /** Un cache vaut 24 heures. */
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * La version de ce que range le cache. Elle monte à chaque changement des segments ou des
+ * recommandations rendus pour un même texte, avec les mêmes options et les mêmes corpus : sans
+ * elle, un cache écrit avant restait servi jusqu'à 24 h. Un cache d'une autre version n'est ni
+ * servi ni relu.
+ *
+ * 2 (L11-3) : la similarité reste le cosinus après reclassement, l'aperçu montre le passage
+ * trouvé, et le découpage en phrases est refait (d'autres segments).
+ */
+export const SIMILARITY_CACHE_VERSION = 2;
+
 /** En deçà, un segment (un intertitre, un astérisme) n'est pas cherché : il n'a aucune recommandation. */
 const MIN_SEARCHED_LENGTH = 20;
 
@@ -137,6 +151,134 @@ const isSearched = (segment: TextSegment): boolean => segment.content.trim().len
  */
 function toLf(text: string): string {
   return text.replace(/\r\n/g, '\n');
+}
+
+/** Une fin de phrase possible : « . », « ! » ou « ? », suivis d'un blanc ou de la fin du texte. */
+const SENTENCE_END_RE = /[.!?]+(?=\s|$)/gu;
+
+/** Titres, toujours suivis d'un nom, comparés tels qu'écrits : « M. Dupont », mais « 4 000 m. » finit une phrase. */
+const TITLE_ABBREVIATIONS: ReadonlySet<string> = new Set([
+  'M', 'MM', 'Mme', 'Mmes', 'Mlle', 'Mlles', 'Dr', 'Pr', 'Prof', 'Mr', 'Mrs', 'Ms', 'Jr', 'Sr',
+]);
+
+/**
+ * Jamais une fin de phrase, en minuscules : latin et renvois (« cf. », « op. cit. »), éditeur
+ * (« ed. »), et en allemand « vgl. », « bzw. », « Hg. », « Hrsg. », « z.B. », « d.h. », « u.a. »
+ * écrits sans blanc.
+ */
+const ALWAYS_ABBREVIATIONS: ReadonlySet<string> = new Set([
+  'cf', 'vs', 'i.e', 'e.g', 'op', 'cit', 'ibid', 'ed', 'eds',
+  'vgl', 'bzw', 'hg', 'hrsg', 'z.b', 'd.h', 'u.a',
+]);
+
+/** Les mêmes, écrites avec un blanc entre leurs deux lettres : « z. B. », « d. h. », « u. a. », « i. e. », « e. g. ». */
+const SPACED_ABBREVIATIONS: ReadonlyArray<readonly [string, string]> = [
+  ['z', 'b'], ['d', 'h'], ['u', 'a'], ['i', 'e'], ['e', 'g'],
+];
+
+/**
+ * Des abréviations seulement devant un nombre, en minuscules : « p. 12 », « vol. IV de », « S. 12 »
+ * (Seite), « Nr. 5 », « Bd. II des ». Ailleurs, « vol », « no », « fig », « chap » ou « tab » sont
+ * des mots qui peuvent finir une phrase (« C'était un vol. »).
+ */
+const BEFORE_NUMBER_ABBREVIATIONS: ReadonlySet<string> = new Set([
+  'p', 'pp', 'vol', 'no', 'chap', 'fig', 'tab', 's', 'nr', 'bd',
+]);
+
+/**
+ * Un nombre romain bien formé, de I à MMMMCMXCIX : « IV », « XIV », mais pas « IL », « DID » ou
+ * « CIVIL », mots d'un texte en capitales (« C'était un vol. IL FUT PUNI. »).
+ */
+const ROMAN = 'M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})';
+
+/** Ce qui suit un numéro : un blanc, une ponctuation, un tiret ou la fin du texte. */
+const NUMBER_END = '(?=[\\s,.;:)\\]–-]|$)';
+
+/**
+ * Un nombre après l'abréviation : des chiffres, ou un chiffre romain en capitales suivi d'un blanc,
+ * d'une ponctuation ou d'un tiret (« vol. IV de », « vol. II, », « chap. III et »).
+ */
+const NUMBER_AHEAD = new RegExp(`^\\s+(?:\\p{N}|(?=[IVXLCDM])${ROMAN}${NUMBER_END})`, 'u');
+
+/** Après « p. » et « pp. », une page liminaire en chiffres romains minuscules (« p. xiv », « pp. xii-xv »). */
+const LOWER_ROMAN_AHEAD = new RegExp(`^\\s+(?=[ivxlcdm])${ROMAN.toLowerCase()}${NUMBER_END}`, 'u');
+
+/**
+ * Après « no. », un « I » seul est le pronom anglais, pas un numéro : « He said no. I left. »
+ * Après « vol. », « chap. » ou « Bd. », il reste un numéro (« vol. I de ») : comme l'ancien
+ * découpage, qui ne coupait jamais après eux, « a nice chap. I liked him. » ne coupe pas.
+ */
+const LONE_I_AHEAD = /^\s+I(?![\p{L}\p{N}])/u;
+
+/**
+ * « etc. », « usw. » : la fin d'une énumération, et d'une phrase seulement devant une capitale.
+ * « Jh. » (Jahrhundert) de même : « im 19. Jh. entstand » ne coupe pas, « im 19. Jh. Danach » si.
+ */
+const BEFORE_CAPITAL_ABBREVIATIONS: ReadonlySet<string> = new Set(['etc', 'usw', 'jh']);
+
+/**
+ * Un ordinal allemand de date ou de siècle : un ou deux chiffres, puis un mois, « Jh. » ou
+ * « Jahrhundert » (« am 9. November », « im 19. Jh. »). Les autres ordinaux restent des fins de
+ * phrase possibles : en allemand, tout nom prend une capitale, et un ordinal devant un nom
+ * (« der 2. Weltkrieg ») s'écrit comme une phrase qui finit sur un nombre (« … auf Seite 12. Kriege
+ * brachen aus. »).
+ *
+ * « Jh. » et « Jahrhundert » ne s'écrivent qu'en allemand : ils suffisent (« Ende 19. Jh. »). Un
+ * mois, non : « April », « August », « September » et « November » sont aussi anglais, et « Mai »
+ * ouvre une phrase française (« … p. 45. Mai 68 marque une rupture. »). Devant un mois, le nombre
+ * n'est un ordinal qu'après une préposition ou un article allemands (« am 9. November », « seit
+ * dem 1. Mai », « Berlin, den 9. November ») ; ailleurs, il finit la phrase.
+ */
+const ORDINAL_NUMBER = /^\d{1,2}$/;
+const GERMAN_CENTURY_AHEAD = /^\s+(?:Jh\.|Jahrhunderts?)(?=[\s,.;:)\]]|$)/u;
+const GERMAN_MONTH_AHEAD =
+  /^\s+(?:Januar|Jänner|Februar|Feber|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)(?=[\s,.;:)\]]|$)/u;
+const GERMAN_DATE_LEADS: ReadonlySet<string> = new Set([
+  'am', 'im', 'vom', 'zum', 'bis', 'seit', 'ab', 'den', 'dem', 'des', 'der',
+]);
+
+/** Le dernier mot entier d'un texte, suivi d'un blanc : celui qui précède le nombre. */
+const LEAD_WORD = /(?<![\p{L}\p{N}])(\p{L}+)\s+$/u;
+
+/** Vrai si le nombre qui finit en `dot` est un ordinal allemand de date ou de siècle. */
+function isGermanOrdinal(text: string, dot: number, word: string, ahead: string): boolean {
+  if (GERMAN_CENTURY_AHEAD.test(ahead)) return true;
+  if (!GERMAN_MONTH_AHEAD.test(ahead)) return false;
+  const start = dot - word.length;
+  const lead = LEAD_WORD.exec(text.slice(Math.max(0, start - 16), start))?.[1]?.toLowerCase();
+  return lead !== undefined && GERMAN_DATE_LEADS.has(lead);
+}
+
+/** Le mot qui précède un point : ce qui suit le dernier blanc ou la dernière ouverture (« ( », « « »…). */
+const WORD_BEFORE = /[^\s«"“‘([]*$/u;
+
+/**
+ * Vrai si le point en `dot` termine une abréviation et pas une phrase. Le mot qui précède se
+ * compare en entier : « signed. » ne finit pas par l'abréviation « ed. ».
+ */
+function isAbbreviationDot(text: string, dot: number): boolean {
+  const word = WORD_BEFORE.exec(text.slice(Math.max(0, dot - 40), dot))?.[0] ?? '';
+  if (word === '') return false;
+  if (TITLE_ABBREVIATIONS.has(word)) return true;
+
+  const lower = word.toLowerCase();
+  if (ALWAYS_ABBREVIATIONS.has(lower)) return true;
+
+  const ahead = text.slice(dot + 1, dot + 24);
+  if (BEFORE_NUMBER_ABBREVIATIONS.has(lower)) {
+    if (lower === 'no' && LONE_I_AHEAD.test(ahead)) return false;
+    return NUMBER_AHEAD.test(ahead) || ((lower === 'p' || lower === 'pp') && LOWER_ROMAN_AHEAD.test(ahead));
+  }
+  if (BEFORE_CAPITAL_ABBREVIATIONS.has(lower)) return !/^\s+\p{Lu}/u.test(ahead);
+  if (ORDINAL_NUMBER.test(word)) return isGermanOrdinal(text, dot, word, ahead);
+
+  // « z. B. » : au premier point, la lettre qui suit ; au second, celle qui précède.
+  const next = /^\s(\p{L})\./u.exec(ahead)?.[1]?.toLowerCase();
+  const behind = text.slice(Math.max(0, dot - word.length - 4), dot - word.length);
+  const before = /(?:^|[^\p{L}\p{N}])(\p{L})\.\s$/u.exec(behind)?.[1]?.toLowerCase();
+  return SPACED_ABBREVIATIONS.some(
+    ([first, second]) => (lower === first && next === second) || (lower === second && before === first)
+  );
 }
 
 /** Les sept options, collections triées : tout ce qui change les recommandations (S13-1-3). */
@@ -287,6 +429,7 @@ class SimilarityService {
 
     // Save to cache
     await this.saveCache(projectPath, {
+      version: SIMILARITY_CACHE_VERSION,
       documentHash,
       documentPath: documentPath ? toStoredPath(documentPath, projectPath) : null,
       vectorStoreHash,
@@ -530,103 +673,46 @@ class SimilarityService {
   }
 
   /**
-   * Segment by sentences
-   * Handles common abbreviations in French and English
+   * Segment by sentences. Une phrase finit sur « . », « ! » ou « ? » suivis d'un blanc ou de la fin
+   * du texte, sauf après une abréviation (`isAbbreviationDot`). Le texte n'est pas transformé : chaque
+   * phrase est découpée dans l'original, ponctuation comprise, et ses lignes se comptent à sa position
+   * (S13-1-7). Les abréviations devenaient des marqueurs sans limite de mot (« M. » prenait la fin de
+   * « Potsdam. ») et les lignes se comptaient sur le texte à marqueurs.
    */
   private segmentBySentence(text: string): TextSegment[] {
     const segments: TextSegment[] = [];
 
-    // Common abbreviations to not split on
-    const abbreviations = [
-      'M.',
-      'Mme.',
-      'Mlle.',
-      'Dr.',
-      'Pr.',
-      'Prof.',
-      'Mr.',
-      'Mrs.',
-      'Ms.',
-      'Jr.',
-      'Sr.',
-      'vs.',
-      'etc.',
-      'cf.',
-      'i.e.',
-      'e.g.',
-      'p.',
-      'pp.',
-      'vol.',
-      'no.',
-      'ed.',
-      'eds.',
-      'chap.',
-      'fig.',
-      'tab.',
-      'op.',
-      'cit.',
-      'ibid.',
-    ];
+    // Les positions croissent : les lignes se comptent au fil du texte.
+    let line = 0;
+    let scanned = 0;
+    const lineAt = (position: number): number => {
+      for (; scanned < position; scanned++) if (text[scanned] === '\n') line++;
+      return line;
+    };
 
-    // Replace abbreviations with placeholders
-    let processedText = text;
-    const placeholderMap: Map<string, string> = new Map();
-
-    abbreviations.forEach((abbr, idx) => {
-      const placeholder = `__ABBR_${idx}__`;
-      const regex = new RegExp(abbr.replace('.', '\\.'), 'gi');
-      processedText = processedText.replace(regex, (match) => {
-        placeholderMap.set(placeholder, match);
-        return placeholder;
-      });
-    });
-
-    // Split on sentence-ending punctuation
-    const sentencePattern = /[.!?]+[\s\n]+/g;
-    const rawSentences = processedText.split(sentencePattern);
-
-    // Track line numbers (approximate)
-    const lines = text.split('\n');
-    let currentLineIndex = 0;
-    let charCount = 0;
-
-    for (const sentence of rawSentences) {
-      // Restore abbreviations
-      let restoredSentence = sentence;
-      placeholderMap.forEach((original, placeholder) => {
-        restoredSentence = restoredSentence.replace(new RegExp(placeholder, 'g'), original);
-      });
-
-      const trimmed = restoredSentence.trim();
-      if (trimmed.length > 0) {
-        // Find approximate line number
-        const startLine = currentLineIndex;
-        let endLine = startLine;
-
-        // Count how many lines this sentence spans
-        const sentenceLines = trimmed.split('\n').length;
-        endLine = Math.min(startLine + sentenceLines - 1, lines.length - 1);
-
+    let start = 0;
+    const cut = (end: number) => {
+      const raw = text.slice(start, end);
+      const content = raw.trim();
+      if (content.length > 0) {
+        const from = start + raw.length - raw.trimStart().length;
         segments.push({
-          id: this.computeHash(trimmed),
-          content: trimmed,
-          startLine,
-          endLine,
+          id: this.computeHash(content),
+          content,
+          startLine: lineAt(from),
+          endLine: lineAt(from + content.length - 1),
           type: 'sentence',
         });
-
-        // Update line tracking
-        charCount += sentence.length;
-        while (currentLineIndex < lines.length - 1) {
-          const lineLength = lines[currentLineIndex].length + 1; // +1 for newline
-          if (charCount <= lineLength) {
-            break;
-          }
-          charCount -= lineLength;
-          currentLineIndex++;
-        }
       }
+      start = end;
+    };
+
+    for (const match of text.matchAll(SENTENCE_END_RE)) {
+      const at = match.index ?? 0;
+      if (match[0] === '.' && isAbbreviationDot(text, at)) continue;
+      cut(at + match[0].length);
     }
+    cut(text.length);
 
     return segments;
   }
@@ -697,7 +783,7 @@ class SimilarityService {
           title: result.source.title || 'Sans titre',
           authors: result.source.creator ? [result.source.creator] : [],
           similarity: result.similarity,
-          chunkPreview: result.chunk?.content?.substring(0, 200) || '',
+          chunkPreview: chunkPreview(result.chunk?.content ?? '', segment.content),
           sourceType: 'primary',
           sourceId: result.source.id,
           archive: result.source.archive,
@@ -713,7 +799,7 @@ class SimilarityService {
           title: result.document.title || 'Sans titre',
           authors: result.document.author ? [result.document.author] : [],
           similarity: result.similarity,
-          chunkPreview: result.chunk?.content?.substring(0, 200) || '',
+          chunkPreview: chunkPreview(result.chunk?.content ?? '', segment.content),
           zoteroKey: result.document.bibtexKey,
           pageNumber: (result.chunk as any)?.pageNumber,
           sourceType: 'secondary',
@@ -756,12 +842,10 @@ class SimilarityService {
     const maxCandidates = Math.min(candidates.length, 10);
     const candidatesToRank = candidates.slice(0, maxCandidates);
 
-    // Build the ranking prompt
+    // Build the ranking prompt. L'aperçu entier : le passage trouvé, sans le titre que l'en-tête
+    // de l'extrait répétait (S13-2-0).
     const candidateList = candidatesToRank
-      .map((c, i) => {
-        const preview = c.chunkPreview.substring(0, 150).replace(/\n/g, ' ');
-        return `${i + 1}. "${c.title}" - ${preview}...`;
-      })
+      .map((c, i) => `${i + 1}. "${c.title}" - ${c.chunkPreview}`)
       .join('\n');
 
     const prompt = `You are a research assistant helping to find relevant academic sources.
@@ -802,19 +886,16 @@ Your ranking:`;
       return candidates;
     }
 
-    // Reorder candidates based on ranking
+    // Reorder candidates based on ranking. Seul l'ordre vient du modèle : la similarité reste le
+    // cosinus de la recherche (contrat Path A′). Un score de rang affichait « 100 % » pour le
+    // premier, quelle que soit sa proximité réelle (S13-1-33).
     const reranked: PDFRecommendation[] = [];
     const seen = new Set<number>();
 
     for (const rank of ranking) {
       const index = rank - 1; // Convert 1-based to 0-based
       if (index >= 0 && index < candidatesToRank.length && !seen.has(index)) {
-        // Update similarity to reflect new ranking (higher rank = higher score)
-        const newSimilarity = (ranking.length - reranked.length) / ranking.length;
-        reranked.push({
-          ...candidatesToRank[index],
-          similarity: newSimilarity,
-        });
+        reranked.push(candidatesToRank[index]);
         seen.add(index);
       }
     }
@@ -884,6 +965,10 @@ Your ranking:`;
 
       const content = fs.readFileSync(cachePath, 'utf-8');
       const cache = JSON.parse(content) as SimilarityCache;
+      if (cache.version !== SIMILARITY_CACHE_VERSION) {
+        console.log('💾 [SIMILARITY] Cache ignoré, version de son contenu dépassée', { version: cache.version ?? null });
+        return null;
+      }
 
       console.log('💾 [SIMILARITY] Cache loaded', {
         segmentCount: Object.keys(cache.segments).length,
