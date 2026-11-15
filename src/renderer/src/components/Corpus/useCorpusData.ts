@@ -1,20 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { refusedAsProjectChanged, stillIn } from '../../services/still-in-project';
-import type { GraphData, GraphNode, CorpusStatistics, TopicAnalysisResult } from './corpus-types';
-
-interface Filters {
-  year: number | null;
-  author: string | null;
-  language: string | null;
-  topic: number | null;
-}
+import { filterCorpusGraph } from './corpus-filters';
+import type { CorpusFilters, GraphData, GraphNode, CorpusStatistics, TopicAnalysisResult } from './corpus-types';
 
 export function useCorpusData() {
   const { currentProject } = useProjectStore();
   const [statistics, setStatistics] = useState<CorpusStatistics | null>(null);
-  const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [fullGraphData, setFullGraphData] = useState<GraphData | null>(null);
   const [topicAnalysis, setTopicAnalysis] = useState<TopicAnalysisResult | null>(null);
   const [topicTimeline, setTopicTimeline] = useState<Array<{ year: number; [key: string]: number }> | null>(null);
@@ -30,12 +23,20 @@ export function useCorpusData() {
   // de similarité, le réglage prend effet à la régénération du graphe.
   const [includeAuthorNodes, setIncludeAuthorNodes] = useState<boolean>(false);
   const [regeneratingGraph, setRegeneratingGraph] = useState(false);
-  const [filters, setFilters] = useState<Filters>({
+  const [filters, setFilters] = useState<CorpusFilters>({
     year: null,
     author: null,
     language: null,
     topic: null,
   });
+
+  // Le graphe affiché : le graphe complet réduit aux filtres, recalculé quand l'un d'eux, le graphe
+  // ou l'analyse des thèmes change (S13-1-30). Mémorisé : son identité ne change qu'avec eux, et
+  // force-graph ne relance sa simulation qu'à un nouvel objet.
+  const graphData = useMemo(
+    () => (fullGraphData ? filterCorpusGraph(fullGraphData, filters, topicAnalysis?.topicAssignments) : null),
+    [fullGraphData, filters, topicAnalysis]
+  );
 
   const graphRef = useRef<unknown>();
 
@@ -45,16 +46,25 @@ export function useCorpusData() {
     } else {
       setLoading(false);
       setStatistics(null);
-      setGraphData(null);
       setFullGraphData(null);
       setTopicAnalysis(null);
       setError(null);
     }
   }, [currentProject]);
 
-  useEffect(() => {
-    applyFilters();
-  }, [filters, fullGraphData]);
+  /**
+   * Une analyse des thèmes arrive : celle que le main a enregistrée, au chargement comme après
+   * « Réanalyser ». Elle renumérote ses thèmes : un thème filtré qu'elle n'a plus ne filtre plus
+   * rien, et le menu revient à « Tous ».
+   */
+  const showAnalysis = (analysis: TopicAnalysisResult) => {
+    setTopicAnalysis(analysis);
+    setFilters((current) =>
+      current.topic !== null && !(analysis.topics ?? []).some((topic) => topic.id === current.topic)
+        ? { ...current, topic: null }
+        : current
+    );
+  };
 
   const loadCorpusData = async () => {
     setLoading(true);
@@ -86,7 +96,6 @@ export function useCorpusData() {
 
       if (graphResult.success) {
         setFullGraphData(graphResult.graph);
-        setGraphData(graphResult.graph);
       } else {
         throw new Error(graphResult.error || 'Failed to load graph');
       }
@@ -94,7 +103,7 @@ export function useCorpusData() {
       try {
         const topicsResult = await window.electron.corpus.loadTopics();
         if (topicsResult.success) {
-          setTopicAnalysis(topicsResult);
+          showAnalysis(topicsResult);
           if (topicsResult.options?.nrTopics && topicsResult.options.nrTopics !== 'auto') {
             setNumTopics(topicsResult.options.nrTopics);
           }
@@ -130,7 +139,6 @@ export function useCorpusData() {
 
       if (graphResult.success) {
         setFullGraphData(graphResult.graph);
-        setGraphData(graphResult.graph);
       } else {
         throw new Error(graphResult.error || 'Failed to regenerate graph');
       }
@@ -165,7 +173,7 @@ export function useCorpusData() {
       if (refusedAsProjectChanged(result) || !(await stillHere())) return;
 
       if (result.success) {
-        setTopicAnalysis(result);
+        showAnalysis(result);
         try {
           const timelineResult = await window.electron.corpus.getTopicTimeline();
           if (timelineResult.success) {
@@ -193,36 +201,6 @@ export function useCorpusData() {
     } finally {
       setLoadingTopics(false);
     }
-  };
-
-  const applyFilters = () => {
-    if (!fullGraphData) return;
-
-    let filteredNodes = [...fullGraphData.nodes];
-
-    if (filters.year !== null) {
-      filteredNodes = filteredNodes.filter(
-        (node) => node.metadata?.year === filters.year?.toString()
-      );
-    }
-    if (filters.author !== null) {
-      filteredNodes = filteredNodes.filter(
-        (node) => node.metadata?.author === filters.author
-      );
-    }
-    if (filters.topic !== null && topicAnalysis?.topicAssignments) {
-      const docsInTopic = Object.entries(topicAnalysis.topicAssignments)
-        .filter(([, topicId]) => topicId === filters.topic)
-        .map(([docId]) => docId);
-      filteredNodes = filteredNodes.filter((node) => docsInTopic.includes(node.id));
-    }
-
-    const nodeIds = new Set(filteredNodes.map((n) => n.id));
-    const filteredEdges = fullGraphData.edges.filter(
-      (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
-    );
-
-    setGraphData({ nodes: filteredNodes, edges: filteredEdges });
   };
 
   const clearFilters = () => {
