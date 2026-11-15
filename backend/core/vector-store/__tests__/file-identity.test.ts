@@ -9,7 +9,16 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from 'os';
 import path from 'path';
 import { symlinkAvailable } from '../../../__tests__/helpers/native-guards';
-import { fileIdentity, groupByFile, isInside, isInsideAsync, mayBeSameFile, sameFile, sameFileKey } from '../file-identity';
+import {
+  fileIdentity,
+  groupByFile,
+  isInside,
+  isInsideAsync,
+  mayBeSameFile,
+  sameFile,
+  sameFileKey,
+  sameFileKeyAsync,
+} from '../file-identity';
 
 /** Disque insensible à la casse : un seul fichier, enregistré sous cette casse-là. */
 const ON_DISK = '/projet/PDFs/Hughes‐Warrington_-_2025_-_ETHICS_FOR_ARTIFICIAL_HISTORIANS.pdf';
@@ -330,5 +339,22 @@ describe.skipIf(!symlinkAvailable)('sur un vrai disque, avec de vrais liens', ()
     expect(sameFile(path.join(projet, 'chapters', 'copie.md'), path.join(projet, 'chapters', '01.md'))).toBe(true);
     expect(sameFile(path.join(work, 'alias', 'a-venir.md'), path.join(projet, 'a-venir.md'))).toBe(true);
     expect(sameFile(projet, dehors)).toBe(false);
+  });
+
+  it('sameFileKeyAsync rend la même clé que sameFileKey, cas par cas (J12)', async () => {
+    symlinkSync(projet, path.join(work, 'alias'));
+    symlinkSync('01.md', path.join(projet, 'chapters', 'copie.md'));
+    const cases = [
+      projet,
+      path.join(work, 'alias'),
+      path.join(work, 'alias', 'chapters', '01.md'),
+      path.join(projet, 'chapters', 'copie.md'),
+      path.join(work, 'alias', 'a-venir', 'project.json'),
+      path.join(work, 'disparu'),
+      path.join(work, '\u00c9t\u00e9'.normalize('NFD')),
+    ];
+    for (const candidate of cases) {
+      expect([candidate, await sameFileKeyAsync(candidate)]).toEqual([candidate, sameFileKey(candidate)]);
+    }
   });
 });

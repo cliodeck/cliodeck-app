@@ -17,6 +17,7 @@ import {
   type ProjectOpenResult,
   type UnrequestedClose,
 } from '../../services/project-lifecycle.js';
+import { createProjectLocator } from '../../services/project-locator.js';
 import {
   projectServices,
   ProjectServiceError,
@@ -36,6 +37,7 @@ import {
   ProjectCreateChapterSchema,
   ProjectReadChaptersSchema,
   ProjectBookSettingsSchema,
+  ProjectLocateSchema,
 } from '../utils/validation.js';
 
 /**
@@ -321,6 +323,17 @@ export function setupProjectHandlers(options: ProjectHandlersOptions = {}): Proj
       console.error('❌ project:update-config error:', error);
       return errorResponse(error);
     }
+  });
+
+  // Où sont les projets que nomment les brouillons (J12) : `project.json` encore là, et la clé du
+  // dossier. Lecture seule, sous délai, jamais synchrone : ce sont des projets que l'app ne
+  // connaît plus, sur un volume qui peut ne plus répondre.
+  const locator = createProjectLocator();
+  ipcMain.handle('project:locate', async (_event, rawPaths: unknown) => {
+    const paths = validate(ProjectLocateSchema, rawPaths);
+    const places = await locator.locate(paths);
+    console.log('📤 IPC Response: project:locate', places.map((place) => place.state).join(', '));
+    return successResponse({ places });
   });
 
   console.log('✅ Project handlers registered');

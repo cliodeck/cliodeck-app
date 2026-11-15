@@ -53,6 +53,19 @@ const api = {
     save: (data: any) => ipcRenderer.invoke('project:save', data),
     getRecent: () => ipcRenderer.invoke('project:get-recent'),
     removeRecent: (path: string) => ipcRenderer.invoke('project:remove-recent', path),
+    /**
+     * Où sont les projets que nomment les brouillons (J12) : `project.json` encore à son chemin, et
+     * la clé du dossier (casse et liens tranchés par le disque). Lecture seule, chaque chemin sous
+     * un délai : `unknown` quand il ne répond pas.
+     */
+    locate: (
+      paths: string[]
+    ): Promise<{
+      success: boolean;
+      places?: Array<
+        { path: string; state: 'present'; key: string } | { path: string; state: 'absent' | 'unknown' }
+      >;
+    }> => ipcRenderer.invoke('project:locate', paths),
     // Manifeste du manuscrit. La clé est le CHEMIN du projet (dossier ou
     // project.json), pas un `id` — voir project-handlers.
     getChapters: (projectPath: string) =>

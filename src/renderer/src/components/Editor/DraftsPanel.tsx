@@ -8,11 +8,20 @@
  * dépôt natif de CM6), ou jetable. Dans les deux cas la proposition reste
  * adjudicable (`proposeQueuedDraft`), et elle ne fait pas sortir le
  * brouillon de la file : seule son acceptation le fait.
+ *
+ * Sous la liste, repliée, « Brouillons d'autres projets » (J12) : ceux dont
+ * le projet n'est plus à son chemin, à rattacher au projet ouvert ou à jeter.
  */
 import React, { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowDownToLine, Check, GripVertical, Inbox, Trash2, X } from 'lucide-react';
-import { useDraftsStore, draftTitle, draftsForProject, type BrainstormDraft } from '../../stores/draftsStore';
+import { ArrowDownToLine, Check, FolderInput, GripVertical, Inbox, Trash2, X } from 'lucide-react';
+import {
+  useDraftsStore,
+  draftTitle,
+  draftsForProject,
+  draftsOfMissingProjects,
+  type BrainstormDraft,
+} from '../../stores/draftsStore';
 import { useProjectStore } from '../../stores/projectStore';
 import { useDialogStore } from '../../stores/dialogStore';
 import { DRAFT_DRAG_TYPE, proposeQueuedDraft } from './draft-proposal';
@@ -76,13 +85,70 @@ const DraftCard: React.FC<{ draft: BrainstormDraft }> = ({ draft }) => {
   );
 };
 
+/**
+ * Un brouillon dont le projet n'est plus à son chemin (J12) : son début et son ancien chemin, pour
+ * que l'historien le reconnaisse, puis le rattacher au projet ouvert ou le jeter. Rien ne se fait
+ * sans son clic : un disque débranché rend aussi un projet « absent ».
+ */
+const OtherProjectDraftCard: React.FC<{ draft: BrainstormDraft; projectPath: string }> = ({ draft, projectPath }) => {
+  const { t } = useTranslation('common');
+  const attach = useDraftsStore((s) => s.attach);
+  const remove = useDraftsStore((s) => s.remove);
+
+  const handleDiscard = async () => {
+    if (
+      await useDialogStore
+        .getState()
+        .showConfirm(t('drafts.discardOtherConfirm'), undefined, { danger: true })
+    ) {
+      remove(draft.id);
+    }
+  };
+
+  return (
+    <div className="drafts-panel__card">
+      <div className="drafts-panel__card-head">
+        <strong className="drafts-panel__card-title">{draftTitle(draft)}</strong>
+        <span className="drafts-panel__card-date">
+          {new Date(draft.createdAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+        </span>
+      </div>
+      <p className="drafts-panel__card-snippet">{draft.content.slice(0, 220)}</p>
+      <p className="drafts-panel__card-origin">
+        {t('drafts.formerLocation')} <span className="drafts-panel__card-path">{draft.projectPath}</span>
+      </p>
+      <div className="drafts-panel__card-actions">
+        <button
+          type="button"
+          className="chat-surface__inline-btn"
+          onClick={() => attach(draft.id, projectPath)}
+          title={t('drafts.attachTitle')}
+        >
+          <FolderInput size={12} /> {t('drafts.attach')}
+        </button>
+        <button
+          type="button"
+          className="chat-surface__inline-btn drafts-panel__discard"
+          onClick={() => void handleDiscard()}
+          title={t('drafts.discardTitle')}
+        >
+          <Trash2 size={12} /> {t('drafts.discard')}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export const DraftsPanel: React.FC = () => {
   const { t } = useTranslation('common');
   // Ceux du projet ouvert, et ceux d'avant la règle, sans projet (Q12) : une réponse faite des
-  // sources de A n'a pas à être proposée dans le manuscrit de B.
+  // sources de A n'a pas à être proposée dans le manuscrit de B. Le projet ouvert sous un autre
+  // chemin du même dossier (casse, lien) garde les siens (`projectPlaces`, J12).
   const projectPath = useProjectStore((s) => s.currentProject?.path ?? null);
   const queue = useDraftsStore((s) => s.drafts);
-  const drafts = useMemo(() => draftsForProject(queue, projectPath), [queue, projectPath]);
+  const places = useDraftsStore((s) => s.projectPlaces);
+  const drafts = useMemo(() => draftsForProject(queue, projectPath, places), [queue, projectPath, places]);
+  const missing = useMemo(() => draftsOfMissingProjects(queue, projectPath, places), [queue, projectPath, places]);
   const closePanel = useDraftsStore((s) => s.closePanel);
   const clear = useDraftsStore((s) => s.clear);
 
@@ -137,6 +203,20 @@ export const DraftsPanel: React.FC = () => {
             ))}
           </div>
         </>
+      )}
+
+      {projectPath !== null && missing.length > 0 && (
+        <details className="drafts-panel__others">
+          <summary>
+            {t('drafts.otherProjects')} ({missing.length})
+          </summary>
+          <p className="drafts-panel__hint">{t('drafts.otherProjectsHint')}</p>
+          <div className="drafts-panel__others-list">
+            {missing.map((d) => (
+              <OtherProjectDraftCard key={d.id} draft={d} projectPath={projectPath} />
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );

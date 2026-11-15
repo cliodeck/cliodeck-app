@@ -272,6 +272,12 @@ export const OptionalStringSchema = z.string().optional();
 export const OptionalModelIdSchema = z.string().optional();
 
 // Filesystem schemas
+/**
+ * Les dossiers de projet que nomment les brouillons (`project:locate`, J12) : une liste bornée
+ * (`LOCATE_MAX_PATHS`, `project-locator.ts`) de chemins de longueur bornée.
+ */
+export const ProjectLocateSchema = z.array(z.string().min(1).max(4096)).max(100);
+
 export const FsReadDirectorySchema = z.object({
   dirPath: z.string().min(1, 'Directory path is required'),
 });
