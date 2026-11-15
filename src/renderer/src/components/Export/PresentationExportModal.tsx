@@ -235,9 +235,9 @@ export const PresentationExportModal: React.FC<PresentationExportModalProps> = (
             <strong>{t('presentation.controls')}</strong>
             <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
               <li>{t('presentation.controlArrows')}</li>
-              <li><code style={{ color: 'var(--color-success)' }}>S</code> : {t('presentation.controlS').replace('S key: ', '')}</li>
-              <li><code style={{ color: 'var(--color-success)' }}>F</code> : {t('presentation.controlF').replace('F key: ', '')}</li>
-              <li><code style={{ color: 'var(--color-success)' }}>ESC</code> : {t('presentation.controlESC').replace('ESC key: ', '')}</li>
+              <li><code style={{ color: 'var(--color-success)' }}>S</code> : {t('presentation.controlS')}</li>
+              <li><code style={{ color: 'var(--color-success)' }}>F</code> : {t('presentation.controlF')}</li>
+              <li><code style={{ color: 'var(--color-success)' }}>ESC</code> : {t('presentation.controlESC')}</li>
             </ul>
           </div>
 

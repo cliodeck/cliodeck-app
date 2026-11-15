@@ -8,6 +8,9 @@
  *   de fichier à nommer.
  * - Le main refuse d'écrire l'export dans un fichier Markdown (`export-output-path.ts`) : la
  *   fenêtre le dit par sa phrase, avec le nom du fichier.
+ * - Les touches de reveal.js : la lettre, puis ce qu'elle fait. Un `.replace` ne retirait que le
+ *   préfixe anglais de la traduction, d'où « S : Touche S : … » en français et « S : S-Taste: … »
+ *   en allemand (S12-2-7).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -16,19 +19,31 @@ import fr from '../../../../../../public/locales/fr/common.json';
 import en from '../../../../../../public/locales/en/common.json';
 import de from '../../../../../../public/locales/de/common.json';
 
+/** La langue des rendus : fr, sauf dans les tests qui la changent. */
+const ui = vi.hoisted(() => ({ lng: 'fr' as 'fr' | 'en' | 'de' }));
+
 vi.mock('react-i18next', async () => {
   const i18next = (await import('i18next')).default;
-  const resources = (await import('../../../../../../public/locales/fr/common.json')).default;
+  const [frCommon, enCommon, deCommon] = await Promise.all([
+    import('../../../../../../public/locales/fr/common.json'),
+    import('../../../../../../public/locales/en/common.json'),
+    import('../../../../../../public/locales/de/common.json'),
+  ]);
   const instance = i18next.createInstance();
   await instance.init({
     lng: 'fr',
     ns: ['common'],
     defaultNS: 'common',
-    resources: { fr: { common: resources } },
+    resources: {
+      fr: { common: frCommon.default },
+      en: { common: enCommon.default },
+      de: { common: deCommon.default },
+    },
     interpolation: { escapeValue: false },
+    showSupportNotice: false,
   });
   return {
-    useTranslation: () => ({ t: instance.t.bind(instance), i18n: instance }),
+    useTranslation: () => ({ t: instance.getFixedT(ui.lng), i18n: instance }),
     Trans: ({ children }: { children?: unknown }) => children ?? null,
     initReactI18next: { type: '3rdParty', init: () => undefined },
   };
@@ -80,6 +95,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  ui.lng = 'fr';
   useProjectStore.setState({ currentProject: null, chapters: [] } as never);
 });
 
@@ -114,6 +130,24 @@ describe('la phrase sur le frontmatter nomme le fichier exporté', () => {
     const text = (locale as { presentation: { frontmatterPrecedence: string } }).presentation.frontmatterPrecedence;
     expect(text).toContain('{{file}}');
     expect(text).not.toContain('slides.md');
+  });
+});
+
+describe('les touches de reveal.js : la lettre, puis ce qu’elle fait, une seule fois', () => {
+  it.each([
+    ['fr', ['S : Mode présentateur avec notes', 'F : Plein écran', "ESC : Vue d'ensemble"]],
+    ['de', ['S : Präsentationsmodus mit Notizen', 'F : Vollbild', 'ESC : Übersicht']],
+    ['en', ['S : Presenter mode with notes', 'F : Fullscreen', 'ESC : Overview']],
+  ] as const)('%s', (lng, expected) => {
+    ui.lng = lng;
+    openProject('presentation');
+    render(<PresentationExportModal isOpen onClose={() => undefined} />);
+
+    const keyLines = screen
+      .getAllByRole('listitem')
+      .filter((item) => item.querySelector('code') !== null)
+      .map((item) => item.textContent);
+    expect(keyLines).toEqual(expected);
   });
 });
 
