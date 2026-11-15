@@ -6,7 +6,7 @@
 }
 
 /* Overview */
-.stats-overview {
+:where(.primary-source-stats) .stats-overview {
   display: flex;
   justify-content: space-around;
   padding-bottom: 12px;
@@ -40,11 +40,11 @@
 }
 
 /* Sections */
-.stats-section {
+:where(.primary-source-stats) .stats-section {
   margin-top: 12px;
 }
 
-.stats-section h5 {
+:where(.primary-source-stats) .stats-section h5 {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -56,54 +56,56 @@
   letter-spacing: 0.5px;
 }
 
-/* Transcription Progress */
-.transcription-progress {
+/* Transcription Progress. Sous :where(.primary-source-stats), comme toutes les règles de cette
+   feuille (J13) : sans portée, `.progress-bar`, le rail de cette barre, peignait aussi la partie
+   remplie de la barre des fenêtres d'export (6 px, gris clair) une fois ce panneau ouvert. */
+:where(.primary-source-stats) .transcription-progress {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.progress-bar {
+:where(.primary-source-stats) .progress-bar {
   height: 6px;
   background: var(--bg-tertiary);
   border-radius: 3px;
   overflow: hidden;
 }
 
-.progress-fill {
+:where(.primary-source-stats) .progress-fill {
   height: 100%;
   background: var(--color-success);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
 
-.progress-stats {
+:where(.primary-source-stats) .progress-stats {
   display: flex;
   justify-content: space-between;
   font-size: 10px;
 }
 
-.progress-stats .with-transcription {
+:where(.primary-source-stats) .progress-stats .with-transcription {
   color: var(--color-success);
 }
 
-.progress-stats .rate {
+:where(.primary-source-stats) .progress-stats .rate {
   font-weight: 600;
   color: var(--text-primary);
 }
 
-.progress-stats .without-transcription {
+:where(.primary-source-stats) .progress-stats .without-transcription {
   color: var(--text-tertiary);
 }
 
 /* Stat List */
-.stat-list {
+:where(.primary-source-stats) .stat-list {
   list-style: none;
   padding: 0;
   margin: 0;
 }
 
-.stat-list li {
+:where(.primary-source-stats) .stat-list li {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -111,7 +113,7 @@
   font-size: 12px;
 }
 
-.stat-list .stat-name {
+:where(.primary-source-stats) .stat-list .stat-name {
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -120,20 +122,20 @@
   padding-right: 8px;
 }
 
-.stat-list .stat-count {
+:where(.primary-source-stats) .stat-list .stat-count {
   color: var(--text-secondary);
   font-weight: 500;
   flex-shrink: 0;
 }
 
 /* Tags Cloud */
-.tags-cloud {
+:where(.primary-source-stats) .tags-cloud {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-.tags-cloud .tag {
+:where(.primary-source-stats) .tags-cloud .tag {
   padding: 2px 8px;
   background: var(--color-warning-light);
   color: var(--color-warning);
@@ -142,7 +144,7 @@
   font-weight: 500;
 }
 
-.tags-cloud .more-tags {
+:where(.primary-source-stats) .tags-cloud .more-tags {
   padding: 2px 8px;
   background: var(--bg-tertiary);
   color: var(--text-tertiary);
