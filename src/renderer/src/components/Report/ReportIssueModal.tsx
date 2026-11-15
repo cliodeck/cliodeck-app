@@ -79,7 +79,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ isOpen, onCl
       <div className="report-issue-content" onClick={(e) => e.stopPropagation()}>
         <div className="report-issue-header">
           <h3>{t('report.title')}</h3>
-          <button className="close-btn" onClick={handleClose}>
+          <button className="report-issue-close" onClick={handleClose}>
             <X size={20} />
           </button>
         </div>
@@ -92,7 +92,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ isOpen, onCl
             </div>
           ) : (
             <>
-              <div className="form-field">
+              <div className="report-issue-field">
                 <label>{t('report.type')}</label>
                 <select
                   value={issueType}
@@ -104,7 +104,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ isOpen, onCl
                 </select>
               </div>
 
-              <div className="form-field">
+              <div className="report-issue-field">
                 <label>{t('report.issueTitle')}</label>
                 <input
                   type="text"
@@ -115,7 +115,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ isOpen, onCl
                 />
               </div>
 
-              <div className="form-field">
+              <div className="report-issue-field">
                 <label>{t('report.description')}</label>
                 <textarea
                   value={description}
@@ -129,12 +129,12 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({ isOpen, onCl
         </div>
 
         <div className="report-issue-footer">
-          <button className="btn-cancel" onClick={handleClose}>
+          <button className="report-issue-cancel" onClick={handleClose}>
             {t('actions.cancel')}
           </button>
           {!submitted && (
             <button
-              className="btn-export"
+              className="report-issue-submit"
               onClick={handleSubmit}
               disabled={!title.trim()}
             >

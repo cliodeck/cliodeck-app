@@ -36,13 +36,44 @@
   font-size: var(--font-size-lg);
 }
 
+/* La croix, les champs et les boutons de cette fenêtre ont leurs propres classes (J13).
+   Jusque-là, elle empruntait `.close-btn`, `.form-field`, `.btn-cancel` et `.btn-export` à
+   d'autres feuilles : son bouton « Ouvrir sur GitHub » n'était bleu qu'après un export, dont
+   la feuille, chargée à la demande, déclarait `.btn-export` sans portée. Les valeurs sont
+   celles qu'elle avait après un export PDF. */
+.report-issue-close {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: color var(--transition-normal);
+}
+
+.report-issue-close:hover {
+  color: var(--text-primary);
+}
+
 .report-issue-body {
   padding: var(--spacing-lg);
   overflow-y: auto;
   flex: 1;
 }
 
-.report-issue-body .form-field select {
+.report-issue-field {
+  margin-bottom: var(--spacing-lg);
+}
+
+.report-issue-field label {
+  display: block;
+  margin-bottom: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.report-issue-field input {
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
   background-color: var(--bg-panel);
@@ -52,12 +83,27 @@
   font-size: var(--font-size-sm);
 }
 
-.report-issue-body .form-field select:focus {
+.report-issue-field input:focus {
   outline: none;
   border-color: var(--color-accent);
 }
 
-.report-issue-body .form-field textarea {
+.report-issue-field select {
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: var(--bg-panel);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+}
+
+.report-issue-field select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.report-issue-field textarea {
   width: 100%;
   padding: var(--spacing-sm) var(--spacing-md);
   background-color: var(--bg-panel);
@@ -70,7 +116,7 @@
   min-height: 120px;
 }
 
-.report-issue-body .form-field textarea:focus {
+.report-issue-field textarea:focus {
   outline: none;
   border-color: var(--color-accent);
 }
@@ -106,4 +152,30 @@
   align-items: center;
   justify-content: center;
   gap: var(--spacing-sm);
+}
+
+.report-issue-cancel {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.report-issue-cancel:hover {
+  background: var(--surface-variant);
+  border-color: var(--text-secondary);
+}
+
+/* « Ouvrir sur GitHub » : le bouton principal, en bleu d'accent avant comme après un export
+   (décision de l'auteur, J13). Sa bordure reste celle de `.report-issue-footer button`. */
+.report-issue-submit {
+  background-color: var(--color-accent);
+  color: var(--text-primary);
+}
+
+.report-issue-submit:hover:not(:disabled) {
+  background-color: var(--color-accent-hover);
+}
+
+.report-issue-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
