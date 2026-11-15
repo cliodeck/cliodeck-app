@@ -318,8 +318,9 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
               </div>
             )}
 
-            {/* Étiquettes du projet : écrites dans la note de lecture. */}
-            <div className="detail-item" onClick={(e) => e.stopPropagation()}>
+            {/* Étiquettes du projet : écrites dans la note de lecture. Libellé au-dessus, comme les
+                détails longs : à côté, le champ, plus large que sa colonne, le recouvrait. */}
+            <div className="detail-item detail-item-stacked" onClick={(e) => e.stopPropagation()}>
               <span className="detail-label">{t('bibliography.projectTags')}</span>
               <div className="detail-value">
                 <TagManager tags={projectTags} onTagsChange={handleProjectTagsChange} allTags={allProjectTags} />
@@ -327,7 +328,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
             </div>
 
             {citation.zoteroNotes && citation.zoteroNotes.length > 0 && (
-              <div className="detail-item">
+              <div className="detail-item detail-item-stacked">
                 <span className="detail-label">{t('bibliography.zoteroNotes')}</span>
                 <div className="detail-value citation-zotero-notes">
                   {citation.zoteroNotes.map((note) => (
@@ -340,7 +341,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
             )}
 
             {citation.notes && (
-              <div className="detail-item">
+              <div className="detail-item detail-item-stacked">
                 <span className="detail-label">{t('bibliography.bibNote')}</span>
                 <span className="detail-value">{citation.notes}</span>
               </div>
@@ -349,7 +350,7 @@ export const CitationCard: React.FC<CitationCardProps> = React.memo(({ citation 
             {/* Le résumé du `.bib`, en entier et en texte. Après la note : un
                 long résumé ne repousse pas les détails courts. */}
             {abstract && (
-              <div className="detail-item">
+              <div className="detail-item detail-item-stacked">
                 <span className="detail-label">{t('bibliography.abstract')}</span>
                 <span className="detail-value citation-abstract">{abstract}</span>
               </div>

@@ -114,6 +114,14 @@
   flex: 1;
 }
 
+/* Détails longs (résumé, notes) et étiquettes du projet : le libellé au-dessus de la valeur, qui
+   prend toute la largeur de la fiche. À côté, un long libellé (« Zusammenfassung ») ne laissait
+   qu'une étroite colonne au résumé, et le champ d'étiquettes recouvrait le sien (J4). */
+.detail-item.detail-item-stacked {
+  flex-direction: column;
+  gap: 2px;
+}
+
 /* Tags Zotero : lecture seule ; les automatiques se révèlent à la demande. */
 .citation-source-tags {
   display: flex;
