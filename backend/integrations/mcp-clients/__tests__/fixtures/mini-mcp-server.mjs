@@ -1,4 +1,5 @@
-// Mini-serveur MCP stdio pour les tests : répond à `initialize` et `tools/list`, rien d'autre.
+// Mini-serveur MCP stdio pour les tests : répond à `initialize`, `tools/list` et `tools/call` (un seul
+// outil, `echo`, qui renvoie ses arguments en texte), rien d'autre.
 // Ni dépendance, ni réseau. Usage : node mini-mcp-server.mjs <fichier-des-pid> [meurt-après-ms]
 // Chaque lancement ajoute son PID au fichier : le test vérifie ainsi, PID par PID, qu'aucun
 // processus ne survit. Avec un délai, il meurt (code 1) ce temps après avoir listé ses outils.
@@ -35,6 +36,12 @@ lines.on('line', (line) => {
       result: { tools: [{ name: 'echo', description: 'renvoie ce qu’on lui donne', inputSchema: { type: 'object' } }] },
     });
     if (dieAfterMs) setTimeout(() => process.exit(1), Number(dieAfterMs));
+  } else if (message.method === 'tools/call' && message.params?.name === 'echo') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { content: [{ type: 'text', text: JSON.stringify(message.params.arguments ?? {}) }] },
+    });
   } else if (message.id !== undefined) {
     send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Method not found' } });
   }

@@ -213,7 +213,9 @@ describe('un config.json illisible n’est pas une configuration vide (S11-1-8)'
  * outils offerts au modèle ; « Redémarrer » laissait deux processus (S09-1-0, S09-1-1).
  */
 describe('vraie fabrique SDK et mini-serveur stdio : arrêté veut dire arrêté', () => {
-  const SERVER = fileURLToPath(new URL('./fixtures/mini-mcp-server.mjs', import.meta.url));
+  const SERVER = fileURLToPath(
+    new URL('../../../../backend/integrations/mcp-clients/__tests__/fixtures/mini-mcp-server.mjs', import.meta.url)
+  );
   const originalGate = mcpClientsService.approvalGate;
 
   let root: string;

@@ -10,6 +10,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // `secureStorage` repose sur `safeStorage` d'Electron : une table en mémoire le remplace, comme
 // dans mcp-env-secrets.test.ts.
@@ -38,6 +39,19 @@ const LEGITIME = {
   transport: 'stdio' as const,
   command: 'npx',
   args: ['-y', '@cliodeck/mcp-europeana'],
+};
+
+// Le serveur qu'on laisse démarrer : le mini-serveur local, lancé par ce Node-ci. `npx -y …`
+// interrogeait le registre npm à chaque passage, et le test avait déjà dépassé 5 s une fois.
+const LOCAL = {
+  name: 'mini',
+  transport: 'stdio' as const,
+  command: process.execPath,
+  args: [
+    fileURLToPath(
+      new URL('../../../../backend/integrations/mcp-clients/__tests__/fixtures/mini-mcp-server.mjs', import.meta.url)
+    ),
+  ],
 };
 
 async function makeWorkspace(clients: unknown[]): Promise<string> {
@@ -142,14 +156,15 @@ describe('loadProject — garde d’approbation des serveurs MCP', () => {
   });
 
   it('ne démarre que les serveurs approuvés, pas les autres', async () => {
-    root = await makeWorkspace([LEGITIME, HOSTILE]);
+    root = await makeWorkspace([LOCAL, HOSTILE]);
     mcpClientsService.approvalGate = async (client) =>
-      client.name === 'europeana' ? 'approved' : 'rejected';
+      client.name === 'mini' ? 'approved' : 'rejected';
 
     await mcpClientsService.loadProject(root);
 
     const names = mcpClientsService.list().map((c) => c.name);
-    expect(names).toContain('europeana');
+    expect(names).toContain('mini');
     expect(names).not.toContain('helper');
+    expect(mcpClientsService.list().find((c) => c.name === 'mini')?.state).toBe('ready');
   });
 });
