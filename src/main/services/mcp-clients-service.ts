@@ -28,7 +28,6 @@ import {
   updateWorkspaceConfig,
   WorkspaceConfigError,
   type MCPClientConfig as WorkspaceClientConfig,
-  type WorkspaceConfig,
 } from '../../../backend/core/workspace/config.js';
 import {
   ensureWorkspaceDirectories,
@@ -308,41 +307,65 @@ class MCPClientsService {
     if (!root || !manager) {
       throw new Error('No project loaded');
     }
-    // La portée née dans cette écriture, si elle échoue : ce qui a été rangé dessous est retiré.
-    const unsaved: string[] = [];
-    let saved: WorkspaceConfig;
+    // Les secrets que cette tentative range, et sous quelle portée : si config.json ne s'écrit pas,
+    // rien ne les nomme, et ils sont retirés.
+    const stored: Array<{ scope: string; scopeCreated: boolean }> = [];
+    // Ce que le manager inscrira, établi dans l'écriture : tout ce qui ferait lever register() est
+    // refusé avant que config.json change (S09-1-3), et aucun slot n'existe tant qu'il n'est pas écrit.
+    let registration: ManagerClientConfig | undefined;
     try {
-      saved = await updateWorkspaceConfig(root, (cfg) => {
+      await updateWorkspaceConfig(root, (cfg) => {
         // Un autre projet ouvert pendant l'attente du verrou ou la lecture : rien n'est écrit.
         if (this.manager !== manager) throw projectChanged();
         const existing = cfg.mcpClients ?? [];
         if (existing.some((c) => c.name === client.name)) {
           throw new Error(`MCP client "${client.name}" already exists`);
         }
+        // Absent de config.json mais encore inscrit (le fichier retouché à la main, projet ouvert).
+        if (manager.get(client.name)) {
+          throw new Error(`MCP client "${client.name}" already registered`);
+        }
         // Route fresh secrets straight to `secureStorage` so they never
         // touch `config.json`. The migration step above handles previously
         // persisted plain values; this catches new ones at the door.
         // Sous la portée du projet, créée dans cette écriture s'il n'en a pas (S09-1-6).
         if (clientHasSecrets(client)) {
-          const created = secretsScopeOf(cfg) === null;
+          const scopeCreated = secretsScopeOf(cfg) === null;
           const scope = ensureSecretsScope(cfg);
-          if (created) unsaved.push(scope);
+          // Noté après les deux refus, jamais pour eux : la clé d'un client déclaré du même nom n'est
+          // pas à cette tentative. Avant de ranger : un rangement interrompu se retire aussi.
+          stored.push({ scope, scopeCreated });
           migrateClientEnvSecrets(scope, client);
         }
+        // Lève pour un stdio sans commande ou un SSE sans adresse : rien n'est écrit.
+        registration = toManagerConfig(client, secretsScopeOf(cfg));
         cfg.mcpClients = [...existing, client];
       });
     } catch (e) {
-      for (const lost of unsaved) discardUnsavedScope(lost, [client]);
+      for (const { scope, scopeCreated } of stored) {
+        if (scopeCreated) {
+          discardUnsavedScope(scope, [client]);
+          continue;
+        }
+        // Portée déjà enregistrée : les secrets des autres clients servent, seuls ceux de ce nom
+        // partent. Le nom est libre dans config.json (refus « already exists » plus haut) : rien
+        // ne les relit.
+        try {
+          deleteClientEnvSecrets(scope, client);
+        } catch (err) {
+          console.warn('[mcp-clients] secrets d’un ajout non écrit impossibles à retirer:', err);
+        }
+      }
       throw e;
     }
     // Écrit : l'ajout est fait, dans le config.json de CE projet. Si un autre projet s'est ouvert
     // pendant l'écriture, pas de refus (il dirait que rien n'a été écrit), mais rien n'est inscrit
     // ni démarré dans le manager abandonné : le serveur démarrera avec les autres serveurs déclarés,
-    // au prochain chargement de ce projet.
-    if (this.manager !== manager) {
+    // au prochain chargement de ce projet. (`registration` est établie dès que l'écriture a abouti.)
+    if (this.manager !== manager || !registration) {
       return { name: client.name, state: 'unconfigured', tools: [], generation: 0 };
     }
-    manager.register(toManagerConfig(client, secretsScopeOf(saved)));
+    manager.register(registration);
     return manager.start(client.name);
   }
 
@@ -362,9 +385,10 @@ class MCPClientsService {
     // Seule la clé de CE projet : l'ancienne clé globale peut servir à un autre (S09-1-6).
     const scope = secretsScopeOf(saved);
     if (removed && scope) deleteClientEnvSecrets(scope, removed);
-    // Écrit : le retrait est fait. On arrête le serveur de CE projet, sur le manager capturé —
-    // déjà arrêté par la bascule si un autre projet s'est ouvert pendant l'écriture.
-    await manager.stop(name);
+    // Écrit : le retrait est fait. On retire le serveur de CE projet, sur le manager capturé — déjà
+    // arrêté par la bascule si un autre projet s'est ouvert pendant l'écriture. Retiré, pas
+    // seulement arrêté : la liste ne le montre plus, et son nom est libre pour un réajout (S09-1-3).
+    await manager.unregister(name);
   }
 
   async restart(name: string): Promise<MCPClientInstance | null> {

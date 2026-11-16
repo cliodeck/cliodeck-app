@@ -504,3 +504,165 @@ describe('MCPClientManager : arrêté veut dire arrêté, un seul handle par cli
     expect(mgr.listAll().map((c) => c.state)).toEqual(['stopped', 'stopped']);
   });
 });
+
+/**
+ * Retirer un client libère son nom (S09-1-3) : le manager n'avait pas de `unregister`, le slot
+ * d'un client supprimé restait inscrit, arrêté, et le réajouter sous le même nom levait « already
+ * registered », alors que config.json avait déjà été réécrit.
+ *
+ * Les tests de crash et de reprise tardifs prouvent un comportement que `stopRequested` et le handle
+ * détaché par `unregister` assurent. Le garde d'identité du slot (`isCurrent`) est défensif : ils
+ * passent sans lui.
+ */
+describe('MCPClientManager.unregister : le nom redevient libre', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('le slot a disparu au moment de l’événement final, qui dit « unregistered »', async () => {
+    const events: MCPClientEvent[] = [];
+    const listedAtFinalEvent: string[][] = [];
+    const { factory, fakes, open } = recordingFactory({ tools: [{ name: 't' }], closeCrashes: true });
+    const mgr: MCPClientManager = new MCPClientManager({
+      factory,
+      onEvent: (e) => {
+        events.push(e);
+        if (e.kind === 'state_changed' && e.reason === 'unregistered') {
+          listedAtFinalEvent.push(mgr.listAll().map((c) => c.name));
+        }
+      },
+    });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+    const before = events.length;
+
+    await mgr.unregister('gallica');
+
+    // Un seul événement, le dernier, après la fermeture : qui relit la liste ne voit plus le client.
+    expect(events.slice(before)).toEqual([
+      expect.objectContaining({ kind: 'state_changed', name: 'gallica', from: 'ready', to: 'stopped', reason: 'unregistered' }),
+    ]);
+    expect(listedAtFinalEvent).toEqual([[]]);
+    expect(mgr.get('gallica')).toBeNull();
+    expect(fakes[0].isClosed()).toBe(true);
+    expect(open()).toBe(0);
+  });
+
+  it('un client déjà arrêté : retiré aussi, et l’événement final part quand même', async () => {
+    const events: MCPClientEvent[] = [];
+    const { factory } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({ factory, onEvent: (e) => events.push(e) });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+    await mgr.stop('gallica');
+    const before = events.length;
+
+    await mgr.unregister('gallica');
+
+    // La barre d'état ne relit la liste qu'à un `state_changed` : sans lui, elle compterait encore le client.
+    expect(events.slice(before)).toEqual([
+      expect.objectContaining({ kind: 'state_changed', name: 'gallica', to: 'stopped', reason: 'unregistered' }),
+    ]);
+    expect(mgr.listAll()).toEqual([]);
+  });
+
+  it('crash tardif du handle retiré : aucune reprise, rien ne revient sous ce nom', async () => {
+    vi.useFakeTimers();
+    const events: MCPClientEvent[] = [];
+    const { factory, fakes } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({ factory, retryDelayMs: 5, onEvent: (e) => events.push(e) });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+    await mgr.unregister('gallica');
+    const after = events.length;
+
+    // L'ancien processus finit de mourir après le retrait.
+    fakes[0].triggerCrash(CRASH);
+    await vi.runAllTimersAsync();
+
+    expect(mgr.get('gallica')).toBeNull();
+    expect(fakes).toHaveLength(1);
+    expect(events.slice(after)).toEqual([]);
+  });
+
+  it('réinscrit sous le même nom : le crash tardif de l’ancien handle ne touche pas le nouveau', async () => {
+    vi.useFakeTimers();
+    const { factory, fakes, open } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({ factory, retryDelayMs: 5 });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+    await mgr.unregister('gallica');
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+
+    fakes[0].triggerCrash(CRASH);
+    await vi.runAllTimersAsync();
+
+    expect(mgr.get('gallica')?.state).toBe('ready');
+    expect(fakes).toHaveLength(2);
+    expect(fakes[1].isClosed()).toBe(false);
+    expect(open()).toBe(1);
+  });
+
+  it('reprise programmée au moment du retrait : elle ne part pas, ni dans le slot réinscrit', async () => {
+    vi.useFakeTimers();
+    const { factory, fakes } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({ factory, retryDelayMs: 50 });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+    fakes[0].triggerCrash(CRASH);
+    expect(mgr.get('gallica')?.state).toBe('degraded');
+
+    await mgr.unregister('gallica');
+    mgr.register(cfg('gallica'));
+    await vi.runAllTimersAsync();
+
+    expect(fakes).toHaveLength(1);
+    expect(mgr.get('gallica')?.state).toBe('unconfigured');
+  });
+
+  it('register du même nom accepté, avec la nouvelle configuration', async () => {
+    const seen: MCPClientConfig[] = [];
+    const mgr = new MCPClientManager({
+      factory: (c) => {
+        seen.push(c);
+        return makeFake({ tools: [{ name: 't' }] }).handle;
+      },
+    });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+    await mgr.unregister('gallica');
+
+    const corrected: MCPClientConfig = {
+      name: 'gallica',
+      config: { transport: 'stdio', command: 'node', args: ['corrige.js'] },
+    };
+    mgr.register(corrected);
+
+    expect((await mgr.start('gallica')).state).toBe('ready');
+    expect(seen.at(-1)).toEqual(corrected);
+    expect(mgr.listAll().map((c) => c.name)).toEqual(['gallica']);
+  });
+
+  it('callTool sur un client retiré : une erreur rendue, jamais levée (un tour de chat en cours l’appelle)', async () => {
+    const { factory } = recordingFactory({ tools: [{ name: 't' }] });
+    const mgr = new MCPClientManager({ factory });
+    mgr.register(cfg('gallica'));
+    await mgr.start('gallica');
+    await mgr.unregister('gallica');
+
+    const res = await mgr.callTool('gallica', 't', {});
+
+    expect(res.ok).toBe(false);
+    expect(res.error?.code).toBe('client_not_ready');
+  });
+
+  it('nom inconnu : sans effet ni événement', async () => {
+    const events: MCPClientEvent[] = [];
+    const mgr = new MCPClientManager({ factory: () => makeFake().handle, onEvent: (e) => events.push(e) });
+
+    await mgr.unregister('absent');
+
+    expect(events).toEqual([]);
+  });
+});

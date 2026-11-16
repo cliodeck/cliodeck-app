@@ -261,18 +261,19 @@ describe('vraie fabrique SDK et mini-serveur stdio : arrêté veut dire arrêté
     await rm(root, { recursive: true, force: true });
   });
 
-  it('« Supprimer » : arrêté, toujours arrêté 2,5 s plus tard, et plus aucun processus', async () => {
+  it('« Supprimer » : retiré, toujours absent 2,5 s plus tard, et plus aucun processus', async () => {
     expect((await mcpClientsService.addClient(client())).state).toBe('ready');
     expect(pids()).toHaveLength(1);
 
     await mcpClientsService.removeClient('mini');
     const stoppedAt = events.length;
-    expect(stateOf('mini')).toBe('stopped');
+    // Retiré, plus seulement arrêté : la liste ne le montre plus (S09-1-3).
+    expect(stateOf('mini')).toBeUndefined();
 
     // La reprise fantôme partait à 500 ms : on la laisse largement passer.
     await new Promise((resolve) => setTimeout(resolve, 2_500));
 
-    expect(stateOf('mini')).toBe('stopped');
+    expect(stateOf('mini')).toBeUndefined();
     expect(events.slice(stoppedAt)).toEqual([]);
     expect(pids()).toHaveLength(1);
     expect(pids().filter(alive)).toEqual([]);
@@ -633,6 +634,72 @@ describe('clés des serveurs MCP : une portée par projet (S09-1-6)', () => {
       expect([...secrets.keys()]).toEqual([]);
     }
   );
+
+  /**
+   * Projet qui a déjà sa portée (L08-8, revue) : `discardUnsavedScope` ne vaut que pour une portée née
+   * dans l'écriture, et la clé rangée sous une portée enregistrée restait dans le coffre, sans entrée
+   * dans config.json. Le client `europeana`, déclaré, a la sienne, qui doit rester.
+   */
+  describe('ajout qui n’est pas écrit, sur un projet qui a déjà sa portée', () => {
+    const SCOPE = '11111111-2222-3333-4444-555555555555';
+    const EUROPEANA_KEY = `mcp.project.${SCOPE}.client.europeana.env.EUROPEANA_API_KEY`;
+
+    async function projectWithScope(): Promise<string> {
+      const root = await makeProject([]);
+      writeFileSync(
+        configOf(root),
+        JSON.stringify(
+          { schema_version: 2, name: 'p', secrets_scope: SCOPE, mcpClients: [europeana(SECRET_SENTINEL)] },
+          null,
+          2
+        )
+      );
+      secrets.set(EUROPEANA_KEY, 'cle-test-A');
+      await mcpClientsService.loadProject(root);
+      return root;
+    }
+
+    it.skipIf(process.getuid?.() === 0)(
+      'écriture qui échoue : la clé rangée par cette tentative est retirée, celle du client déclaré reste',
+      async () => {
+        const rootA = await projectWithScope();
+        const before = readFileSync(configOf(rootA), 'utf8');
+        chmodSync(configOf(rootA), 0o444);
+
+        await expect(
+          mcpClientsService.addClient({
+            name: 'gallica',
+            transport: 'stdio',
+            command: '/nonexistent/gallica-mcp',
+            env: { GALLICA_API_KEY: 'cle-test-G' },
+          })
+        ).rejects.toMatchObject({ code: 'EACCES' });
+
+        expect(readFileSync(configOf(rootA), 'utf8')).toBe(before);
+        expect([...secrets.entries()]).toEqual([[EUROPEANA_KEY, 'cle-test-A']]);
+      }
+    );
+
+    it('stdio sans commande : refusé, aucune clé gardée sous la portée du projet', async () => {
+      const rootA = await projectWithScope();
+      const before = readFileSync(configOf(rootA), 'utf8');
+
+      await expect(
+        mcpClientsService.addClient({ name: 'gallica', transport: 'stdio', env: { GALLICA_API_KEY: 'cle-test-G' } })
+      ).rejects.toThrow(/requires a command/);
+
+      expect(readFileSync(configOf(rootA), 'utf8')).toBe(before);
+      expect([...secrets.entries()]).toEqual([[EUROPEANA_KEY, 'cle-test-A']]);
+    });
+
+    it('nom déjà déclaré : refusé, la clé du client déclaré n’est ni remplacée ni retirée', async () => {
+      await projectWithScope();
+
+      await expect(mcpClientsService.addClient(europeana('autre-cle'))).rejects.toThrow(/already exists/);
+
+      expect([...secrets.entries()]).toEqual([[EUROPEANA_KEY, 'cle-test-A']]);
+    });
+  });
 
   it('aucune clé déclarée : ni portée ni écriture', async () => {
     const rootA = await makeProject([{ name: 'local', transport: 'stdio', command: '/nonexistent/x', env: { LANG: 'fr' } }]);

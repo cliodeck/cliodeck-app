@@ -85,6 +85,7 @@ import {
   type CancellableOperation,
 } from '../../services/cancellable-operation.js';
 import { mcpClientsService } from '../../services/mcp-clients-service.js';
+import { rememberMcpApproval } from '../../services/mcp-approval-gate.js';
 import { BrowserWindow } from 'electron';
 import { ObsidianVaultReader } from '../../../../backend/integrations/obsidian/ObsidianVaultReader.js';
 import { authorTextInVault } from '../../../../backend/integrations/obsidian/author-text-exclusions.js';
@@ -598,6 +599,11 @@ export function setupFusionHandlers(): void {
 
     try {
       const instance = await mcpClientsService.addClient(normalized);
+      // Écrit dans config.json : l'accord donné à la question vaut aussi pour les chargements
+      // suivants (S09-2-6), y compris quand un autre projet s'est ouvert pendant l'écriture, car le
+      // serveur est écrit dans celui de départ. Après l'ajout, qui a remplacé dans `normalized` les
+      // clés d'API par la sentinelle, comme dans le config.json relu au chargement.
+      await rememberMcpApproval(normalized);
       if (auditPath) {
         await appendMcpAudit(auditPath, {
           ts: new Date().toISOString(),
