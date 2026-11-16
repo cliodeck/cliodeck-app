@@ -9,10 +9,12 @@
  * réels et boucle jusqu'à `maxTurns`. C'est le vecteur nº 1 du modèle de
  * menace.
  *
- * Deux protections, dans cet ordre :
+ * Le résultat MCP (`CallToolResult`) est d'abord mis en texte (`toolResultToText`) : c'est ce
+ * texte, et lui seul, que le modèle lit. Une erreur rendue par le serveur (`isError`, erreur
+ * JSON-RPC) est un texte du serveur comme un autre. Puis deux protections, dans cet ordre :
  *
  *  1. **Borne de taille.** Un outil tiers peut renvoyer un document entier.
- *     Au-delà de `MAX_TOOL_RESULT_CHARS`, la sérialisation est tronquée et
+ *     Au-delà de `MAX_TOOL_RESULT_CHARS`, le texte est tronqué et
  *     un marqueur explicite est ajouté, pour que le modèle sache qu'il lit
  *     un extrait plutôt que d'inventer la suite. La troncature est
  *     journalisée comme événement de sécurité.
@@ -40,7 +42,7 @@ import {
 import type { SecurityEvent } from '../../../backend/security/events.js';
 
 /**
- * Budget de caractères pour la sérialisation d'un résultat d'outil.
+ * Budget de caractères du texte d'un résultat d'outil (ou de son erreur).
  *
  * Les outils que ClioDeck expose lui-même tronquent chaque extrait à
  * 4 000 caractères ; un résultat agrège plusieurs extraits, d'où une borne
@@ -71,46 +73,103 @@ export interface InspectToolResultOptions {
   now?: () => string;
 }
 
-/**
- * Sérialise, borne et inspecte un résultat d'outil MCP.
- *
- * Retourne un `ToolResultLike` prêt à être remis au moteur de chat : soit
- * le résultat d'origine (éventuellement tronqué), soit une erreur neutre
- * si l'inspection a bloqué.
- */
-export function inspectToolResult(
-  res: ToolResultLike,
-  opts: InspectToolResultOptions
-): ToolResultLike {
-  // Un échec d'outil ne transporte qu'un message d'erreur produit par notre
-  // propre couche : rien à inspecter.
-  if (!res.ok) return res;
+/** Longueur gardée d'un type MIME ou d'un type de bloc, écrits par le serveur. */
+const MAX_LABEL_FIELD_CHARS = 100;
+/** Longueur gardée d'une URI ou d'un nom de ressource, écrits par le serveur. */
+const MAX_LINK_FIELD_CHARS = 500;
+/** Ce que lit le modèle d'un résultat sans aucun contenu. */
+const NO_CONTENT_TEXT = '[The tool returned no content.]';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Un champ court du serveur, dans un libellé : sur une ligne, borné. */
+function labelField(value: unknown, max: number): string {
+  if (typeof value !== 'string' || value.trim() === '') return 'unknown';
+  const flat = value.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+/** Taille des octets que code une chaîne base64, sans la décoder. */
+function base64Size(data: unknown): string {
+  if (typeof data !== 'string') return 'unknown size';
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+  const bytes = Math.max(0, Math.floor((data.length * 3) / 4) - padding);
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function blockToText(block: unknown): string {
+  if (!isRecord(block)) return '[Unsupported content block]';
+  switch (block.type) {
+    case 'text':
+      return typeof block.text === 'string' ? block.text : '';
+    case 'image':
+    case 'audio':
+      return (
+        `[${block.type === 'image' ? 'Image' : 'Audio'} not shown to the model: ` +
+        `${labelField(block.mimeType, MAX_LABEL_FIELD_CHARS)}, ${base64Size(block.data)}]`
+      );
+    case 'resource': {
+      const resource = isRecord(block.resource) ? block.resource : {};
+      if (typeof resource.text === 'string') return resource.text;
+      return (
+        `[Resource not shown to the model: ${labelField(resource.uri, MAX_LINK_FIELD_CHARS)}, ` +
+        `${labelField(resource.mimeType, MAX_LABEL_FIELD_CHARS)}, ${base64Size(resource.blob)}]`
+      );
+    }
+    case 'resource_link':
+      return (
+        `[Resource link: ${labelField(block.name, MAX_LINK_FIELD_CHARS)} ` +
+        `<${labelField(block.uri, MAX_LINK_FIELD_CHARS)}>]`
+      );
+    default:
+      return `[Unsupported content block: ${labelField(block.type, MAX_LABEL_FIELD_CHARS)}]`;
+  }
+}
+
+/**
+ * Le texte que le modèle lit d'un résultat d'outil MCP (`CallToolResult`), ou `null` pour un autre
+ * objet, que le garde sérialise en JSON (S09-2-8). Sérialisé tel quel, le résultat envoyait au modèle
+ * le base64 d'une image, jusqu'à la borne de taille.
+ *
+ *  - les blocs `text` sont joints ;
+ *  - une image ou un son devient un libellé : type MIME et taille, jamais le base64 ;
+ *  - une ressource embarquée donne son texte, sinon un libellé ; un lien, son nom et son URI ;
+ *  - un type de bloc inconnu, un libellé ;
+ *  - `structuredContent` n'est lu, en JSON, qu'en l'absence de bloc texte : la spécification met
+ *    dans un bloc texte la même chose, sérialisée.
+ *
+ * Les champs des libellés viennent du serveur : bornés, ils passent dans le texte inspecté. Les
+ * libellés sont en anglais, comme les autres marqueurs adressés au modèle.
+ */
+export function toolResultToText(result: unknown): string | null {
+  if (!isRecord(result) || !Array.isArray(result.content)) return null;
+  const parts = result.content.map(blockToText);
+  const hasText = result.content.some((block) => isRecord(block) && block.type === 'text');
+  if (!hasText && isRecord(result.structuredContent)) parts.push(JSON.stringify(result.structuredContent));
+  const text = parts.filter((part) => part !== '').join('\n\n');
+  return text === '' ? NO_CONTENT_TEXT : text;
+}
+
+/**
+ * Borne et inspecte le texte qu'un serveur MCP fait lire au modèle. Rend le texte borné, ou `null`
+ * quand l'inspection le bloque.
+ */
+function boundAndInspect(
+  text: string,
+  opts: InspectToolResultOptions
+): { text: string; truncated: boolean } | null {
   const at = opts.now ?? (() => new Date().toISOString());
   const source = `mcp:${opts.toolName}`;
 
-  // 1. Sérialisation + borne de taille.
-  let serialized: string;
-  try {
-    serialized = JSON.stringify(res.result ?? {});
-  } catch {
-    // Résultat non sérialisable (cycles, BigInt…) : le moteur échouerait
-    // de toute façon au moment d'écrire le message `tool`.
-    return {
-      ok: false,
-      error: {
-        code: 'unserializable_result',
-        message: `Tool ${opts.toolName} returned a non-serializable result.`,
-      },
-    };
-  }
-
-  let truncated = false;
-  const originalLength = serialized.length;
+  // 1. Borne de taille.
+  let bounded = text;
+  const originalLength = text.length;
   if (originalLength > MAX_TOOL_RESULT_CHARS) {
-    truncated = true;
-    serialized =
-      serialized.slice(0, MAX_TOOL_RESULT_CHARS) +
+    bounded =
+      text.slice(0, MAX_TOOL_RESULT_CHARS) +
       `\n\n[Truncated: the tool returned ${originalLength} characters, ` +
       `only the first ${MAX_TOOL_RESULT_CHARS} are shown.]`;
     opts.onEvent?.({
@@ -129,19 +188,82 @@ export function inspectToolResult(
     onEvent: opts.onEvent,
   });
   const outcome = inspector.inspect([
-    { id: opts.toolName, source, content: serialized },
+    { id: opts.toolName, source, content: bounded },
   ]);
+  if (outcome.blocked.length > 0) return null;
+  return { text: bounded, truncated: bounded !== text };
+}
 
-  if (outcome.blocked.length > 0) {
+const blockedResult = (): ToolResultLike => ({
+  ok: false,
+  error: { code: 'blocked_by_inspector', message: BLOCKED_TOOL_MESSAGE },
+});
+
+/**
+ * Le texte d'une erreur écrit par le serveur, ou `null` pour une erreur de notre propre couche
+ * (`client_not_ready`, `no_manager`, `project_changed`, `unknown_tool`…), qui ne porte rien du
+ * serveur. Deux erreurs viennent de lui :
+ *  - un outil qui a répondu `isError` (`tool_error`) : son texte est dans le résultat joint ;
+ *  - une erreur JSON-RPC (`call_tool_error`) : le message d'une `McpError`, que le serveur choisit.
+ */
+function serverErrorText(res: ToolResultLike): string | null {
+  if (res.result !== undefined) {
+    try {
+      return toolResultToText(res.result) ?? res.error?.message ?? null;
+    } catch {
+      return res.error?.message ?? null;
+    }
+  }
+  return res.error?.code === 'call_tool_error' ? res.error.message : null;
+}
+
+/**
+ * Met en texte, borne et inspecte un résultat d'outil MCP.
+ *
+ * Retourne un `ToolResultLike` prêt à être remis au moteur de chat : le
+ * texte d'un `CallToolResult`, ou l'objet d'origine (en chaîne s'il a été
+ * tronqué), ou une erreur neutre si l'inspection a bloqué. Une chaîne
+ * part telle quelle au modèle : le moteur ne la resérialise pas.
+ *
+ * Une erreur rendue par le serveur passe par la même borne et la même
+ * inspection : son texte devient le message de l'erreur, que lit le modèle.
+ */
+export function inspectToolResult(
+  res: ToolResultLike,
+  opts: InspectToolResultOptions
+): ToolResultLike {
+  if (!res.ok) {
+    const text = serverErrorText(res);
+    if (text === null) return res;
+    const guarded = boundAndInspect(text, opts);
+    if (guarded === null) return blockedResult();
+    return { ok: false, error: { code: res.error?.code ?? 'tool_error', message: guarded.text } };
+  }
+
+  // Le texte que lira le modèle : celui d'un CallToolResult, ou la sérialisation d'un autre objet.
+  let asText: string | null;
+  let text: string;
+  try {
+    asText = toolResultToText(res.result);
+    text = asText ?? JSON.stringify(res.result ?? {});
+  } catch {
+    // Résultat non sérialisable (cycles, BigInt…) : le moteur échouerait
+    // de toute façon au moment d'écrire le message `tool`.
     return {
       ok: false,
-      error: { code: 'blocked_by_inspector', message: BLOCKED_TOOL_MESSAGE },
+      error: {
+        code: 'unserializable_result',
+        message: `Tool ${opts.toolName} returned a non-serializable result.`,
+      },
     };
   }
 
-  // Le résultat passe. S'il a été tronqué, on renvoie la chaîne bornée
-  // plutôt que l'objet d'origine : c'est elle que le modèle doit lire.
-  return truncated ? { ok: true, result: serialized } : res;
+  const guarded = boundAndInspect(text, opts);
+  if (guarded === null) return blockedResult();
+
+  // Le résultat passe. Un CallToolResult part en texte ; un autre objet
+  // tronqué aussi : c'est la chaîne bornée que le modèle doit lire.
+  return asText !== null || guarded.truncated ? { ok: true, result: guarded.text } : res;
 }
 
 /**

@@ -15,7 +15,10 @@
 //   --curseur=sans-fin    toujours une page de plus, qui reprend le catalogue au début une fois au bout ;
 //   --lent=ms             chaque page de tools/list part ce temps après la demande ;
 //   --schema-sortie[=P]   sur la page P seulement (0 par défaut), `echo` déclare un outputSchema ; il
-//                         répond toujours sans structuredContent, ce que le SDK refuse pour un tel outil.
+//                         répond toujours sans structuredContent, ce que le SDK refuse pour un tel outil ;
+//   --erreur-outil[=texte] `echo` répond en erreur d'outil (`isError`), avec ce texte (« date must be
+//                         YYYY-MM-DD » par défaut) ;
+//   --image=octets        `echo` répond par un bloc texte puis une image PNG de cette taille, en base64.
 import { appendFileSync } from 'node:fs';
 import readline from 'node:readline';
 
@@ -89,11 +92,18 @@ lines.on('line', (line) => {
     else answer();
     if (dieAfterMs) setTimeout(() => process.exit(1), Number(dieAfterMs));
   } else if (message.method === 'tools/call' && message.params?.name === 'echo') {
-    const response = JSON.stringify({
-      jsonrpc: '2.0',
-      id: message.id,
-      result: { content: [{ type: 'text', text: JSON.stringify(message.params.arguments ?? {}) }] },
-    });
+    const echoed = { type: 'text', text: JSON.stringify(message.params.arguments ?? {}) };
+    const result = has('erreur-outil')
+      ? { content: [{ type: 'text', text: option('erreur-outil') ?? 'date must be YYYY-MM-DD' }], isError: true }
+      : has('image')
+        ? {
+            content: [
+              echoed,
+              { type: 'image', data: Buffer.alloc(Number(option('image'))).toString('base64'), mimeType: 'image/png' },
+            ],
+          }
+        : { content: [echoed] };
+    const response = JSON.stringify({ jsonrpc: '2.0', id: message.id, result });
     // Une seule écriture : le bruit et la réponse arrivent dans le même paquet.
     const noise = has('bruit-avant-appel') ? 'searching archives...\n{"progress":0.5}\n' : '';
     process.stdout.write(`${noise}${response}\n`);
