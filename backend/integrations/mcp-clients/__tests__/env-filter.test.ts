@@ -156,15 +156,35 @@ describe('mcpSpawnParentEnv : le PATH d’une app lancée depuis le Dock', () =>
     expect(nvmDirs).toEqual([`${NVM_VERSIONS}/v22.12.0/bin`]);
   });
 
+  // Lancée d'un terminal après `nvm use 20`, l'app hérite de la version choisie : la plus haute
+  // ne doit pas passer devant elle.
+  it('nvm déjà dans le PATH hérité : la version choisie reste la seule, aucune autre devant elle', () => {
+    const v20 = `${NVM_VERSIONS}/v20.11.1/bin`;
+    const env = mcpSpawnParentEnv(
+      { PATH: `${v20}:/usr/bin:/bin` },
+      { ...darwin, readdir: (dir) => (dir === NVM_VERSIONS ? ['v20.11.1', 'v22.12.0'] : noNvm(dir)) }
+    );
+    const nvmDirs = (env.PATH ?? '').split(':').filter((d) => d.includes('.nvm'));
+    expect(nvmDirs).toEqual([v20]);
+  });
+
   it('sous Windows, l’env part tel quel', () => {
     const parent = { Path: 'C:\\Windows\\system32', USERPROFILE: 'C:\\Users\\h' };
     const env = mcpSpawnParentEnv(parent, { home: 'C:\\Users\\h', platform: 'win32', readdir: () => ['v22.12.0'] });
     expect(env).toEqual(parent);
   });
 
-  it('un HOME vide n’ajoute aucun dossier relatif, que la commande chercherait dans le dossier courant', () => {
-    const env = mcpSpawnParentEnv({ PATH: LAUNCHD_PATH }, { ...darwin, home: '' });
-    expect((env.PATH ?? '').split(':').filter((d) => d !== '' && !d.startsWith('/'))).toEqual([]);
+  // Une entrée vide du PATH vaut le dossier courant, que la configuration du client peut fixer
+  // (`cwd`) : un PATH absent n'en laissait aucune avant la correction.
+  it('un HOME vide ou un PATH absent n’ajoutent ni dossier relatif ni entrée vide, cherchés dans le dossier courant', () => {
+    for (const [parent, home] of [
+      [{ PATH: LAUNCHD_PATH }, ''],
+      [{}, '/Users/h'],
+      [{}, ''],
+    ] as const) {
+      const env = mcpSpawnParentEnv(parent, { ...darwin, home });
+      expect((env.PATH ?? '').split(':').filter((d) => !d.startsWith('/'))).toEqual([]);
+    }
   });
 
   it('un PATH déclaré par le client reste prioritaire, et l’env reçu n’est pas modifié', () => {

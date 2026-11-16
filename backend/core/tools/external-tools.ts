@@ -46,7 +46,8 @@ export function extendedToolPath(
   // Élément par élément : une sous-chaîne (`/usr/local/bin2`) ne vaut pas présence.
   const present = new Set(currentPath.split(delimiter));
   const missing = [...new Set([...extraDirs, ...UNIX_TOOL_PATHS])].filter((p) => !present.has(p));
-  return [...missing, currentPath].join(delimiter);
+  // Un PATH vide ne laisse pas d'entrée vide à la fin : elle vaudrait le dossier courant.
+  return [...missing, ...(currentPath ? [currentPath] : [])].join(delimiter);
 }
 
 export interface FindToolDeps {

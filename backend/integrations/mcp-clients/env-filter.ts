@@ -131,8 +131,7 @@ function compareVersions(a: readonly number[], b: readonly number[]): number {
  * lu (`lts/*`, `22`, `node` : ce serait refaire nvm) ; un client qui veut une autre version
  * déclare son PATH.
  */
-function latestNvmBin(home: string, readdir: (dir: string) => string[]): string | null {
-  const versionsDir = path.join(home, '.nvm', 'versions', 'node');
+function latestNvmBin(versionsDir: string, readdir: (dir: string) => string[]): string | null {
   let entries: string[];
   try {
     entries = readdir(versionsDir);
@@ -158,6 +157,9 @@ function latestNvmBin(home: string, readdir: (dir: string) => string[]): string 
  * exports (`extendedToolPath`) et, devant eux, ceux de uv (`~/.local/bin`), de Volta et de la
  * version de nvm la plus haute. Sous Windows, rien ne change.
  *
+ * Si le PATH hérité contient déjà une version de nvm (app lancée d'un terminal après
+ * `nvm use 20`), aucune autre n'est ajoutée : la plus haute passerait devant le choix fait.
+ *
  * Ce PATH ne sert qu'au lancement : il n'entre ni dans `config.json` ni dans l'empreinte
  * d'accord, qui ne couvre que l'env déclaré par le client.
  */
@@ -169,12 +171,17 @@ export function mcpSpawnParentEnv(
   if (platform === 'win32') return parentEnv;
   const home = deps.home ?? os.homedir();
   const readdir = deps.readdir ?? ((dir: string) => readdirSync(dir));
+  const inherited = parentEnv.PATH ?? '';
   // Un HOME vide ou relatif donnerait des dossiers cherchés depuis le dossier courant.
   const userDirs: string[] = [];
   if (path.isAbsolute(home)) {
     userDirs.push(path.join(home, '.local', 'bin'), path.join(home, '.volta', 'bin'));
-    const nvm = latestNvmBin(home, readdir);
+    const nvmVersions = path.join(home, '.nvm', 'versions', 'node');
+    const nvmChosen = inherited
+      .split(path.delimiter)
+      .some((dir) => dir.startsWith(nvmVersions + path.sep));
+    const nvm = nvmChosen ? null : latestNvmBin(nvmVersions, readdir);
     if (nvm) userDirs.push(nvm);
   }
-  return { ...parentEnv, PATH: extendedToolPath(parentEnv.PATH ?? '', platform, userDirs) };
+  return { ...parentEnv, PATH: extendedToolPath(inherited, platform, userDirs) };
 }
