@@ -21,8 +21,9 @@
  *  - le nom envoyé ne dépend ainsi que du nom brut. Dernier recours, s'il est déjà pris : un
  *    compteur.
  *
- * Le nom envoyé ne sert qu'au modèle. L'appel au serveur, la puce d'outil, `mcp-access.jsonl` et
- * les événements de sécurité gardent les noms réels.
+ * Le nom envoyé ne sert qu'au modèle. L'appel au serveur, la puce d'outil et `mcp-access.jsonl`
+ * gardent le serveur et l'outil réels, les événements de sécurité le nom brut (ADR 0003, amendement
+ * du 2026-11-17).
  */
 
 import { createHash } from 'crypto';
