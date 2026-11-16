@@ -212,6 +212,36 @@ describe('realMCPClientFactory : sortie standard et catalogue paginé', () => {
     expect(warnings(warn)[0]).toContain('pages');
   }, 15_000);
 
+  // Le SDK vide son cache d'outils à chaque page de tools/list, puis le remplit avec cette seule page.
+  // Un outil d'une page antérieure perdait le contrôle de son outputSchema (et la garde des outils
+  // « task required ») : même outil, même serveur, contrôlé ou non selon la page où il tombait.
+  it.each<[string, string[]]>([
+    ['sur une seule page', []],
+    ['en première page de deux', ['--outils=2', '--page=1']],
+    ['en première page, puis revu sans schéma', ['--outils=30', '--page=7', '--curseur=sans-fin']],
+  ])('un outil à outputSchema %s : un appel sans sortie structurée est refusé', async (_cas, options) => {
+    handle = open('catalogue', '--schema-sortie', ...options);
+    await handle.connect();
+    expect((await handle.listTools()).map((t) => t.name)).toContain('echo');
+
+    const call = await handle.callTool('echo', { texte: 'Dreyfus' });
+
+    expect(call.ok).toBe(false);
+    expect(call.error?.message).toContain('has an output schema but did not return structured content');
+  }, 15_000);
+
+  it('un outil répété, que seule une page suivante dote d’un outputSchema : le contrôle suit l’entrée exposée, la première', async () => {
+    // `echo` revient aux pages 0, 4, 8, 12 et 17 ; seule la page 4 lui donne un outputSchema.
+    handle = open('catalogue', '--schema-sortie=4', '--outils=30', '--page=7', '--curseur=sans-fin');
+    await handle.connect();
+    await handle.listTools();
+
+    const call = await handle.callTool('echo', { texte: 'Dreyfus' });
+
+    expect(call.error).toBeUndefined();
+    expect(call.ok).toBe(true);
+  }, 15_000);
+
   it('arrêté pendant la lecture du catalogue : le client s’arrête sans attendre la page en cours', async () => {
     manager = new MCPClientManager({ factory: realMCPClientFactory });
     // Chaque page met une minute à venir : sans sortie, `handshaking` durerait jusqu'au plafond.

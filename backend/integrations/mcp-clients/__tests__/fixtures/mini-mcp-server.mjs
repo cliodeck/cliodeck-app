@@ -13,7 +13,9 @@
 //   --page=P              tools/list par pages de P (curseur : le numéro de la page) ;
 //   --curseur=boucle      la dernière page renvoie le curseur de la deuxième, déjà lu ;
 //   --curseur=sans-fin    toujours une page de plus, qui reprend le catalogue au début une fois au bout ;
-//   --lent=ms             chaque page de tools/list part ce temps après la demande.
+//   --lent=ms             chaque page de tools/list part ce temps après la demande ;
+//   --schema-sortie[=P]   sur la page P seulement (0 par défaut), `echo` déclare un outputSchema ; il
+//                         répond toujours sans structuredContent, ce que le SDK refuse pour un tel outil.
 import { appendFileSync } from 'node:fs';
 import readline from 'node:readline';
 
@@ -37,9 +39,16 @@ for (const [key, text] of options) {
 const toolCount = Number(option('outils') ?? 1);
 const pageSize = Number(option('page') ?? toolCount);
 const cursorMode = option('curseur');
+const outputSchema = { type: 'object', properties: { texte: { type: 'string' } }, required: ['texte'] };
+const schemaPage = has('schema-sortie') ? Number(option('schema-sortie') ?? 0) : -1;
 const toolAt = (i, page) =>
   i === 0
-    ? { name: 'echo', description: 'renvoie ce qu’on lui donne', inputSchema: { type: 'object' } }
+    ? {
+        name: 'echo',
+        description: 'renvoie ce qu’on lui donne',
+        inputSchema: { type: 'object' },
+        ...(page === schemaPage ? { outputSchema } : {}),
+      }
     : { name: `outil-${i}`, description: `outil ${i}, page ${page}`, inputSchema: { type: 'object' } };
 
 function listPage(cursor) {

@@ -6,7 +6,8 @@
  *   - transport lifecycle (spawn subprocess, close pipes, abort SSE)
  *   - typed error mapping to the manager's `MCPClientError`
  *   - onCrash subscription so the manager can trigger its one silent retry
- *   - pagination of `tools/list`, bounded (`MAX_TOOL_PAGES`, cursor already seen)
+ *   - pagination of `tools/list`, bounded (`MAX_TOOL_PAGES`, cursor already seen), with the
+ *     SDK's tool cache reloaded from the whole catalogue
  *
  * The manager owns state transitions; the factory is transport-dumb.
  */
@@ -14,6 +15,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type {
   MCPClientConfig,
   MCPClientError,
@@ -50,6 +52,23 @@ function isLineNoise(err: unknown): boolean {
 function excerpt(message: string): string {
   const flat = message.replace(/\s+/g, ' ').trim();
   return flat.length > NOISE_EXCERPT_CHARS ? `${flat.slice(0, NOISE_EXCERPT_CHARS)}…` : flat;
+}
+
+/**
+ * `Client.listTools` vide le cache d'outils du SDK puis le remplit avec la seule page reçue. Ce cache
+ * porte le contrôle de l'`outputSchema` et la garde `taskSupport: 'required'` de `callTool`. Après une
+ * lecture paginée, seuls les outils de la dernière page seraient contrôlés : on le recharge avec tout
+ * le catalogue, dans les entrées exposées (la première page pour un nom répété). Méthode privée du SDK
+ * 1.29, lue par crochets, que TypeScript accepte : si elle disparaît, la compilation casse, et
+ * sdk-factory.test.ts vérifie le contrôle à chaque montée du SDK.
+ */
+function cacheWholeCatalogue(client: Client, tools: Tool[], name: string): void {
+  const reload: unknown = client['cacheToolMetadata'];
+  if (typeof reload !== 'function') {
+    console.warn(`[mcp-clients] ${name} : cache d'outils du SDK introuvable, seule la dernière page de tools/list est contrôlée`);
+    return;
+  }
+  reload.call(client, tools);
 }
 
 function toErr(code: string, e: unknown): MCPClientError {
@@ -134,29 +153,33 @@ export const realMCPClientFactory: MCPClientFactory = (
       // Tout le catalogue, page après page (S09-2-5). Un curseur déjà vu ou le plafond arrêtent la
       // lecture sans faire échouer le serveur : les pages lues restent. Un outil déjà lu garde sa
       // première page.
-      const tools = new Map<string, MCPToolDescriptor>();
+      const tools = new Map<string, Tool>();
+      const finish = (): MCPToolDescriptor[] => {
+        const catalogue = [...tools.values()];
+        cacheWholeCatalogue(connected, catalogue, cfg.name);
+        return catalogue.map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: t.inputSchema as Record<string, unknown> | undefined,
+        }));
+      };
       const seenCursors = new Set<string>();
       let cursor: string | undefined;
       for (let page = 0; page < MAX_TOOL_PAGES; page++) {
         const res = await connected.listTools(cursor === undefined ? undefined : { cursor });
         for (const t of res.tools ?? []) {
-          if (tools.has(t.name)) continue;
-          tools.set(t.name, {
-            name: t.name,
-            description: t.description,
-            inputSchema: t.inputSchema as Record<string, unknown> | undefined,
-          });
+          if (!tools.has(t.name)) tools.set(t.name, t);
         }
-        if (!res.nextCursor) return [...tools.values()];
+        if (!res.nextCursor) return finish();
         if (seenCursors.has(res.nextCursor)) {
           console.warn(`[mcp-clients] ${cfg.name} : curseur de tools/list déjà lu, catalogue arrêté à ${tools.size} outils`);
-          return [...tools.values()];
+          return finish();
         }
         seenCursors.add(res.nextCursor);
         cursor = res.nextCursor;
       }
       console.warn(`[mcp-clients] ${cfg.name} : tools/list arrêté après ${MAX_TOOL_PAGES} pages, à ${tools.size} outils`);
-      return [...tools.values()];
+      return finish();
     },
 
     async callTool(name, args) {
