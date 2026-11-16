@@ -129,6 +129,36 @@ function blockToText(block: unknown): string {
   }
 }
 
+/** Égalité de deux valeurs JSON, quel que soit l'ordre des clés. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a)) {
+    return Array.isArray(b) && a.length === b.length && a.every((item, i) => sameJson(item, b[i]));
+  }
+  if (!isRecord(a) || !isRecord(b)) return false;
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && sameJson(a[key], b[key]))
+  );
+}
+
+/**
+ * Vrai si un bloc texte du résultat est déjà la sérialisation de `structuredContent`, compacte ou
+ * indentée : la copie que la spécification recommande (SHOULD), sans l'exiger.
+ */
+function textReproduces(content: unknown[], structured: Record<string, unknown>): boolean {
+  return content.some((block) => {
+    if (!isRecord(block) || block.type !== 'text' || typeof block.text !== 'string') return false;
+    if (!block.text.trimStart().startsWith('{')) return false;
+    try {
+      return sameJson(JSON.parse(block.text), structured);
+    } catch {
+      return false;
+    }
+  });
+}
+
 /**
  * Le texte que le modèle lit d'un résultat d'outil MCP (`CallToolResult`), ou `null` pour un autre
  * objet, que le garde sérialise en JSON (S09-2-8). Sérialisé tel quel, le résultat envoyait au modèle
@@ -138,17 +168,25 @@ function blockToText(block: unknown): string {
  *  - une image ou un son devient un libellé : type MIME et taille, jamais le base64 ;
  *  - une ressource embarquée donne son texte, sinon un libellé ; un lien, son nom et son URI ;
  *  - un type de bloc inconnu, un libellé ;
- *  - `structuredContent` n'est lu, en JSON, qu'en l'absence de bloc texte : la spécification met
- *    dans un bloc texte la même chose, sérialisée.
+ *  - `toolResult`, la forme du protocole 2024-10-07 que le SDK négocie encore, passe en JSON quand
+ *    `content` est vide (le SDK y met `[]` par défaut) ;
+ *  - `structuredContent` s'ajoute en JSON, sauf si un bloc texte le reproduit déjà. La copie en
+ *    texte n'est qu'une recommandation de la spécification, et le `McpServer` du SDK n'en ajoute
+ *    aucune : un résumé en texte ne doit pas cacher les données (revue de L08-10).
  *
  * Les champs des libellés viennent du serveur : bornés, ils passent dans le texte inspecté. Les
  * libellés sont en anglais, comme les autres marqueurs adressés au modèle.
  */
 export function toolResultToText(result: unknown): string | null {
   if (!isRecord(result) || !Array.isArray(result.content)) return null;
-  const parts = result.content.map(blockToText);
-  const hasText = result.content.some((block) => isRecord(block) && block.type === 'text');
-  if (!hasText && isRecord(result.structuredContent)) parts.push(JSON.stringify(result.structuredContent));
+  const content: unknown[] = result.content;
+  const parts = content.map(blockToText);
+  if (content.length === 0 && result.toolResult !== undefined) {
+    const legacy = result.toolResult;
+    parts.push(typeof legacy === 'string' ? legacy : JSON.stringify(legacy));
+  }
+  const structured = result.structuredContent;
+  if (isRecord(structured) && !textReproduces(content, structured)) parts.push(JSON.stringify(structured));
   const text = parts.filter((part) => part !== '').join('\n\n');
   return text === '' ? NO_CONTENT_TEXT : text;
 }

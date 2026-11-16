@@ -7,6 +7,7 @@
  * qu'un résultat bloqué ne fuit pas son contenu vers le modèle.
  */
 import { describe, it, expect } from 'vitest';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import {
   inspectToolDescription,
   inspectToolResult,
@@ -141,10 +142,43 @@ describe('toolResultToText', () => {
 
   it('structuredContent sans bloc texte : son JSON', () => {
     expect(toolResultToText(callToolResult([], { structuredContent: { texte: 'Dreyfus' } }))).toBe('{"texte":"Dreyfus"}');
-    // Avec un bloc texte, c'est lui qui part (la spécification y met la même chose, sérialisée).
+  });
+
+  it('structuredContent qu’un bloc texte reproduit déjà : une seule fois, compact ou indenté, dans n’importe quel ordre', () => {
+    const structuredContent = { cote: 'F/7/12445', pieces: [1, 2], dossier: { titre: 'Dreyfus' } };
     expect(
-      toolResultToText(callToolResult([{ type: 'text', text: 'Dreyfus' }], { structuredContent: { texte: 'Dreyfus' } }))
-    ).toBe('Dreyfus');
+      toolResultToText(callToolResult([{ type: 'text', text: JSON.stringify(structuredContent) }], { structuredContent }))
+    ).toBe(JSON.stringify(structuredContent));
+    const indented = JSON.stringify({ dossier: { titre: 'Dreyfus' }, pieces: [1, 2], cote: 'F/7/12445' }, null, 2);
+    expect(toolResultToText(callToolResult([{ type: 'text', text: indented }], { structuredContent }))).toBe(indented);
+  });
+
+  // Revue de L08-10 : la copie en texte n'est qu'un SHOULD de la spécification, et le McpServer du
+  // SDK n'en ajoute aucune. Un résumé en texte ne doit pas cacher les données au modèle.
+  it('un résumé en texte et les données en structuredContent : le modèle lit les deux', () => {
+    const text = toolResultToText(
+      callToolResult([{ type: 'text', text: '3 résultats' }], { structuredContent: { hits: ['a', 'b', 'c'] } })
+    );
+    expect(text).toBe('3 résultats\n\n{"hits":["a","b","c"]}');
+  });
+
+  it('un bloc texte vide et structuredContent : le JSON, jamais « aucun contenu »', () => {
+    expect(toolResultToText(callToolResult([{ type: 'text', text: '' }], { structuredContent: { hits: [1] } }))).toBe(
+      '{"hits":[1]}'
+    );
+  });
+
+  // Revue de L08-10 : le SDK 1.29 négocie encore le protocole 2024-10-07, où le résultat d'un outil
+  // arrive en `toolResult`. `CallToolResultSchema` y ajoute `content: []` et garde `toolResult`.
+  it('protocole 2024-10-07 : un résultat en toolResult part au modèle, jamais « aucun contenu »', () => {
+    const legacy = CallToolResultSchema.parse({ toolResult: { hits: ['Dreyfus'] } });
+    expect(legacy.content).toEqual([]);
+    expect(toolResultToText(legacy)).toBe('{"hits":["Dreyfus"]}');
+    expect(toolResultToText(CallToolResultSchema.parse({ toolResult: 'Affaire Dreyfus' }))).toBe('Affaire Dreyfus');
+    expect(inspectToolResult({ ok: true, result: legacy }, { toolName: 'ancien__search', mode: 'audit' })).toEqual({
+      ok: true,
+      result: '{"hits":["Dreyfus"]}',
+    });
   });
 
   it('un résultat sans contenu le dit', () => {
