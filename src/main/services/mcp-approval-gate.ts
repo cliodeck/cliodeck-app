@@ -2,9 +2,10 @@
  * Garde appliqué aux serveurs MCP déclarés dans `.cliodeck/config.json`.
  *
  * Même dispositif que pour l'ajout manuel (`fusion:mcp:add`) : validation de
- * la commande et de l'environnement, puis confirmation native. La différence
- * est qu'ici l'accord est mémorisé par empreinte, sinon ouvrir son propre
- * projet redemanderait l'autorisation à chaque démarrage.
+ * la commande et de l'environnement, puis confirmation native. L'accord est
+ * mémorisé par empreinte, ici comme à l'ajout, sinon ouvrir son propre projet
+ * redemanderait l'autorisation à chaque démarrage. Un accord vaut pour une
+ * empreinte, sur tous les projets : retirer un serveur ne le retire pas.
  *
  * Un serveur SSE passe par le même chemin (S09-2-3). Il ne lance aucun
  * processus, mais les arguments des appels d'outils partent vers son
@@ -38,6 +39,16 @@ function getRegistry(): McpApprovalRegistry {
     );
   }
   return registry;
+}
+
+/**
+ * Retient l'accord donné pour ce serveur, comme le garde au chargement. Appelé aussi par
+ * `fusion:mcp:add`, une fois le serveur écrit dans config.json : sans quoi le chargement suivant
+ * reposait la question qu'on venait d'accepter (S09-2-6). Le client est celui qu'a vu l'écriture,
+ * après la migration des secrets : sa clé d'API est la sentinelle, comme au chargement.
+ */
+export async function rememberMcpApproval(client: WorkspaceClientConfig): Promise<void> {
+  await getRegistry().approve(fingerprintClient(client), client);
 }
 
 function toAddRequest(client: WorkspaceClientConfig): McpAddRequest {
@@ -96,6 +107,6 @@ export async function defaultMcpApprovalGate(
 
   if (!accepted) return 'rejected';
 
-  await reg.approve(fingerprint, client);
+  await rememberMcpApproval(client);
   return 'approved';
 }
