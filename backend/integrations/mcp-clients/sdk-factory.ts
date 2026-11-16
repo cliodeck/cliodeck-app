@@ -6,6 +6,7 @@
  *   - transport lifecycle (spawn subprocess, close pipes, abort SSE)
  *   - typed error mapping to the manager's `MCPClientError`
  *   - onCrash subscription so the manager can trigger its one silent retry
+ *   - pagination of `tools/list`, bounded (`MAX_TOOL_PAGES`, cursor already seen)
  *
  * The manager owns state transitions; the factory is transport-dumb.
  */
@@ -23,8 +24,32 @@ import { buildMCPSpawnEnv, mcpSpawnParentEnv } from './env-filter.js';
 
 const CLIENT_INFO = { name: 'cliodeck', version: '2.0.0' };
 
+/**
+ * Pages de `tools/list` lues au plus : un serveur qui renvoie toujours un curseur neuf ne retient pas
+ * la connexion. Chaque page a le délai du SDK (60 s).
+ */
+const MAX_TOOL_PAGES = 20;
+/** Lignes écartées signalées par handle ; une dernière dit que les suivantes sont tues. */
+const MAX_NOISE_WARNINGS = 5;
+/** Longueur gardée de l'erreur : un serveur peut écrire son env, clés comprises, sur sa sortie. */
+const NOISE_EXCERPT_CHARS = 100;
+
 function now(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Une ligne de la sortie (stdio) ou un événement (SSE) qui n'est pas un message JSON-RPC : le
+ * transport l'écarte, le signale par `onerror` et continue de lire. `SyntaxError` de `JSON.parse`,
+ * `ZodError` du schéma du SDK. Tout le reste (spawn, EPIPE, `SseError`) est un plantage.
+ */
+function isLineNoise(err: unknown): boolean {
+  return err instanceof SyntaxError || (err instanceof Error && err.name === 'ZodError');
+}
+
+function excerpt(message: string): string {
+  const flat = message.replace(/\s+/g, ' ').trim();
+  return flat.length > NOISE_EXCERPT_CHARS ? `${flat.slice(0, NOISE_EXCERPT_CHARS)}…` : flat;
 }
 
 function toErr(code: string, e: unknown): MCPClientError {
@@ -42,6 +67,7 @@ export const realMCPClientFactory: MCPClientFactory = (
   let transport: StdioClientTransport | SSEClientTransport | null = null;
   const crashCallbacks: Array<(err: MCPClientError) => void> = [];
   let crashed = false;
+  let noiseLines = 0;
 
   const fireCrash = (err: MCPClientError): void => {
     if (crashed) return;
@@ -55,6 +81,21 @@ export const realMCPClientFactory: MCPClientFactory = (
     });
   };
 
+  // Une bannière ou un print de débogage n'est pas un plantage : le serveur était abattu et relancé
+  // à chaque ligne (S09-2-0). L'avertissement est borné et ne recopie jamais la ligne entière.
+  const onTransportError = (err: Error): void => {
+    if (!isLineNoise(err)) {
+      fireCrash(toErr('transport_error', err));
+      return;
+    }
+    noiseLines += 1;
+    if (noiseLines <= MAX_NOISE_WARNINGS) {
+      console.warn(`[mcp-clients] ${cfg.name} : ligne ignorée, pas du JSON-RPC (${excerpt(err.message)})`);
+    } else if (noiseLines === MAX_NOISE_WARNINGS + 1) {
+      console.warn(`[mcp-clients] ${cfg.name} : autres lignes ignorées, plus signalées`);
+    }
+  };
+
   return {
     async connect(): Promise<void> {
       if (cfg.config.transport === 'stdio') {
@@ -66,8 +107,7 @@ export const realMCPClientFactory: MCPClientFactory = (
           env: buildMCPSpawnEnv(cfg.config.env, mcpSpawnParentEnv()),
           cwd: cfg.config.cwd,
         });
-        stdio.onerror = (err: Error): void =>
-          fireCrash(toErr('transport_error', err));
+        stdio.onerror = onTransportError;
         stdio.onclose = (): void =>
           fireCrash(toErr('transport_closed', 'stdio transport closed'));
         transport = stdio;
@@ -77,8 +117,7 @@ export const realMCPClientFactory: MCPClientFactory = (
             ? { headers: cfg.config.headers }
             : undefined,
         });
-        sse.onerror = (err: Error): void =>
-          fireCrash(toErr('transport_error', err));
+        sse.onerror = onTransportError;
         sse.onclose = (): void =>
           fireCrash(toErr('transport_closed', 'sse transport closed'));
         transport = sse;
@@ -89,13 +128,35 @@ export const realMCPClientFactory: MCPClientFactory = (
     },
 
     async listTools(): Promise<MCPToolDescriptor[]> {
-      if (!client) throw new Error('MCP client not connected');
-      const res = await client.listTools();
-      return (res.tools ?? []).map((t) => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: t.inputSchema as Record<string, unknown> | undefined,
-      }));
+      // Capturé : fermé pendant la lecture, le client refuse la page suivante (« Not connected »).
+      const connected = client;
+      if (!connected) throw new Error('MCP client not connected');
+      // Tout le catalogue, page après page (S09-2-5). Un curseur déjà vu ou le plafond arrêtent la
+      // lecture sans faire échouer le serveur : les pages lues restent. Un outil déjà lu garde sa
+      // première page.
+      const tools = new Map<string, MCPToolDescriptor>();
+      const seenCursors = new Set<string>();
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_TOOL_PAGES; page++) {
+        const res = await connected.listTools(cursor === undefined ? undefined : { cursor });
+        for (const t of res.tools ?? []) {
+          if (tools.has(t.name)) continue;
+          tools.set(t.name, {
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema as Record<string, unknown> | undefined,
+          });
+        }
+        if (!res.nextCursor) return [...tools.values()];
+        if (seenCursors.has(res.nextCursor)) {
+          console.warn(`[mcp-clients] ${cfg.name} : curseur de tools/list déjà lu, catalogue arrêté à ${tools.size} outils`);
+          return [...tools.values()];
+        }
+        seenCursors.add(res.nextCursor);
+        cursor = res.nextCursor;
+      }
+      console.warn(`[mcp-clients] ${cfg.name} : tools/list arrêté après ${MAX_TOOL_PAGES} pages, à ${tools.size} outils`);
+      return [...tools.values()];
     },
 
     async callTool(name, args) {
