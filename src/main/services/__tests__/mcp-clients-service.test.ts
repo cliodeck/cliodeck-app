@@ -1,24 +1,43 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'fs';
 import { mkdtemp, rm } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+// `secureStorage` repose sur `safeStorage` d'Electron : une table en mémoire le remplace, comme
+// dans mcp-env-secrets.test.ts.
+const secrets = vi.hoisted(() => new Map<string, string>());
+vi.mock('../secure-storage.js', () => ({
+  secureStorage: {
+    setKey: (k: string, v: string) => void (v ? secrets.set(k, v) : secrets.delete(k)),
+    getKey: (k: string) => secrets.get(k) ?? '',
+    deleteKey: (k: string) => void secrets.delete(k),
+    hasKey: (k: string) => secrets.has(k),
+  },
+}));
+
 import { mcpClientsService, toManagerConfig } from '../mcp-clients-service.js';
-import { WorkspaceConfigError } from '../../../../backend/core/workspace/config.js';
+import { SECRET_SENTINEL } from '../mcp-env-secrets.js';
+import { fingerprintClient } from '../mcp-approval-registry.js';
+import { WorkspaceConfigError, type MCPClientConfig } from '../../../../backend/core/workspace/config.js';
 import { withFileLock } from '../../../../backend/core/fs/user-files.js';
-import type { MCPClientEvent } from '../../../../backend/integrations/mcp-clients/types.js';
+import { MCPClientManager } from '../../../../backend/integrations/mcp-clients/manager.js';
+import type { MCPClientConfig as ManagerClientConfig, MCPClientEvent } from '../../../../backend/integrations/mcp-clients/types.js';
 import { symlinkAvailable } from '../../../../backend/__tests__/helpers/native-guards.js';
 
 describe('toManagerConfig — WorkspaceMCPClient → MCPClientConfig', () => {
   it('maps a stdio client with args + env', () => {
-    const out = toManagerConfig({
-      name: 'fs',
-      transport: 'stdio',
-      command: '/usr/bin/python',
-      args: ['-m', 'mcp.fs'],
-      env: { FOO: 'bar' },
-    });
+    const out = toManagerConfig(
+      {
+        name: 'fs',
+        transport: 'stdio',
+        command: '/usr/bin/python',
+        args: ['-m', 'mcp.fs'],
+        env: { FOO: 'bar' },
+      },
+      null
+    );
     expect(out).toEqual({
       name: 'fs',
       config: {
@@ -31,21 +50,13 @@ describe('toManagerConfig — WorkspaceMCPClient → MCPClientConfig', () => {
   });
 
   it('maps a minimal stdio client (no args, no env)', () => {
-    const out = toManagerConfig({
-      name: 'bare',
-      transport: 'stdio',
-      command: 'cliodeck-mcp',
-    });
+    const out = toManagerConfig({ name: 'bare', transport: 'stdio', command: 'cliodeck-mcp' }, null);
     expect(out.config.transport).toBe('stdio');
     expect((out.config as { command: string }).command).toBe('cliodeck-mcp');
   });
 
   it('maps an sse client', () => {
-    const out = toManagerConfig({
-      name: 'remote',
-      transport: 'sse',
-      url: 'https://example.com/mcp/sse',
-    });
+    const out = toManagerConfig({ name: 'remote', transport: 'sse', url: 'https://example.com/mcp/sse' }, null);
     expect(out).toEqual({
       name: 'remote',
       config: { transport: 'sse', url: 'https://example.com/mcp/sse' },
@@ -54,13 +65,13 @@ describe('toManagerConfig — WorkspaceMCPClient → MCPClientConfig', () => {
 
   it('throws when stdio config has no command', () => {
     expect(() =>
-      toManagerConfig({ name: 'broken', transport: 'stdio' })
+      toManagerConfig({ name: 'broken', transport: 'stdio' }, null)
     ).toThrowError(/requires a command/);
   });
 
   it('throws when sse config has no url', () => {
     expect(() =>
-      toManagerConfig({ name: 'broken', transport: 'sse' })
+      toManagerConfig({ name: 'broken', transport: 'sse' }, null)
     ).toThrowError(/requires a url/);
   });
 });
@@ -430,5 +441,182 @@ describe.skipIf(!symlinkAvailable)('loadProject : .cliodeck lié hors du projet'
 
     expect(readdirSync(outside)).toEqual(['config.json']);
     expect(mcpClientsService.list()).toEqual([]);
+  });
+});
+
+/**
+ * Contre-vérification de S09-1-6, sur le service réel : deux projets déclarent un client
+ * `europeana`, chacun avec sa clé. Les secrets étaient rangés sous le seul nom du client, dans un
+ * magasin commun : charger B écrasait la clé de A, et supprimer le client dans B l'effaçait. Le
+ * démarrage est remplacé (aucun processus) ; l'env lu est celui que le manager reçoit, tel qu'il
+ * irait au serveur.
+ */
+describe('clés des serveurs MCP : une portée par projet (S09-1-6)', () => {
+  const originalGate = mcpClientsService.approvalGate;
+  // La clé qu'ont écrite les versions d'avant, dans le magasin de l'utilisateur : son nom ne change pas.
+  const LEGACY = 'mcp.client.europeana.env.EUROPEANA_API_KEY';
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const europeana = (key: string): MCPClientConfig => ({
+    name: 'europeana',
+    transport: 'stdio',
+    command: '/nonexistent/europeana-mcp',
+    args: ['--lang', 'fr'],
+    env: { EUROPEANA_API_KEY: key, EUROPEANA_LANG: 'fr' },
+  });
+
+  const roots: string[] = [];
+  let registered: ManagerClientConfig[];
+  let seenByGate: MCPClientConfig[];
+
+  async function makeProject(clients: MCPClientConfig[]): Promise<string> {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cliodeck-mcp-cles-'));
+    roots.push(root);
+    mkdirSync(path.join(root, '.cliodeck'), { recursive: true });
+    writeFileSync(configOf(root), JSON.stringify({ schema_version: 2, name: 'p', mcpClients: clients }, null, 2));
+    return root;
+  }
+  const configOf = (root: string): string => path.join(root, '.cliodeck', 'config.json');
+  const diskOf = (root: string): Record<string, unknown> & { mcpClients: MCPClientConfig[] } =>
+    JSON.parse(readFileSync(configOf(root), 'utf8'));
+  /** L'env que le manager a reçu pour `europeana` au dernier chargement. */
+  const lastEnv = (): Record<string, string> | undefined => {
+    const last = registered.filter((c) => c.name === 'europeana').at(-1);
+    return last?.config.transport === 'stdio' ? last.config.env : undefined;
+  };
+
+  beforeEach(() => {
+    secrets.clear();
+    registered = [];
+    seenByGate = [];
+    mcpClientsService.approvalGate = async (client) => {
+      seenByGate.push(structuredClone(client));
+      return 'approved';
+    };
+    const register = MCPClientManager.prototype.register;
+    vi.spyOn(MCPClientManager.prototype, 'register').mockImplementation(function (this: MCPClientManager, cfg) {
+      registered.push(structuredClone(cfg));
+      register.call(this, cfg);
+    });
+    vi.spyOn(MCPClientManager.prototype, 'startAll').mockResolvedValue([]);
+    vi.spyOn(MCPClientManager.prototype, 'start').mockImplementation(async (name: string) => ({
+      name,
+      state: 'unconfigured',
+      tools: [],
+      generation: 0,
+    }));
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    mcpClientsService.approvalGate = originalGate;
+    await mcpClientsService.unload();
+    for (const root of roots.splice(0)) {
+      if (existsSync(configOf(root))) chmodSync(configOf(root), 0o644);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('A puis B, client retiré dans B, A rechargé : le serveur de A reçoit toujours sa clé', async () => {
+    const rootA = await makeProject([europeana('cle-test-A')]);
+    const rootB = await makeProject([europeana('cle-test-B')]);
+
+    await mcpClientsService.loadProject(rootA);
+    expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-A', EUROPEANA_LANG: 'fr' });
+    await mcpClientsService.loadProject(rootB);
+    expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-B', EUROPEANA_LANG: 'fr' });
+    await mcpClientsService.removeClient('europeana');
+
+    await mcpClientsService.loadProject(rootA);
+
+    expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-A', EUROPEANA_LANG: 'fr' });
+    // Sur le disque, la sentinelle seule, et une portée différente pour chaque projet.
+    expect(diskOf(rootA).mcpClients[0].env).toEqual({ EUROPEANA_API_KEY: SECRET_SENTINEL, EUROPEANA_LANG: 'fr' });
+    expect(diskOf(rootA).secrets_scope).toMatch(UUID);
+    expect(diskOf(rootB).secrets_scope).toMatch(UUID);
+    expect(diskOf(rootA).secrets_scope).not.toBe(diskOf(rootB).secrets_scope);
+    expect([...secrets.values()]).not.toContain('cle-test-B');
+  });
+
+  it('projet déjà migré, sans portée : portée créée au chargement, ancienne clé recopiée et gardée, même empreinte', async () => {
+    secrets.set(LEGACY, 'cle-test-A');
+    const migrated = europeana(SECRET_SENTINEL);
+    const rootA = await makeProject([migrated]);
+    const approvedBefore = fingerprintClient(migrated);
+
+    await mcpClientsService.loadProject(rootA);
+
+    const scope = diskOf(rootA).secrets_scope;
+    expect(scope).toMatch(UUID);
+    expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-A', EUROPEANA_LANG: 'fr' });
+    expect(secrets.get(`mcp.project.${scope}.client.europeana.env.EUROPEANA_API_KEY`)).toBe('cle-test-A');
+    // Un accord donné avant ce correctif vaut toujours : ni la portée ni la clé n'entrent dans l'env.
+    expect(diskOf(rootA).mcpClients[0]).toEqual(migrated);
+    expect(seenByGate.map(fingerprintClient)).toEqual([approvedBefore]);
+  });
+
+  it('retirer le client d’un projet ancien n’efface pas l’ancienne clé, dont un autre projet dépend', async () => {
+    secrets.set(LEGACY, 'cle-test-A');
+    const rootA = await makeProject([europeana(SECRET_SENTINEL)]);
+    const rootC = await makeProject([europeana(SECRET_SENTINEL)]);
+
+    await mcpClientsService.loadProject(rootA);
+    await mcpClientsService.removeClient('europeana');
+
+    expect(secrets.get(LEGACY)).toBe('cle-test-A');
+    // C, pas encore rouvert depuis le correctif, la retrouve.
+    await mcpClientsService.loadProject(rootC);
+    expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-A', EUROPEANA_LANG: 'fr' });
+  });
+
+  it('rechargé, le même projet garde sa portée et son empreinte', async () => {
+    const rootA = await makeProject([europeana('cle-test-A')]);
+    await mcpClientsService.loadProject(rootA);
+    const scope = diskOf(rootA).secrets_scope;
+    const written = readFileSync(configOf(rootA), 'utf8');
+
+    await mcpClientsService.loadProject(rootA);
+
+    expect(readFileSync(configOf(rootA), 'utf8')).toBe(written);
+    expect(diskOf(rootA).secrets_scope).toBe(scope);
+    expect(seenByGate.map(fingerprintClient)).toEqual([fingerprintClient(seenByGate[0]), fingerprintClient(seenByGate[0])]);
+    expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-A', EUROPEANA_LANG: 'fr' });
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'config.json qui ne s’écrit pas : pas de portée, et l’ancienne clé sert toujours',
+    async () => {
+      secrets.set(LEGACY, 'cle-test-A');
+      const rootA = await makeProject([europeana(SECRET_SENTINEL)]);
+      const before = readFileSync(configOf(rootA), 'utf8');
+      chmodSync(configOf(rootA), 0o444);
+
+      await mcpClientsService.loadProject(rootA);
+
+      expect(readFileSync(configOf(rootA), 'utf8')).toBe(before);
+      expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-A', EUROPEANA_LANG: 'fr' });
+      expect([...secrets.keys()]).toEqual([LEGACY]);
+    }
+  );
+
+  it('aucune clé déclarée : ni portée ni écriture', async () => {
+    const rootA = await makeProject([{ name: 'local', transport: 'stdio', command: '/nonexistent/x', env: { LANG: 'fr' } }]);
+    const before = readFileSync(configOf(rootA), 'utf8');
+
+    await mcpClientsService.loadProject(rootA);
+
+    expect(readFileSync(configOf(rootA), 'utf8')).toBe(before);
+  });
+
+  it('addClient avec une clé : rangée sous la portée du projet, créée dans la même écriture', async () => {
+    const rootA = await makeProject([]);
+    await mcpClientsService.loadProject(rootA);
+
+    await mcpClientsService.addClient(europeana('cle-test-A'));
+
+    const scope = diskOf(rootA).secrets_scope;
+    expect(scope).toMatch(UUID);
+    expect(diskOf(rootA).mcpClients[0].env).toEqual({ EUROPEANA_API_KEY: SECRET_SENTINEL, EUROPEANA_LANG: 'fr' });
+    expect([...secrets.entries()]).toEqual([[`mcp.project.${scope}.client.europeana.env.EUROPEANA_API_KEY`, 'cle-test-A']]);
+    expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-A', EUROPEANA_LANG: 'fr' });
   });
 });

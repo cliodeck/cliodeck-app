@@ -13,12 +13,25 @@
  *     value whose key looks like a secret (heuristic on the env name,
  *     matching `KEY|TOKEN|SECRET|PASSWORD|PASS|CREDENTIAL` segments)
  *     and is not already a sentinel is moved into `secureStorage` under
- *     a stable per-client key. The on-disk config is rewritten with a
- *     `SECRET_SENTINEL` placeholder.
+ *     a stable per-project, per-client key. The on-disk config is
+ *     rewritten with a `SECRET_SENTINEL` placeholder.
  *   - When a client is registered with the SDK manager, sentinels are
  *     resolved back to real values via `secureStorage.getKey`.
  *   - On `removeClient`, the corresponding secret is deleted to avoid
  *     orphans accumulating in the secret store.
+ *
+ * Portée par projet (S09-1-6). `secureStorage` est un magasin unique pour
+ * toute l'app : rangés sous le seul nom du client, les secrets de deux projets
+ * déclarant un client `europeana` étaient la même entrée. Charger l'un
+ * écrasait la clé de l'autre, supprimer le client dans l'un l'effaçait. Chaque
+ * projet porte donc un identifiant, `secrets_scope` dans `config.json`, créé
+ * dans l'écriture qui range son premier secret, ou au premier chargement d'un
+ * projet déjà migré. La sentinelle ne change pas : l'empreinte d'un serveur
+ * approuvé (`fingerprintClient`) non plus.
+ *
+ * Les clés d'avant, `mcp.client.<nom>.env.<VAR>`, sont lues en repli et
+ * recopiées sous la portée, jamais supprimées : un autre projet, pas encore
+ * rouvert, peut en dépendre. Elles restent jusqu'à « Révoquer toutes les clés ».
  *
  * Non-goals:
  *   - This is not a full vault. Values are encrypted at rest by
@@ -29,7 +42,11 @@
  *     decrypting anything.
  */
 
-import type { MCPClientConfig as WorkspaceClientConfig } from '../../../backend/core/workspace/config.js';
+import { randomUUID } from 'node:crypto';
+import type {
+  MCPClientConfig as WorkspaceClientConfig,
+  WorkspaceConfig,
+} from '../../../backend/core/workspace/config.js';
 import { secureStorage } from './secure-storage.js';
 
 /** Marker value written into `config.json` in place of a real secret.
@@ -44,9 +61,43 @@ export function isSensitiveEnvVarName(name: string): boolean {
   return SECRET_NAME_PATTERN.test(name);
 }
 
-/** Stable storage key for a given client/env pair. */
-export function secretKeyFor(clientName: string, envKey: string): string {
+/** Stable storage key for a given project/client/env triple. */
+export function secretKeyFor(scope: string, clientName: string, envKey: string): string {
+  return `mcp.project.${scope}.client.${clientName}.env.${envKey}`;
+}
+
+/** La clé d'avant la portée, commune à tous les projets : lue en repli, jamais écrite. */
+export function legacySecretKeyFor(clientName: string, envKey: string): string {
   return `mcp.client.${clientName}.env.${envKey}`;
+}
+
+/**
+ * Forme d'un `randomUUID` : la portée entre dans un chemin de clé à points du magasin, et
+ * `config.json` peut venir d'ailleurs.
+ */
+const SCOPE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** La portée des secrets du projet, ou `null` s'il n'en a pas (encore) une valide. */
+export function secretsScopeOf(cfg: WorkspaceConfig): string | null {
+  const scope = cfg.secrets_scope;
+  return typeof scope === 'string' && SCOPE_PATTERN.test(scope) ? scope : null;
+}
+
+/** La portée du projet, créée dans `cfg` s'il n'en a pas : à appeler dans un mutateur de `updateWorkspaceConfig`. */
+export function ensureSecretsScope(cfg: WorkspaceConfig): string {
+  const known = secretsScopeOf(cfg);
+  if (known) return known;
+  const scope = randomUUID();
+  cfg.secrets_scope = scope;
+  return scope;
+}
+
+/** Ce client a-t-il un secret à ranger (valeur sensible en clair) ou à retrouver (sentinelle) ? */
+export function clientHasSecrets(client: WorkspaceClientConfig): boolean {
+  return Object.entries(client.env ?? {}).some(
+    ([envKey, value]) =>
+      value === SECRET_SENTINEL || (typeof value === 'string' && isSensitiveEnvVarName(envKey))
+  );
 }
 
 /**
@@ -55,18 +106,39 @@ export function secretKeyFor(clientName: string, envKey: string): string {
  * Returns true iff any value was migrated (callers persist the config
  * only when migrations actually happened).
  */
-export function migrateClientEnvSecrets(client: WorkspaceClientConfig): boolean {
+export function migrateClientEnvSecrets(scope: string, client: WorkspaceClientConfig): boolean {
   if (!client.env) return false;
   let migrated = false;
   for (const [envKey, value] of Object.entries(client.env)) {
     if (typeof value !== 'string') continue;
     if (value === SECRET_SENTINEL) continue;
     if (!isSensitiveEnvVarName(envKey)) continue;
-    secureStorage.setKey(secretKeyFor(client.name, envKey), value);
+    secureStorage.setKey(secretKeyFor(scope, client.name, envKey), value);
     client.env[envKey] = SECRET_SENTINEL;
     migrated = true;
   }
   return migrated;
+}
+
+/**
+ * La clé du projet, sinon l'ancienne clé globale, recopiée sous la portée sans être supprimée.
+ * Sans portée (`config.json` n'a pas pu s'écrire), l'ancienne clé seule : jamais de serveur privé
+ * de sa clé parce que la portée n'existe pas. Une recopie qui échoue n'empêche pas de la servir.
+ */
+function readSecret(scope: string | null, clientName: string, envKey: string): string {
+  if (scope) {
+    const own = secureStorage.getKey(secretKeyFor(scope, clientName, envKey));
+    if (own) return own;
+  }
+  const legacy = secureStorage.getKey(legacySecretKeyFor(clientName, envKey));
+  if (legacy && scope) {
+    try {
+      secureStorage.setKey(secretKeyFor(scope, clientName, envKey), legacy);
+    } catch (err) {
+      console.warn('[mcp-env-secrets] recopie de l’ancienne clé impossible:', err);
+    }
+  }
+  return legacy;
 }
 
 /**
@@ -76,6 +148,7 @@ export function migrateClientEnvSecrets(client: WorkspaceClientConfig): boolean 
  * MCP server rather than running with a blank credential.
  */
 export function resolveClientEnvSecrets(
+  scope: string | null,
   clientName: string,
   env: Record<string, string> | undefined
 ): Record<string, string> | undefined {
@@ -83,7 +156,7 @@ export function resolveClientEnvSecrets(
   const out: Record<string, string> = {};
   for (const [envKey, value] of Object.entries(env)) {
     if (value === SECRET_SENTINEL) {
-      const resolved = secureStorage.getKey(secretKeyFor(clientName, envKey));
+      const resolved = readSecret(scope, clientName, envKey);
       if (resolved) out[envKey] = resolved;
       // else: drop — the MCP server should error rather than silently
       // run unauthenticated against a third-party API.
@@ -95,14 +168,15 @@ export function resolveClientEnvSecrets(
 }
 
 /**
- * Delete every secret associated with a client. Called from
+ * Delete every secret associated with a client in this project. Called from
  * `removeClient` so the secret store doesn't accumulate dead entries
- * once the user removes an MCP integration.
+ * once the user removes an MCP integration. L'ancienne clé globale reste :
+ * un autre projet peut encore en dépendre.
  */
-export function deleteClientEnvSecrets(client: WorkspaceClientConfig): void {
+export function deleteClientEnvSecrets(scope: string, client: WorkspaceClientConfig): void {
   if (!client.env) return;
   for (const envKey of Object.keys(client.env)) {
     if (!isSensitiveEnvVarName(envKey)) continue;
-    secureStorage.deleteKey(secretKeyFor(client.name, envKey));
+    secureStorage.deleteKey(secretKeyFor(scope, client.name, envKey));
   }
 }
