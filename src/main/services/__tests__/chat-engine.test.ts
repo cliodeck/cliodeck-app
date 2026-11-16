@@ -1138,3 +1138,125 @@ describe('chat-engine — l’explication malgré l’échec du modèle (H5)', (
     expect(events).toEqual(['error:stream_error', 'done:error']);
   });
 });
+
+/**
+ * Ce qui repart au modèle après un appel d'outil (L08-10). Des arguments en JSON invalide faisaient
+ * partir l'outil avec `{}`, et le modèle citait le résultat d'une recherche sans filtre comme la
+ * réponse à sa demande (S06-1-15). Un résultat déjà en texte était resérialisé (S06-1-11).
+ */
+describe('chat-engine — arguments d’outil et résultat renvoyé au modèle (L08-10)', () => {
+  type ToolEnd = { ok: boolean; errorMessage?: string; name: string };
+
+  /** Un tour : le modèle demande `search` avec `args`, puis répond ; rend ce qu'a vu le fournisseur. */
+  async function toolTurn(
+    args: string,
+    handler: (name: string, a: Record<string, unknown>) => Promise<{ ok: boolean; result?: unknown; error?: { code: string; message: string } }>
+  ) {
+    const seen: ChatMessage[][] = [];
+    const provider = makeFakeProvider([]);
+    provider.chat = async function* (messages: ChatMessage[]) {
+      seen.push(messages);
+      if (seen.length === 1) {
+        yield { delta: '', toolCall: { id: 'c1', name: 'search', arguments: args } };
+        yield { delta: '', done: true, finishReason: 'tool_call' };
+        return;
+      }
+      yield { delta: 'Réponse.' };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+    const calls: Array<Record<string, unknown>> = [];
+    const starts: string[] = [];
+    const ends: ToolEnd[] = [];
+    await runChatTurn({
+      provider,
+      messages: [{ role: 'user', content: 'Que disent les sources sur Vichy ?' }],
+      tools: [{ name: 'search', description: 'cherche', parameters: { type: 'object' } }],
+      toolHandler: {
+        call: async (name, a) => {
+          calls.push(a);
+          return handler(name, a);
+        },
+      },
+      hooks: {
+        onToolCallStart: (ev) => starts.push(ev.name),
+        onToolCallEnd: (ev) => ends.push({ ok: ev.ok, errorMessage: ev.errorMessage, name: ev.name }),
+      },
+    });
+    const second = seen[1] ?? [];
+    return {
+      seen,
+      calls,
+      starts,
+      ends,
+      replayed: second.find((m) => m.role === 'assistant' && m.toolCalls?.length),
+      toolMessage: second.find((m) => m.role === 'tool'),
+    };
+  }
+
+  const ok = async () => ({ ok: true, result: { hits: ['générique'] } });
+
+  it('JSON non fermé : l’outil ne part pas, le modèle lit une erreur qui le dit, la puce finit en échec', async () => {
+    const turn = await toolTurn('{"query": "Vichy', ok);
+
+    expect(turn.calls).toEqual([]);
+    expect(turn.toolMessage?.content).toMatch(/^Error: invalid arguments for tool search/);
+    expect(turn.toolMessage?.content).toContain('The tool was not run');
+    expect(turn.toolMessage?.content).toContain('{"query": "Vichy');
+    expect(turn.starts).toEqual(['search']);
+    expect(turn.ends).toEqual([{ ok: false, errorMessage: expect.stringContaining('invalid arguments'), name: 'search' }]);
+    // Le message assistant rejoué porte un objet : OpenAI et Anthropic refusent un JSON invalide.
+    expect(turn.replayed?.toolCalls).toEqual([{ id: 'c1', name: 'search', arguments: '{}' }]);
+    // Le tour continue : le modèle peut corriger.
+    expect(turn.seen).toHaveLength(2);
+  });
+
+  it('un tableau JSON : même refus, et le message rejoué porte {}', async () => {
+    const turn = await toolTurn('[1]', ok);
+
+    expect(turn.calls).toEqual([]);
+    expect(turn.toolMessage?.content).toMatch(/^Error: invalid arguments for tool search/);
+    expect(turn.ends[0]?.ok).toBe(false);
+    expect(turn.replayed?.toolCalls).toEqual([{ id: 'c1', name: 'search', arguments: '{}' }]);
+  });
+
+  it.each(['null', '42', '"Vichy"'])('une valeur JSON qui n’est pas un objet (%s) : refusée', async (args) => {
+    const turn = await toolTurn(args, ok);
+    expect(turn.calls).toEqual([]);
+    expect(turn.toolMessage?.content).toMatch(/^Error: invalid arguments/);
+  });
+
+  it('des arguments démesurés : le message au modèle n’en garde qu’un extrait', async () => {
+    const turn = await toolTurn(`{"query": "${'Vichy '.repeat(5_000)}`, ok);
+    expect(turn.calls).toEqual([]);
+    expect(turn.toolMessage?.content.length).toBeLessThan(600);
+    expect(turn.ends[0]?.errorMessage?.length).toBeLessThan(600);
+  });
+
+  it('témoin : sans arguments, l’outil part avec {} (outil sans paramètre)', async () => {
+    const turn = await toolTurn('', ok);
+    expect(turn.calls).toEqual([{}]);
+    expect(turn.ends[0]?.ok).toBe(true);
+  });
+
+  it('témoin : des arguments valides partent tels quels, et le message rejoué les garde', async () => {
+    const turn = await toolTurn('{"query":"Vichy"}', ok);
+    expect(turn.calls).toEqual([{ query: 'Vichy' }]);
+    expect(turn.replayed?.toolCalls).toEqual([{ id: 'c1', name: 'search', arguments: '{"query":"Vichy"}' }]);
+    expect(turn.toolMessage?.content).toBe('{"hits":["générique"]}');
+  });
+
+  it('un résultat déjà en texte part tel quel, sans guillemets échappés', async () => {
+    const text = 'Le Temps, 7 février 1934 : « La nuit tragique ».\n\n[Truncated: the tool returned 40000 characters.]';
+    const turn = await toolTurn('{"query":"Vichy"}', async () => ({ ok: true, result: text }));
+    expect(turn.toolMessage?.content).toBe(text);
+  });
+
+  it('une erreur longue : le modèle la lit entière, l’écran n’en reçoit qu’un extrait', async () => {
+    const message = `date must be YYYY-MM-DD. ${'détail '.repeat(4_000)}`;
+    const turn = await toolTurn('{"query":"Vichy"}', async () => ({ ok: false, error: { code: 'tool_error', message } }));
+    expect(turn.toolMessage?.content).toBe(`Error: ${message}`);
+    expect(turn.ends[0]?.ok).toBe(false);
+    expect(turn.ends[0]?.errorMessage?.startsWith('date must be YYYY-MM-DD.')).toBe(true);
+    expect(turn.ends[0]?.errorMessage?.length).toBeLessThanOrEqual(301);
+  });
+});

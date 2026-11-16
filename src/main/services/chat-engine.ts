@@ -105,6 +105,7 @@ export interface ChatEngineHooks {
     ev: ChatEngineToolEvent & {
       durationMs: number;
       ok: boolean;
+      /** Pour l'écran : borné à `MAX_TOOL_ERROR_DISPLAY_CHARS`, il peut venir d'un serveur MCP. */
       errorMessage?: string;
     }
   ): void;
@@ -274,6 +275,34 @@ export function dropEmptyTurns(messages: ChatMessage[]): ChatMessage[] {
       (m.toolCalls?.length ?? 0) > 0 ||
       m.content.trim().length > 0
   );
+}
+
+/** Longueur gardée d'arguments d'outil invalides dans le message qui le dit au modèle. */
+const INVALID_ARGUMENTS_EXCERPT_CHARS = 200;
+
+/**
+ * Longueur gardée du message d'erreur d'un outil envoyé à l'écran (infobulle de la puce d'outil).
+ * Le modèle lit le message entier, déjà borné par le garde MCP ; l'écran, quelques lignes.
+ */
+export const MAX_TOOL_ERROR_DISPLAY_CHARS = 300;
+
+const clip = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max)}…` : text);
+
+/**
+ * Les arguments d'un appel d'outil, ou `null` s'ils ne forment pas un objet JSON (JSON coupé par la
+ * limite de jetons du modèle, tableau, chaîne…). Un appel sans arguments est celui d'un outil sans
+ * paramètre : `{}`.
+ */
+function parseToolArguments(raw: string | undefined): Record<string, unknown> | null {
+  if (!raw || raw.trim() === '') return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -682,6 +711,8 @@ export async function runChatTurn<TSource = unknown>(
       // Record the assistant's tool-call message so the provider-specific
       // adapter can replay it on the next turn (Anthropic tool_use blocks,
       // OpenAI tool_calls array, Gemini functionCall parts, etc.).
+      // Des arguments qui ne forment pas un objet y deviennent `{}` : Anthropic refuse un `input` qui
+      // n'est pas un objet, OpenAI un JSON invalide. L'outil, lui, ne part pas (plus bas).
       messages = [
         ...messages,
         {
@@ -690,19 +721,14 @@ export async function runChatTurn<TSource = unknown>(
           toolCalls: pendingToolCalls.map((c) => ({
             id: c.id,
             name: c.name,
-            arguments: c.arguments,
+            arguments: parseToolArguments(c.arguments) === null ? '{}' : c.arguments,
           })),
         },
       ];
 
       for (let i = 0; i < pendingToolCalls.length; i++) {
         const call = pendingToolCalls[i];
-        let parsedArgs: Record<string, unknown> = {};
-        try {
-          parsedArgs = call.arguments ? JSON.parse(call.arguments) : {};
-        } catch {
-          // malformed JSON — pass through empty args.
-        }
+        const parsedArgs = parseToolArguments(call.arguments);
         const callId = `${turn}-${i}`;
         const startedAt = Date.now();
         try {
@@ -716,7 +742,22 @@ export async function runChatTurn<TSource = unknown>(
         } catch {
           // UI hook failure — continue.
         }
-        const res = await args.toolHandler.call(call.name, parsedArgs);
+        // Des arguments invalides : l'outil ne part pas. Parti avec `{}`, il rendait un résultat sans
+        // filtre, que le modèle citait comme la réponse à sa demande (S06-1-15). Le modèle lit
+        // pourquoi, avec un extrait de ce qu'il a envoyé, et peut corriger son appel.
+        const res: ChatEngineToolResult =
+          parsedArgs === null
+            ? {
+                ok: false,
+                error: {
+                  code: 'invalid_tool_arguments',
+                  message:
+                    `invalid arguments for tool ${call.name}: expected a JSON object. The tool was not run. ` +
+                    `Received: ${clip(call.arguments, INVALID_ARGUMENTS_EXCERPT_CHARS)}`,
+                },
+              }
+            : await args.toolHandler.call(call.name, parsedArgs);
+        const errorMessage = res.ok ? undefined : res.error?.message;
         try {
           hooks.onToolCallEnd?.({
             callId,
@@ -725,14 +766,19 @@ export async function runChatTurn<TSource = unknown>(
             index: i,
             durationMs: Date.now() - startedAt,
             ok: res.ok,
-            errorMessage: res.ok ? undefined : res.error?.message,
+            errorMessage:
+              errorMessage === undefined ? undefined : clip(errorMessage, MAX_TOOL_ERROR_DISPLAY_CHARS),
           });
         } catch {
           // UI hook failure — continue.
         }
+        // Un résultat déjà en texte (le garde MCP y met tout résultat MCP) part tel quel : le
+        // resérialiser en faisait une chaîne JSON échappée (S06-1-11).
         const body = res.ok
-          ? JSON.stringify(res.result ?? {})
-          : `Error: ${res.error?.message ?? 'unknown'}`;
+          ? typeof res.result === 'string'
+            ? res.result
+            : JSON.stringify(res.result ?? {})
+          : `Error: ${errorMessage ?? 'unknown'}`;
         messages = [
           ...messages,
           { role: 'tool', toolCallId: call.id, content: body },

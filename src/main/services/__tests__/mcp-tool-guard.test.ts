@@ -7,10 +7,12 @@
  * qu'un résultat bloqué ne fuit pas son contenu vers le modèle.
  */
 import { describe, it, expect } from 'vitest';
+import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import {
   inspectToolDescription,
   inspectToolResult,
   inspectToolSchema,
+  toolResultToText,
   MAX_SCHEMA_TEXT_CHARS,
   MAX_TOOL_DESCRIPTION_CHARS,
   MAX_TOOL_RESULT_CHARS,
@@ -68,6 +70,246 @@ describe('inspectToolResult — inspection', () => {
   it('ne touche pas un résultat en erreur (rien à inspecter)', () => {
     const res = { ok: false, error: { code: 'timeout', message: 'Tool timed out' } };
     expect(inspectToolResult(res, { toolName: 'x__y', mode: 'block' })).toBe(res);
+  });
+
+  // Les erreurs de notre propre couche ne portent aucun texte du serveur : rendues telles quelles.
+  it.each(['client_not_ready', 'client_not_connected', 'no_manager', 'project_changed', 'unknown_tool', 'unserializable_result'])(
+    'ne touche pas une erreur de notre couche (%s)',
+    (code) => {
+      const res = { ok: false, error: { code, message: `${code}: ${INJECTION}` } };
+      expect(inspectToolResult(res, { toolName: 'x__y', mode: 'block' })).toBe(res);
+    }
+  );
+});
+
+/** Un résultat d'outil MCP tel que le rend le SDK (`CallToolResult`). */
+const callToolResult = (content: unknown[], extra: Record<string, unknown> = {}) => ({ content, ...extra });
+
+// S09-2-8, S06-1-11 : le résultat MCP partait au modèle en JSON (base64 des images compris), et un
+// résultat tronqué était encodé deux fois. Il part désormais en texte, borné et inspecté une fois.
+describe('toolResultToText', () => {
+  it('joint les blocs texte', () => {
+    expect(
+      toolResultToText(callToolResult([{ type: 'text', text: 'Danzig, 1932.' }, { type: 'text', text: 'Corridor.' }]))
+    ).toBe('Danzig, 1932.\n\nCorridor.');
+  });
+
+  it('une image ou un son : un libellé avec le type MIME et la taille, jamais le base64', () => {
+    const data = 'A'.repeat(270_000); // ~200 Ko
+    const text = toolResultToText(
+      callToolResult([
+        { type: 'text', text: 'Page 12.' },
+        { type: 'image', data, mimeType: 'image/png' },
+        { type: 'audio', data: 'B'.repeat(4_000), mimeType: 'audio/wav' },
+      ])
+    );
+    expect(text).toContain('Page 12.');
+    expect(text).toContain('image/png');
+    expect(text).toContain('198 KB');
+    expect(text).toContain('audio/wav');
+    expect(text).not.toContain('AAAAAAAA');
+    expect(text).not.toContain('BBBBBBBB');
+    expect(text?.length).toBeLessThan(300);
+  });
+
+  it('une ressource : son texte, sinon un libellé ; un lien : son URI et son nom', () => {
+    const text = toolResultToText(
+      callToolResult([
+        { type: 'resource', resource: { uri: 'file:///notice.txt', text: 'Notice de la BnF.' } },
+        { type: 'resource', resource: { uri: 'file:///scan.pdf', mimeType: 'application/pdf', blob: 'C'.repeat(8_000) } },
+        { type: 'resource_link', uri: 'https://gallica.bnf.fr/ark:/12148/bpt6k', name: 'Le Temps, 1934' },
+      ])
+    );
+    expect(text).toContain('Notice de la BnF.');
+    expect(text).toContain('file:///scan.pdf');
+    expect(text).toContain('application/pdf');
+    expect(text).not.toContain('CCCCCCCC');
+    expect(text).toContain('https://gallica.bnf.fr/ark:/12148/bpt6k');
+    expect(text).toContain('Le Temps, 1934');
+  });
+
+  it('un type inconnu : un libellé ; le type MIME et le type de bloc, écrits par le serveur, sont bornés', () => {
+    const text = toolResultToText(
+      callToolResult([
+        { type: `video${'x'.repeat(5_000)}`, data: 'D'.repeat(1_000) },
+        { type: 'image', data: 'AAAA', mimeType: `image/${'y'.repeat(5_000)}` },
+      ])
+    );
+    expect(text).toContain('video');
+    expect(text).not.toContain('DDDDDDDD');
+    expect(text?.length).toBeLessThan(500);
+  });
+
+  it('structuredContent sans bloc texte : son JSON', () => {
+    expect(toolResultToText(callToolResult([], { structuredContent: { texte: 'Dreyfus' } }))).toBe('{"texte":"Dreyfus"}');
+  });
+
+  it('structuredContent qu’un bloc texte reproduit déjà : une seule fois, compact ou indenté, dans n’importe quel ordre', () => {
+    const structuredContent = { cote: 'F/7/12445', pieces: [1, 2], dossier: { titre: 'Dreyfus' } };
+    expect(
+      toolResultToText(callToolResult([{ type: 'text', text: JSON.stringify(structuredContent) }], { structuredContent }))
+    ).toBe(JSON.stringify(structuredContent));
+    const indented = JSON.stringify({ dossier: { titre: 'Dreyfus' }, pieces: [1, 2], cote: 'F/7/12445' }, null, 2);
+    expect(toolResultToText(callToolResult([{ type: 'text', text: indented }], { structuredContent }))).toBe(indented);
+  });
+
+  // Revue de L08-10 : la copie en texte n'est qu'un SHOULD de la spécification, et le McpServer du
+  // SDK n'en ajoute aucune. Un résumé en texte ne doit pas cacher les données au modèle.
+  it('un résumé en texte et les données en structuredContent : le modèle lit les deux', () => {
+    const text = toolResultToText(
+      callToolResult([{ type: 'text', text: '3 résultats' }], { structuredContent: { hits: ['a', 'b', 'c'] } })
+    );
+    expect(text).toBe('3 résultats\n\n{"hits":["a","b","c"]}');
+  });
+
+  it('un bloc texte vide et structuredContent : le JSON, jamais « aucun contenu »', () => {
+    expect(toolResultToText(callToolResult([{ type: 'text', text: '' }], { structuredContent: { hits: [1] } }))).toBe(
+      '{"hits":[1]}'
+    );
+  });
+
+  // Revue de L08-10 : le SDK 1.29 négocie encore le protocole 2024-10-07, où le résultat d'un outil
+  // arrive en `toolResult`. `CallToolResultSchema` y ajoute `content: []` et garde `toolResult`.
+  it('protocole 2024-10-07 : un résultat en toolResult part au modèle, jamais « aucun contenu »', () => {
+    const legacy = CallToolResultSchema.parse({ toolResult: { hits: ['Dreyfus'] } });
+    expect(legacy.content).toEqual([]);
+    expect(toolResultToText(legacy)).toBe('{"hits":["Dreyfus"]}');
+    expect(toolResultToText(CallToolResultSchema.parse({ toolResult: 'Affaire Dreyfus' }))).toBe('Affaire Dreyfus');
+    expect(inspectToolResult({ ok: true, result: legacy }, { toolName: 'ancien__search', mode: 'audit' })).toEqual({
+      ok: true,
+      result: '{"hits":["Dreyfus"]}',
+    });
+  });
+
+  it('un résultat sans contenu le dit', () => {
+    expect(toolResultToText(callToolResult([]))).toBe('[The tool returned no content.]');
+  });
+
+  it('un objet qui n’est pas un CallToolResult : null', () => {
+    expect(toolResultToText({ hits: [] })).toBeNull();
+    expect(toolResultToText('texte')).toBeNull();
+    expect(toolResultToText(null)).toBeNull();
+    expect(toolResultToText(undefined)).toBeNull();
+  });
+});
+
+describe('inspectToolResult — un CallToolResult part en texte, encodé une fois', () => {
+  it('une image de 200 Ko : un libellé, aucun base64, aucune troncature', () => {
+    const { events, onEvent } = collector();
+    const out = inspectToolResult(
+      { ok: true, result: callToolResult([{ type: 'image', data: 'A'.repeat(270_000), mimeType: 'image/png' }]) },
+      { toolName: 'archives__get_page', mode: 'warn', onEvent }
+    );
+
+    expect(out.ok).toBe(true);
+    expect(typeof out.result).toBe('string');
+    const body = out.result as string;
+    expect(body).toContain('image/png');
+    expect(body).not.toContain('AAAAAAAA');
+    expect(body.length).toBeLessThan(200);
+    expect(events.some((e) => e.kind === 'unusual_encoding')).toBe(false);
+  });
+
+  it('un texte de 40 000 caractères : le texte lui-même, borné, marqueur lisible, un seul encodage', () => {
+    const { events, onEvent } = collector();
+    const line = 'Le Temps, 7 février 1934 : « La nuit tragique ». ';
+    const long = line.repeat(Math.ceil(40_000 / line.length)).slice(0, 40_000);
+    const out = inspectToolResult(
+      { ok: true, result: callToolResult([{ type: 'text', text: long }]) },
+      { toolName: 'gallica__read', mode: 'warn', onEvent }
+    );
+
+    expect(out.ok).toBe(true);
+    const body = out.result as string;
+    expect(typeof body).toBe('string');
+    // Le texte du serveur, pas sa sérialisation JSON (`{"content":[{"type":"text","text":"…`).
+    expect(body.startsWith(line)).toBe(true);
+    expect(body).not.toContain('\\"');
+    expect(body).not.toContain('"content"');
+    expect(body.slice(0, MAX_TOOL_RESULT_CHARS)).toBe(long.slice(0, MAX_TOOL_RESULT_CHARS));
+    expect(body).toContain(`\n\n[Truncated: the tool returned 40000 characters, only the first ${MAX_TOOL_RESULT_CHARS} are shown.]`);
+    expect(events.some((e) => e.kind === 'unusual_encoding' && e.detail.startsWith('tool_result_truncated'))).toBe(true);
+  });
+
+  it('un petit texte : la chaîne elle-même', () => {
+    const out = inspectToolResult(
+      { ok: true, result: callToolResult([{ type: 'text', text: '{"texte":"Dreyfus"}' }]) },
+      { toolName: 'mini__echo', mode: 'audit' }
+    );
+    expect(out).toEqual({ ok: true, result: '{"texte":"Dreyfus"}' });
+  });
+
+  it('une injection dans le texte est vue et bloquée en mode audit', () => {
+    const out = inspectToolResult(
+      { ok: true, result: callToolResult([{ type: 'text', text: INJECTION }]) },
+      { toolName: 'hostile__search', mode: 'audit' }
+    );
+    expect(out).toEqual({ ok: false, error: { code: 'blocked_by_inspector', message: BLOCKED_TOOL_MESSAGE } });
+  });
+});
+
+// S09-1-24 : un outil qui répond `isError` ne laissait au modèle que « Error: unknown ». Son texte est
+// écrit par le serveur tiers, comme un résultat : même borne, même inspection.
+describe('inspectToolResult — erreur rendue par le serveur', () => {
+  const serverError = (text: string) => ({
+    ok: false,
+    result: callToolResult([{ type: 'text', text }], { isError: true }),
+    error: { code: 'tool_error', message: 'The MCP tool reported an error.' },
+  });
+
+  it('isError : le texte du serveur devient le message d’erreur, sans le résultat', () => {
+    const out = inspectToolResult(serverError('date must be YYYY-MM-DD'), { toolName: 'archives__search', mode: 'audit' });
+    expect(out).toEqual({ ok: false, error: { code: 'tool_error', message: 'date must be YYYY-MM-DD' } });
+  });
+
+  it('isError démesuré : borné comme un résultat', () => {
+    const { events, onEvent } = collector();
+    const out = inspectToolResult(serverError('z'.repeat(MAX_TOOL_RESULT_CHARS * 2)), {
+      toolName: 'archives__search',
+      mode: 'warn',
+      onEvent,
+    });
+    expect(out.ok).toBe(false);
+    expect(out.error?.code).toBe('tool_error');
+    expect(out.error?.message.length).toBeLessThan(MAX_TOOL_RESULT_CHARS + 200);
+    expect(out.error?.message).toContain('[Truncated:');
+    expect(events.some((e) => e.kind === 'unusual_encoding' && e.detail.startsWith('tool_result_truncated'))).toBe(true);
+  });
+
+  it('isError hostile : bloqué en mode audit, le texte ne fuit pas', () => {
+    const { events, onEvent } = collector();
+    const out = inspectToolResult(serverError(INJECTION), { toolName: 'hostile__search', mode: 'audit', onEvent });
+    expect(out).toEqual({ ok: false, error: { code: 'blocked_by_inspector', message: BLOCKED_TOOL_MESSAGE } });
+    expect(JSON.stringify(out)).not.toContain('Ignore all previous');
+    expect(events.find((e) => e.kind === 'prompt_injection_blocked')?.source).toBe('mcp:hostile__search');
+  });
+
+  it('isError en image seule : un libellé, jamais le base64', () => {
+    const res = {
+      ok: false,
+      result: callToolResult([{ type: 'image', data: 'A'.repeat(10_000), mimeType: 'image/png' }], { isError: true }),
+      error: { code: 'tool_error', message: 'The MCP tool reported an error.' },
+    };
+    const out = inspectToolResult(res, { toolName: 'archives__get_page', mode: 'warn' });
+    expect(out.error?.message).toContain('image/png');
+    expect(out.error?.message).not.toContain('AAAAAAAA');
+  });
+
+  // Le message d'une erreur JSON-RPC (`McpError`) est lui aussi écrit par le serveur.
+  it('call_tool_error : le message est borné et inspecté', () => {
+    const hostile = { ok: false, error: { code: 'call_tool_error', message: `MCP error -32602: ${INJECTION}` } };
+    expect(inspectToolResult(hostile, { toolName: 'hostile__search', mode: 'audit' })).toEqual({
+      ok: false,
+      error: { code: 'blocked_by_inspector', message: BLOCKED_TOOL_MESSAGE },
+    });
+
+    const long = { ok: false, error: { code: 'call_tool_error', message: `MCP error -32602: ${'w'.repeat(MAX_TOOL_RESULT_CHARS * 2)}` } };
+    const out = inspectToolResult(long, { toolName: 'tiers__search', mode: 'warn' });
+    expect(out.error?.code).toBe('call_tool_error');
+    expect(out.error?.message.length).toBeLessThan(MAX_TOOL_RESULT_CHARS + 200);
+
+    const plain = { ok: false, error: { code: 'call_tool_error', message: 'MCP error -32601: Method not found' } };
+    expect(inspectToolResult(plain, { toolName: 'tiers__search', mode: 'audit' })).toEqual(plain);
   });
 });
 

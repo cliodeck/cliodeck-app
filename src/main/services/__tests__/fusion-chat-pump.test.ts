@@ -1431,3 +1431,114 @@ describe('« Arrêter » sur le moteur embarqué (L09-10)', () => {
     expect(textOf(next.sent)).toBe('Une réponse.');
   });
 });
+
+/**
+ * Ce qui repart au modèle après un appel d'outil MCP, par le vrai service : catalogue, garde des
+ * résultats (`inspectToolResult`), moteur, puis le fournisseur au tour suivant (L08-10). Seul le
+ * client MCP est simulé, avec ce que rend la fabrique SDK.
+ */
+describe('résultat d’un outil MCP : ce que le modèle lit, ce que l’écran montre (L08-10)', () => {
+  type CallToolReturn = Awaited<ReturnType<typeof mcpClientsService.callTool>>;
+
+  function offerLookup(answer: CallToolReturn) {
+    bench.tools = true;
+    vi.spyOn(mcpClientsService, 'list').mockReturnValue([
+      {
+        name: 'srv',
+        state: 'ready',
+        generation: 1,
+        tools: [{ name: 'lookup', description: 'cherche', inputSchema: { type: 'object', properties: {} } }],
+      },
+    ]);
+    return vi.spyOn(mcpClientsService, 'callTool').mockResolvedValue(answer);
+  }
+
+  /** Le modèle demande `srv__lookup` avec ces arguments, puis répond. */
+  function modelCallsLookup(args: string): void {
+    let call = 0;
+    bench.provider = async function* () {
+      call += 1;
+      if (call === 1) {
+        yield { delta: '', done: false, toolCall: { id: 't1', name: 'srv__lookup', arguments: args } };
+        yield { delta: '', done: true, finishReason: 'tool_call' };
+        return;
+      }
+      yield { delta: 'Réponse.', done: false };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+  }
+
+  const toolMessage = () => bench.seenMessages[1]?.find((m) => m.role === 'tool')?.content;
+  const toolDone = (sent: Sent[]) =>
+    sent
+      .filter((e) => e.channel === 'fusion:chat:tool-call')
+      .map((e) => e.payload as { status: string; ok?: boolean; errorMessage?: string })
+      .find((p) => p.status === 'done');
+
+  /** Ce que rend la fabrique pour un outil qui répond `isError`. */
+  const serverError = (text: string): CallToolReturn => ({
+    ok: false,
+    result: { content: [{ type: 'text', text }], isError: true },
+    error: { code: 'tool_error', message: 'The MCP tool reported an error.' },
+  });
+
+  it('isError : le modèle lit le texte du serveur, et l’écran aussi', async () => {
+    offerLookup(serverError('date must be YYYY-MM-DD'));
+    modelCallsLookup('{"date":"1934"}');
+
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(toolMessage()).toBe('Error: date must be YYYY-MM-DD');
+    expect(toolDone(sent)).toMatchObject({ ok: false, errorMessage: 'date must be YYYY-MM-DD' });
+  });
+
+  it('isError démesuré : le modèle lit le texte borné, l’écran un extrait de quelques centaines de caractères', async () => {
+    offerLookup(serverError(`date must be YYYY-MM-DD. ${'x'.repeat(60_000)}`));
+    modelCallsLookup('{"date":"1934"}');
+
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(toolMessage()?.startsWith('Error: date must be YYYY-MM-DD.')).toBe(true);
+    expect(toolMessage()).toContain('[Truncated:');
+    expect(toolMessage()?.length).toBeLessThan(33_000);
+    expect(toolDone(sent)?.errorMessage?.startsWith('date must be YYYY-MM-DD.')).toBe(true);
+    expect(toolDone(sent)?.errorMessage?.length).toBeLessThanOrEqual(301);
+  });
+
+  it('une image : le modèle lit un libellé, jamais le base64', async () => {
+    offerLookup({
+      ok: true,
+      result: {
+        content: [
+          { type: 'text', text: 'Page 12.' },
+          { type: 'image', data: 'A'.repeat(270_000), mimeType: 'image/png' },
+        ],
+      },
+    });
+    modelCallsLookup('{"page":12}');
+
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(toolMessage()).toContain('Page 12.');
+    expect(toolMessage()).toContain('image/png');
+    expect(toolMessage()).not.toContain('AAAAAAAA');
+    expect(toolMessage()?.length).toBeLessThan(200);
+    expect(toolDone(sent)).toMatchObject({ ok: true });
+  });
+
+  it('arguments en JSON invalide : l’outil ne part pas, la puce finit en échec, le modèle peut corriger', async () => {
+    const callTool = offerLookup({ ok: true, result: { content: [{ type: 'text', text: 'générique' }] } });
+    modelCallsLookup('{"query": "Vichy');
+
+    const { sent } = startTurn();
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(callTool).not.toHaveBeenCalled();
+    expect(toolMessage()).toMatch(/^Error: invalid arguments for tool srv__lookup/);
+    expect(toolDone(sent)).toMatchObject({ ok: false });
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+  });
+});

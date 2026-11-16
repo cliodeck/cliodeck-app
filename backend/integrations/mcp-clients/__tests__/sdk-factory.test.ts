@@ -242,6 +242,39 @@ describe('realMCPClientFactory : sortie standard et catalogue paginé', () => {
     expect(call.ok).toBe(true);
   }, 15_000);
 
+  // S09-1-24 : un outil qui répond `isError` rendait `{ ok: false, result }`, sans erreur. Le moteur
+  // n'y lisait que « Error: unknown », et le journal d'accès un code absent. Le résultat reste : son
+  // texte, écrit par le serveur, passe ensuite par le garde (`inspectToolResult`), comme un succès.
+  it.each<[string, string[]]>([
+    ['sans outputSchema', []],
+    // En erreur, le SDK ne demande pas de sortie structurée à un outil qui déclare un outputSchema.
+    ['avec un outputSchema', ['--schema-sortie']],
+  ])('un outil qui répond isError (%s) : une erreur de code stable, le résultat du serveur gardé', async (_cas, options) => {
+    handle = open('archives', '--erreur-outil', ...options);
+    await handle.connect();
+    await handle.listTools();
+
+    const call = await handle.callTool('echo', { date: '1934' });
+
+    expect(call.ok).toBe(false);
+    expect(call.error?.code).toBe('tool_error');
+    expect(call.result).toMatchObject({ isError: true, content: [{ type: 'text', text: 'date must be YYYY-MM-DD' }] });
+  }, 15_000);
+
+  it('témoin : une image rendue par l’outil arrive entière, en bloc image', async () => {
+    handle = open('archives', '--image=150000');
+    await handle.connect();
+    await handle.listTools();
+
+    const call = await handle.callTool('echo', { page: 12 });
+
+    expect(call.ok).toBe(true);
+    expect(call.error).toBeUndefined();
+    expect(call.result).toMatchObject({
+      content: [{ type: 'text', text: '{"page":12}' }, { type: 'image', mimeType: 'image/png', data: expect.any(String) }],
+    });
+  }, 15_000);
+
   it('arrêté pendant la lecture du catalogue : le client s’arrête sans attendre la page en cours', async () => {
     manager = new MCPClientManager({ factory: realMCPClientFactory });
     // Chaque page met une minute à venir : sans sortie, `handshaking` durerait jusqu'au plafond.

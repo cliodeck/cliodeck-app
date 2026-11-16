@@ -191,7 +191,13 @@ export const realMCPClientFactory: MCPClientFactory = (
       }
       try {
         const res = await client.callTool({ name, arguments: args });
-        return { ok: !res.isError, result: res };
+        // Un outil qui répond `isError` garde son résultat : son texte, écrit par le serveur, passe
+        // par le garde du chat (`inspectToolResult`) avant d'atteindre le modèle, qui ne lisait
+        // que « Error: unknown » (S09-1-24). Le code le dit aussi au journal d'accès.
+        if (res.isError) {
+          return { ok: false, result: res, error: toErr('tool_error', 'The MCP tool reported an error.') };
+        }
+        return { ok: true, result: res };
       } catch (e) {
         return { ok: false, error: toErr('call_tool_error', e) };
       }
