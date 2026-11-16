@@ -62,6 +62,7 @@ import { historyService } from './history-service.js';
 import type { HistoryManager } from '../../../backend/core/history/HistoryManager.js';
 import { runWithJournalContext } from '../../../backend/core/usage-journal/context.js';
 import { inspectToolDescription, inspectToolResult, inspectToolSchema } from './mcp-tool-guard.js';
+import { buildWireToolName } from '../../../backend/integrations/mcp-clients/tool-names.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
 import {
@@ -650,9 +651,11 @@ export interface ChatStartArgs {
   systemPrompt?: FusionChatSystemPromptOptions;
   /**
    * Opt-in/opt-out filter on the MCP tool catalog (fusion 2.5). Tool
-   * names are namespaced — `${clientName}__${bareToolName}` — exactly as
-   * they appear in the wire format the model sees. When the array is
-   * provided, only tools whose namespaced name appears in it are sent
+   * names are the raw namespaced names — `${clientName}__${bareToolName}`,
+   * as the renderer builds them (`useMcpToolsList`, `mcpToolsStore`). The
+   * model sees that same name only when providers accept it; otherwise it
+   * sees the name `buildWireToolName` derives from it (S09-1-23). When the
+   * array is provided, only tools whose raw name appears in it are sent
    * to the model. When `undefined`, every `ready` tool is sent
    * (legacy behaviour, preserved for callers that haven't been updated).
    */
@@ -952,7 +955,11 @@ class FusionChatService {
     });
 
     // --- Assemble MCP tool catalog + dispatcher ---------------------------
-    const toolScope = new Map<string, string>(); // namespaced tool name → client name
+    // Nom envoyé au modèle → serveur et nom réel de l'outil. Le nom envoyé n'est pas forcément le nom
+    // brut `${client}__${outil}` : un serveur nommé « Gallica BnF » ferait refuser chaque tour par les
+    // fournisseurs cloud (S09-1-23). Seul le modèle le voit.
+    const toolScope = new Map<string, { client: string; bare: string }>();
+    const wireNames = new Set<string>();
     const tools: ToolDescriptor[] = [];
     // Optional opt-in/opt-out filter from the renderer (fusion 2.5).
     // `undefined` keeps legacy behaviour (every `ready` tool is sent);
@@ -969,15 +976,19 @@ class FusionChatService {
           if (enabledToolFilter && !enabledToolFilter.has(namespaced)) continue;
           // La description et le schéma d'entrée viennent du serveur tiers et entrent dans le
           // prompt : bornés et inspectés comme ses résultats (S09-2-3). Bloqué, l'outil n'est pas
-          // proposé au modèle.
+          // proposé au modèle. Les événements de sécurité portent le nom brut, celui que l'historien
+          // reconnaît dans `security-events.jsonl`.
           const guardOpts = { toolName: namespaced, mode: inspectorMode, onEvent: emitSecurityEvent };
           const description = inspectToolDescription(t.description ?? '', guardOpts);
           if (description === null) continue;
           const parameters = inspectToolSchema(t.inputSchema, guardOpts);
           if (parameters === null) continue;
-          toolScope.set(namespaced, client.name);
+          const wire = buildWireToolName(client.name, t.name, wireNames);
+          wireNames.add(wire);
+          toolScope.set(wire, { client: client.name, bare: t.name });
           tools.push({
-            name: namespaced,
+            name: wire,
+            // Le serveur en clair : le modèle sait d'où vient l'outil, même sous un nom assaini.
             description: `[${client.name}] ${description}`.trim(),
             parameters,
           });
@@ -996,17 +1007,17 @@ class FusionChatService {
             error: { code: 'project_changed', message: `Project closed during the turn: ${name} not called` },
           };
         }
-        const clientName = toolScope.get(name);
-        if (!clientName) {
+        const scope = toolScope.get(name);
+        if (!scope) {
           return {
             ok: false,
             error: { code: 'unknown_tool', message: `No client owns tool ${name}` },
           };
         }
-        const bare = name.slice(clientName.length + 2); // strip "clientName__"
-        const raw = await mcpClientsService.callTool(clientName, bare, toolArgs);
+        // Le serveur reçoit le nom réel de son outil, jamais le nom envoyé au modèle.
+        const raw = await mcpClientsService.callTool(scope.client, scope.bare, toolArgs);
         return inspectToolResult(raw, {
-          toolName: name,
+          toolName: `${scope.client}__${scope.bare}`,
           mode: retrievalService.getInspectorMode(),
           onEvent: emitSecurityEvent,
         });
@@ -1469,8 +1480,7 @@ class FusionChatService {
             watchdog.touch();
             // Preserve the legacy IPC shape (bareTool without client prefix,
             // sessionId-scoped callId) for the renderer.
-            const clientName = toolScope.get(ev.name);
-            const bareTool = clientName ? ev.name.slice(clientName.length + 2) : ev.name;
+            const bareTool = toolScope.get(ev.name)?.bare ?? ev.name;
             safeSend('fusion:chat:tool-call', {
               sessionId,
               callId: `${sessionId}-${ev.callId}`,
@@ -1481,8 +1491,7 @@ class FusionChatService {
           },
           onToolCallEnd: (ev) => {
             watchdog.touch();
-            const clientName = toolScope.get(ev.name);
-            const bareTool = clientName ? ev.name.slice(clientName.length + 2) : ev.name;
+            const bareTool = toolScope.get(ev.name)?.bare ?? ev.name;
             safeSend('fusion:chat:tool-call', {
               sessionId,
               callId: `${sessionId}-${ev.callId}`,

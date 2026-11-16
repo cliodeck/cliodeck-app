@@ -114,6 +114,7 @@ import { fakeLlama } from '../../../../backend/core/llm/__tests__/helpers/fake-n
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 interface Sent { channel: string; payload: unknown }
 
@@ -1541,4 +1542,176 @@ describe('résultat d’un outil MCP : ce que le modèle lit, ce que l’écran 
     expect(toolDone(sent)).toMatchObject({ ok: false });
     expect(terminal(sent)?.chunk.finishReason).toBe('stop');
   });
+});
+
+/**
+ * Le nom d'outil envoyé au modèle (S09-1-23). Un serveur MCP au nom libre (« Gallica BnF ») donnait
+ * des outils nommés `Gallica BnF__search`, que les fournisseurs cloud refusent : HTTP 400 à chaque
+ * tour, même sans rapport avec l'outil. Le faux modèle fait comme eux : il refuse toute la requête
+ * pour un seul nom invalide. Le filtre du renderer reste écrit en noms bruts ; le serveur reçoit le
+ * nom réel de l'outil, et la puce aussi.
+ */
+describe('nom d’outil MCP envoyé au modèle (S09-1-23)', () => {
+  /** Ce que tous les fournisseurs acceptent (OpenAI, Anthropic, Mistral ; Gemini : lettre ou `_` en tête). */
+  const WIRE = /^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$/;
+
+  function offerGallica() {
+    bench.tools = true;
+    vi.spyOn(mcpClientsService, 'list').mockReturnValue([
+      {
+        name: 'Gallica BnF',
+        state: 'ready',
+        generation: 1,
+        tools: [
+          { name: 'search', description: 'cherche dans Gallica', inputSchema: { type: 'object', properties: {} } },
+          { name: 'a.b', description: 'outil pointé', inputSchema: { type: 'object', properties: {} } },
+          { name: 'delete', description: 'non coché', inputSchema: { type: 'object', properties: {} } },
+        ],
+      },
+      {
+        name: 'srv',
+        state: 'ready',
+        generation: 1,
+        tools: [{ name: 'lookup', description: 'cherche', inputSchema: { type: 'object', properties: {} } }],
+      },
+    ]);
+    return vi.spyOn(mcpClientsService, 'callTool').mockResolvedValue({ ok: true, result: 'réponse du serveur' });
+  }
+
+  /** Comme un fournisseur cloud : un nom d'outil invalide, et toute la requête part en 400. */
+  function cloudModelCalls(description: string): void {
+    let call = 0;
+    bench.provider = async function* (_messages, opts) {
+      const invalid = (opts.tools ?? []).map((t) => t.name).filter((n) => !WIRE.test(n));
+      if (invalid.length > 0) throw new Error(`HTTP 400 invalid_request_error: tools.0.name: ${invalid[0]}`);
+      call += 1;
+      if (call === 1) {
+        const target = opts.tools?.find((t) => t.description.endsWith(description));
+        if (!target) throw new Error(`outil « ${description} » absent du catalogue`);
+        yield { delta: '', done: false, toolCall: { id: 't1', name: target.name, arguments: '{"q":"Vichy"}' } };
+        yield { delta: '', done: true, finishReason: 'tool_call' };
+        return;
+      }
+      yield { delta: 'Réponse.', done: false };
+      yield { delta: '', done: true, finishReason: 'stop' };
+    };
+  }
+
+  function startWithTools(enabledTools: string[]): Sent[] {
+    const { webContents, sent } = captureWebContents();
+    fusionChatService.start({
+      webContents,
+      messages: [{ role: 'user', content: 'question' }],
+      systemPrompt: { language: 'fr' },
+      enabledTools,
+    });
+    return sent;
+  }
+
+  const toolCalls = (sent: Sent[]) =>
+    sent
+      .filter((e) => e.channel === 'fusion:chat:tool-call')
+      .map((e) => e.payload as { name: string; status: string; ok?: boolean });
+
+  // Les noms bruts, tels que le renderer les coche (`useMcpToolsList`, `mcpToolsStore`).
+  const ENABLED = ['Gallica BnF__search', 'Gallica BnF__a.b', 'srv__lookup'];
+
+  it('le tour répond : tous les noms envoyés sont valides, les cochés seuls, la description garde le serveur en clair', async () => {
+    const callTool = offerGallica();
+    cloudModelCalls('cherche dans Gallica');
+
+    const sent = startWithTools(ENABLED);
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    const offered = bench.seenOpts[0]?.tools ?? [];
+    expect(offered).toHaveLength(3);
+    for (const t of offered) expect(t.name).toMatch(WIRE);
+    // Un nom déjà valide ne change pas.
+    expect(offered.map((t) => t.name)).toContain('srv__lookup');
+    expect(offered.find((t) => t.description.endsWith('cherche dans Gallica'))?.description).toBe(
+      '[Gallica BnF] cherche dans Gallica'
+    );
+    expect(offered.some((t) => t.description.endsWith('non coché'))).toBe(false);
+    expect(callTool).toHaveBeenCalledWith('Gallica BnF', 'search', { q: 'Vichy' });
+  });
+
+  it('un outil au nom pointé part chez son serveur sous son nom réel, et la puce le porte', async () => {
+    const callTool = offerGallica();
+    cloudModelCalls('outil pointé');
+
+    const sent = startWithTools(ENABLED);
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(terminal(sent)?.error).toBeUndefined();
+    expect(terminal(sent)?.chunk.finishReason).toBe('stop');
+    expect(callTool).toHaveBeenCalledTimes(1);
+    expect(callTool).toHaveBeenCalledWith('Gallica BnF', 'a.b', { q: 'Vichy' });
+    expect(toolCalls(sent).map((p) => [p.name, p.status])).toEqual([
+      ['a.b', 'started'],
+      ['a.b', 'done'],
+    ]);
+    expect(toolCalls(sent).find((p) => p.status === 'done')?.ok).toBe(true);
+    // Le message rejoué au modèle porte le nom qu'il a lui-même employé.
+    const replayed = bench.seenMessages[1]?.find((m) => m.role === 'assistant' && m.toolCalls?.length);
+    expect(replayed?.toolCalls?.[0]?.name).toMatch(WIRE);
+  });
+
+  it('vrai client MCP et mini-serveur : « Gallica BnF » s’ajoute tel quel, et son outil `a.b` répond au tour sous ses noms réels', async () => {
+    const server = fileURLToPath(
+      new URL('../../../../backend/integrations/mcp-clients/__tests__/fixtures/mini-mcp-server.mjs', import.meta.url)
+    );
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cliodeck-wire-names-'));
+    const pidLog = path.join(root, 'pids.txt');
+    fs.mkdirSync(path.join(root, '.cliodeck'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.cliodeck', 'config.json'), JSON.stringify({ schema_version: 2, name: 'Thèse' }));
+    const originalGate = mcpClientsService.approvalGate;
+    mcpClientsService.approvalGate = async () => 'approved';
+    try {
+      await mcpClientsService.loadProject(root);
+      // Aucun refus à l'ajout : le serveur garde le nom que l'historien lui a donné.
+      const added = await mcpClientsService.addClient({
+        name: 'Gallica BnF',
+        transport: 'stdio',
+        command: process.execPath,
+        args: [server, pidLog, '--nom=a.b'],
+      });
+      expect(added.state).toBe('ready');
+      bench.tools = true;
+      cloudModelCalls('renvoie ce qu’on lui donne');
+
+      const sent = startWithTools(['Gallica BnF__a.b']);
+      await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+      expect(terminal(sent)?.error).toBeUndefined();
+      // Le mini-serveur ne répond qu'à `a.b` : sous un autre nom, l'appel échouerait.
+      expect(bench.seenMessages[1]?.find((m) => m.role === 'tool')?.content).toBe('{"q":"Vichy"}');
+      expect(toolCalls(sent).map((p) => [p.name, p.status, p.ok])).toEqual([
+        ['a.b', 'started', undefined],
+        ['a.b', 'done', true],
+      ]);
+      // `mcp-access.jsonl` : le serveur et l'outil sous leurs noms réels, jamais le nom envoyé.
+      await mcpClientsService.unload();
+      const access = fs
+        .readFileSync(path.join(root, '.cliodeck', 'mcp-access.jsonl'), 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { kind: string; name?: string; tool?: string; ok?: boolean });
+      expect(access.filter((e) => e.kind === 'tool_call')).toMatchObject([{ name: 'Gallica BnF', tool: 'a.b', ok: true }]);
+    } finally {
+      mcpClientsService.approvalGate = originalGate;
+      await mcpClientsService.unload();
+      // Filet, par PID et jamais par motif.
+      const pids = fs.existsSync(pidLog) ? fs.readFileSync(pidLog, 'utf8').split('\n').filter(Boolean).map(Number) : [];
+      for (const pid of pids) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // déjà parti
+        }
+      }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 15_000);
 });

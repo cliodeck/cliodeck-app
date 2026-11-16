@@ -18,7 +18,9 @@
 //                         répond toujours sans structuredContent, ce que le SDK refuse pour un tel outil ;
 //   --erreur-outil[=texte] `echo` répond en erreur d'outil (`isError`), avec ce texte (« date must be
 //                         YYYY-MM-DD » par défaut) ;
-//   --image=octets        `echo` répond par un bloc texte puis une image PNG de cette taille, en base64.
+//   --image=octets        `echo` répond par un bloc texte puis une image PNG de cette taille, en base64 ;
+//   --nom=texte           `echo` s'appelle ainsi, par exemple d'un nom pointé (`a.b`), que le spec MCP
+//                         admet et que les fournisseurs cloud refusent.
 import { appendFileSync } from 'node:fs';
 import readline from 'node:readline';
 
@@ -40,6 +42,7 @@ for (const [key, text] of options) {
 }
 
 const toolCount = Number(option('outils') ?? 1);
+const echoName = option('nom') ?? 'echo';
 const pageSize = Number(option('page') ?? toolCount);
 const cursorMode = option('curseur');
 const outputSchema = { type: 'object', properties: { texte: { type: 'string' } }, required: ['texte'] };
@@ -47,7 +50,7 @@ const schemaPage = has('schema-sortie') ? Number(option('schema-sortie') ?? 0) :
 const toolAt = (i, page) =>
   i === 0
     ? {
-        name: 'echo',
+        name: echoName,
         description: 'renvoie ce qu’on lui donne',
         inputSchema: { type: 'object' },
         ...(page === schemaPage ? { outputSchema } : {}),
@@ -91,7 +94,7 @@ lines.on('line', (line) => {
     if (option('lent')) setTimeout(answer, Number(option('lent')));
     else answer();
     if (dieAfterMs) setTimeout(() => process.exit(1), Number(dieAfterMs));
-  } else if (message.method === 'tools/call' && message.params?.name === 'echo') {
+  } else if (message.method === 'tools/call' && message.params?.name === echoName) {
     const echoed = { type: 'text', text: JSON.stringify(message.params.arguments ?? {}) };
     const result = has('erreur-outil')
       ? { content: [{ type: 'text', text: option('erreur-outil') ?? 'date must be YYYY-MM-DD' }], isError: true }
