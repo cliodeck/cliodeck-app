@@ -5,6 +5,11 @@
  * la commande et de l'environnement, puis confirmation native. La différence
  * est qu'ici l'accord est mémorisé par empreinte, sinon ouvrir son propre
  * projet redemanderait l'autorisation à chaque démarrage.
+ *
+ * Un serveur SSE passe par le même chemin (S09-2-3). Il ne lance aucun
+ * processus, mais les arguments des appels d'outils partent vers son
+ * adresse, extraits du manuscrit compris, même avec un modèle local : un
+ * projet reçu d'un tiers ne le connecte pas sans question.
  */
 import path from 'node:path';
 import { app, BrowserWindow, dialog } from 'electron';
@@ -68,9 +73,8 @@ export async function defaultMcpApprovalGate(
     return 'invalid';
   }
 
-  // SSE ne lance aucun processus : le garde d'ajout le laisse déjà passer.
-  if (client.transport !== 'stdio') return 'approved';
-
+  // L'env compte, valeurs et sentinelles de secrets comprises, et l'adresse d'un serveur SSE : un
+  // accord donné pour une commande ne vaut plus quand un projet change son env (S09-1-22).
   const fingerprint = fingerprintClient(client);
   const reg = getRegistry();
   if (await reg.isApproved(fingerprint)) return 'approved';

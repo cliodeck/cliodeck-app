@@ -13,6 +13,7 @@ import {
   McpApprovalRegistry,
   fingerprintClient,
 } from '../mcp-approval-registry.js';
+import { SECRET_SENTINEL } from '../mcp-env-secrets.js';
 
 const LEGITIME = {
   name: 'europeana',
@@ -43,6 +44,53 @@ describe('fingerprintClient', () => {
   it('ignore le nom — un projet hostile peut le recopier', () => {
     expect(fingerprintClient({ ...LEGITIME, name: 'autre-nom' })).toBe(
       fingerprintClient(LEGITIME)
+    );
+  });
+
+  // S09-1-22 : un projet reçu reprenait une commande déjà approuvée en y ajoutant un env qui la
+  // détourne (registre de paquets, PATH). L'empreinte l'ignorait : aucun dialogue.
+  it('change dès que l’env change, valeurs comprises', () => {
+    const registre = { ...LEGITIME, env: { NPM_CONFIG_REGISTRY: 'https://registre.example/' } };
+    expect(fingerprintClient(registre)).not.toBe(fingerprintClient(LEGITIME));
+    expect(
+      fingerprintClient({ ...LEGITIME, env: { NPM_CONFIG_REGISTRY: 'https://autre.example/' } })
+    ).not.toBe(fingerprintClient(registre));
+    expect(fingerprintClient({ ...LEGITIME, env: { PATH: '/tmp/bin' } })).not.toBe(
+      fingerprintClient(LEGITIME)
+    );
+  });
+
+  it('ne dépend pas de l’ordre des clés de l’env', () => {
+    expect(fingerprintClient({ ...LEGITIME, env: { B: '2', A: '1' } })).toBe(
+      fingerprintClient({ ...LEGITIME, env: { A: '1', B: '2' } })
+    );
+  });
+
+  // S09-2-3 : un serveur SSE passe désormais par le registre ; son accord vaut pour une adresse.
+  it('change dès que l’adresse d’un serveur SSE change', () => {
+    const sse = { name: 'archives', transport: 'sse' as const, url: 'https://archives.example/sse' };
+    expect(fingerprintClient({ ...sse, url: 'https://collecte.example/sse' })).not.toBe(
+      fingerprintClient(sse)
+    );
+  });
+
+  // Les accords déjà enregistrés (`mcp-approvals.json`) d'un serveur sans env ni adresse ne bougent
+  // pas d'un octet. Valeur calculée en exécutant le code de `main` (5bb3697), pas à la main.
+  it('garde l’empreinte d’avant pour un serveur sans env ni adresse', () => {
+    expect(fingerprintClient(LEGITIME)).toBe(
+      'c6885d938beae2a6904d3b38f62b9efefc79c63d64a6727fce7af56c4f2f012e'
+    );
+    // Un env vide ne change rien : rien n'y redirige la commande.
+    expect(fingerprintClient({ ...LEGITIME, env: {} })).toBe(fingerprintClient(LEGITIME));
+  });
+
+  // L'empreinte est calculée après la migration des secrets (`migrateClientEnvSecrets`) : elle voit
+  // la sentinelle, jamais la clé, et ne change pas quand l'auteur change sa clé.
+  it('voit la sentinelle d’un secret, stable, et distincte d’une valeur en clair', () => {
+    const avecSecret = { ...LEGITIME, env: { EUROPEANA_API_KEY: SECRET_SENTINEL } };
+    expect(fingerprintClient(avecSecret)).toBe(fingerprintClient({ ...avecSecret }));
+    expect(fingerprintClient(avecSecret)).not.toBe(
+      fingerprintClient({ ...LEGITIME, env: { EUROPEANA_API_KEY: 'cle-en-clair' } })
     );
   });
 });

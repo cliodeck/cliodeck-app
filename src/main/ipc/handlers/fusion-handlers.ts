@@ -559,7 +559,7 @@ export function setupFusionHandlers(): void {
       }
     }
 
-    // 1. Whitelist validation (command + env shape).
+    // 1. Whitelist validation (command + env shape, or an http(s) URL).
     const check = validateMcpAddRequest(normalized);
     if (check.ok === false) {
       if (auditPath) {
@@ -577,7 +577,8 @@ export function setupFusionHandlers(): void {
     }
 
     // 2. Native confirmation dialog (main-process owned; renderer cannot
-    //    bypass). SSE passes through without a dialog — no spawn happens.
+    //    bypass). SSE too: nothing is spawned, but the arguments of tool
+    //    calls are sent to its URL (S09-2-3).
     const parent = BrowserWindow.fromWebContents(event.sender) ?? null;
     const confirmed = await confirmMcpAdd(normalized, { dialog, parentWindow: parent });
     if (!confirmed) {

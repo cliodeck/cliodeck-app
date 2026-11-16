@@ -117,7 +117,16 @@ test('ajouter un serveur MCP par le vrai canal : la question est refusée, rien 
     );
     expect(res).toMatchObject({ success: false, error: 'mcp_add_rejected:user_cancelled' });
     const seen = await leaveDialogs(app);
-    expect(seen).toEqual([{ message: 'Add MCP server "temoin"?', buttons: ['Cancel', 'Add MCP server'], response: 0 }]);
+    // La question parle la langue de l'app (L04-9), le français ici.
+    const fr = menuTexts('fr');
+    expect(seen).toEqual([
+      {
+        message: fr.mcpConfirmMessage.replace('{{name}}', 'temoin'),
+        buttons: [fr.mcpConfirmCancel, fr.mcpConfirmAccept],
+        response: 0,
+      },
+    ]);
+    expect(seen[0].message).toBe('Ajouter le serveur MCP « temoin » ?');
   } finally {
     await app.close();
     rmSync(userDataDir, { recursive: true, force: true });

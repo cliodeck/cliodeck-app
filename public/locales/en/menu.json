@@ -58,5 +58,19 @@
   "settingsRecoveredConfig": "ClioDeck's settings file could no longer be read. It was set aside, unchanged, as:\n{{path}}\n\nClioDeck starts again from the default settings, and the list of recent projects is empty: your projects themselves are untouched. Reopen them with File → Open project.",
   "settingsRecoveredSecrets": "ClioDeck's API key file could no longer be read. It was set aside, unchanged, as:\n{{path}}\n\nThe API keys it held (LLM, Zotero, MCP) are no longer stored: re-enter them in the Settings.",
   "settingsUnreadableTitle": "ClioDeck cannot start",
-  "settingsUnreadableMessage": "ClioDeck's settings could not be read:\n{{error}}\n\nCheck that this file is on the disk and that you are allowed to read it, then restart ClioDeck."
+  "settingsUnreadableMessage": "ClioDeck's settings could not be read:\n{{error}}\n\nCheck that this file is on the disk and that you are allowed to read it, then restart ClioDeck.",
+  "mcpConfirmTitle": "Confirm MCP server",
+  "mcpConfirmMessage": "Add MCP server “{{name}}”?",
+  "mcpConfirmCancel": "Cancel",
+  "mcpConfirmAccept": "Add MCP server",
+  "mcpConfirmName": "Name: {{name}}",
+  "mcpConfirmCommand": "Command: {{command}}",
+  "mcpConfirmArgs": "Arguments: {{args}}",
+  "mcpConfirmArgsNone": "Arguments: none",
+  "mcpConfirmEnv": "Environment variables: {{env}}",
+  "mcpConfirmEnvNone": "Environment variables: none",
+  "mcpConfirmEnvRedirect": "The variables followed by their value decide which program actually runs, or which registry it is downloaded from: check them.",
+  "mcpConfirmStdioWarning": "This will spawn a local process with the above command now, and again whenever you restart this server. Only confirm if you trust this source.",
+  "mcpConfirmUrl": "Address: {{url}}",
+  "mcpConfirmSseWarning": "ClioDeck will connect to this address now, and again whenever you restart this server. When the assistant calls one of this server's tools, the arguments of the call are sent to this address: they can contain excerpts of the conversation, the manuscript or the notes, even with a local model. Only confirm if you trust this address."
 }

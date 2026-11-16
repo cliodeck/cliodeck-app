@@ -82,10 +82,12 @@ describe('buildMCPSpawnEnv', () => {
   });
 
   it('allows user to override PATH (documented behavior)', () => {
-    // User config can override PATH because PATH is whitelisted and not denied.
-    // This is accepted risk — MCP servers sometimes need a custom PATH to find
-    // their runtime (e.g. nvm, pyenv). Callers must validate config at admin
-    // ingest time.
+    // User config can override PATH because PATH is whitelisted and not denied:
+    // MCP servers sometimes need a custom PATH to find their runtime (e.g. nvm,
+    // pyenv). The validation happens before the spawn: the approval fingerprint
+    // covers the env, values included (`fingerprintClient`), so a PATH or a
+    // package registry added to an approved command asks again, and the dialog
+    // shows their value (`confirmMcpAdd`, S09-1-22).
     const env = buildMCPSpawnEnv(
       { PATH: '/custom/bin' },
       { PATH: '/usr/bin' }

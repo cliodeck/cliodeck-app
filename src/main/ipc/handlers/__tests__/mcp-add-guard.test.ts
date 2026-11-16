@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import fs from 'fs/promises';
 import { readFileSync } from 'fs';
 import os from 'os';
@@ -9,8 +9,19 @@ import {
   appendMcpAudit,
   ALLOWED_BARE_COMMANDS,
 } from '../mcp-add-guard.js';
+import { loadMenuTranslations, setLanguage } from '../../../i18n.js';
 
 const LOCALES = path.resolve(__dirname, '../../../../../public/locales');
+
+// Les vrais textes de `menu.json` : seul le dossier de l'app est simulé.
+vi.mock('electron', () => ({
+  app: { isPackaged: false, getAppPath: () => path.resolve(__dirname, '../../../../..') },
+}));
+
+beforeAll(() => {
+  loadMenuTranslations();
+  setLanguage('en');
+});
 
 describe('validateMcpAddRequest — command whitelist', () => {
   it('accepts whitelisted bare interpreters', () => {
@@ -82,13 +93,28 @@ describe('validateMcpAddRequest — command whitelist', () => {
     if (!r.ok) expect(r.reason).toMatch(/^env_value_control_chars:/);
   });
 
-  it('passes through sse requests (no command to validate)', () => {
+  it('accepts an http(s) sse url (no command to validate)', () => {
     const r = validateMcpAddRequest({
       name: 'remote',
       transport: 'sse',
       url: 'https://example.com/mcp',
     });
     expect(r).toEqual({ ok: true });
+    expect(
+      validateMcpAddRequest({ name: 'local', transport: 'sse', url: 'http://127.0.0.1:9/sse' })
+    ).toEqual({ ok: true });
+  });
+
+  // S09-2-3 : l'URL d'un serveur SSE n'était pas regardée. Ce n'est pas l'adresse d'un serveur.
+  it('rejects an sse url that is not http(s), or missing', () => {
+    for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'ftp://example.com/sse', 'pas une url']) {
+      const r = validateMcpAddRequest({ name: 'remote', transport: 'sse', url });
+      expect(r, url).toEqual({ ok: false, reason: 'sse_url_invalid' });
+    }
+    expect(validateMcpAddRequest({ name: 'remote', transport: 'sse' })).toEqual({
+      ok: false,
+      reason: 'sse_url_invalid',
+    });
   });
 });
 
@@ -155,6 +181,72 @@ describe('confirmMcpAdd — native dialog gate', () => {
     const detail = showMessageBox.mock.calls[0][1].detail as string;
     expect(detail).not.toMatch(/project load/i);
     expect(detail).toMatch(/\bnow\b/);
+  });
+
+  // S09-2-3 : un serveur SSE passait sans dialogue, au motif qu'il ne lance aucun processus. Mais
+  // les arguments des appels d'outils partent vers son adresse.
+  it('asks for an sse server too, shows its url, and returns false on cancel', async () => {
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+    const ok = await confirmMcpAdd(
+      { name: 'archives', transport: 'sse', url: 'https://collecte.example/sse' },
+      { dialog: { showMessageBox } }
+    );
+    expect(ok).toBe(false);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
+    const opts = showMessageBox.mock.calls[0][1];
+    expect(opts.detail).toContain('https://collecte.example/sse');
+    // Ce qui part : les arguments des appels d'outils, même avec un modèle local.
+    expect(opts.detail).toMatch(/arguments/i);
+    expect(opts.defaultId).toBe(0);
+    expect(opts.cancelId).toBe(0);
+  });
+
+  // S09-1-22 : une variable qui redirige la commande (PATH, registre de paquets) n'était montrée
+  // que par son nom. Les autres valeurs restent masquées (une clé d'API).
+  it('shows the value of the env keys that redirect the command, and only those', async () => {
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+    await confirmMcpAdd(
+      {
+        name: 'europeana',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@cliodeck/mcp-europeana'],
+        env: {
+          PATH: '/Users/x/piege/bin',
+          NPM_CONFIG_REGISTRY: 'https://registre-hostile.example/',
+          PIP_INDEX_URL: 'https://pip.example/simple',
+          UV_DEFAULT_INDEX: 'https://uv.example/simple',
+          YARN_REGISTRY: 'https://yarn.example/',
+          EUROPEANA_API_KEY: 'cle-secrete',
+        },
+      },
+      { dialog: { showMessageBox } }
+    );
+    const detail = showMessageBox.mock.calls[0][1].detail as string;
+    expect(detail).toContain('PATH=/Users/x/piege/bin');
+    expect(detail).toContain('NPM_CONFIG_REGISTRY=https://registre-hostile.example/');
+    expect(detail).toContain('PIP_INDEX_URL=https://pip.example/simple');
+    expect(detail).toContain('UV_DEFAULT_INDEX=https://uv.example/simple');
+    expect(detail).toContain('YARN_REGISTRY=https://yarn.example/');
+    expect(detail).toContain('EUROPEANA_API_KEY');
+    expect(detail).not.toContain('cle-secrete');
+  });
+
+  // Le dialogue était en anglais quelle que soit la langue de l'app.
+  it('speaks the language of the app', async () => {
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+    setLanguage('fr');
+    try {
+      await confirmMcpAdd(
+        { name: 'fs', transport: 'stdio', command: 'npx' },
+        { dialog: { showMessageBox } }
+      );
+    } finally {
+      setLanguage('en');
+    }
+    const opts = showMessageBox.mock.calls[0][1];
+    expect(opts.buttons[0]).toBe('Annuler');
+    expect(opts.message).toContain('« fs »');
   });
 });
 
