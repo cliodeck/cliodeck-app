@@ -63,7 +63,10 @@ export interface ToolResultLike {
 }
 
 export interface InspectToolResultOptions {
-  /** Nom complet de l'outil tel qu'annoncé au modèle (`client__tool`). */
+  /**
+   * Nom brut de l'outil (`client__tool`), source des événements de sécurité : celui que l'historien
+   * reconnaît dans `security-events.jsonl`, pas le nom envoyé au modèle (`buildWireToolName`, S09-1-23).
+   */
   toolName: string;
   /** Mode d'inspection de l'espace de travail (`warn` par défaut). */
   mode: InspectorMode;
@@ -312,7 +315,10 @@ export function inspectToolResult(
 export const MAX_TOOL_DESCRIPTION_CHARS = 4_000;
 
 export interface InspectToolDescriptionOptions {
-  /** Nom complet de l'outil tel qu'annoncé au modèle (`client__tool`). */
+  /**
+   * Nom brut de l'outil (`client__tool`), source des événements de sécurité : celui que l'historien
+   * reconnaît dans `security-events.jsonl`, pas le nom envoyé au modèle (`buildWireToolName`, S09-1-23).
+   */
   toolName: string;
   mode: InspectorMode;
   onEvent?: (e: SecurityEvent) => void;
