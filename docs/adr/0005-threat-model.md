@@ -13,9 +13,14 @@ is required to scope defensive measures and avoid over-engineering.
 
 ### Adversary model
 
-**Trusted**: the local user and their direct colleagues (workspace
-sharing is assumed trustworthy — a colleague who shares a `.cliodeck/`
-folder is not adversarial).
+**Trusted**: the local user. *Amended 2026-11-16:* a project folder
+received from someone else, colleague or not, is **not** trusted (this
+line used to say that "a colleague who shares a `.cliodeck/` folder is
+not adversarial"). The MCP servers its `.cliodeck/config.json` declares,
+stdio or SSE, need the user's approval; the text it puts into the prompt
+(`context.md`, project modes, MCP tool descriptions) goes through
+`SourceInspector`. The code already assumed so (`hints-guard.ts`,
+`mcp-approval-gate.ts`).
 
 **Semi-trusted**: third-party MCP servers configured by the user. They
 may expose tools that return hostile content (prompt injection, data

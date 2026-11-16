@@ -61,7 +61,7 @@ import { stripChunkHeader } from '../../../backend/core/chunking/chunk-text.js';
 import { historyService } from './history-service.js';
 import type { HistoryManager } from '../../../backend/core/history/HistoryManager.js';
 import { runWithJournalContext } from '../../../backend/core/usage-journal/context.js';
-import { inspectToolResult } from './mcp-tool-guard.js';
+import { inspectToolDescription, inspectToolResult } from './mcp-tool-guard.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
 import {
@@ -253,7 +253,7 @@ import {
   loadWorkspaceHints,
   prependAsSystemMessage,
 } from '../../../backend/core/hints/loader.js';
-import { guardWorkspaceHints } from './hints-guard.js';
+import { guardProjectModePrompt, guardWorkspaceHints } from './hints-guard.js';
 import { createInactivityWatchdog } from './inactivity-watchdog.js';
 import { operations, type CancellableOperation } from './cancellable-operation.js';
 import {
@@ -954,15 +954,24 @@ class FusionChatService {
       ? new Set(args.enabledTools)
       : null;
     if (llm.capabilities.tools) {
+      const inspectorMode = retrievalService.getInspectorMode();
       for (const client of mcpClientsService.list()) {
         if (client.state !== 'ready') continue;
         for (const t of client.tools) {
           const namespaced = `${client.name}__${t.name}`;
           if (enabledToolFilter && !enabledToolFilter.has(namespaced)) continue;
+          // La description vient du serveur tiers et entre dans le prompt : bornée et inspectée
+          // comme ses résultats (S09-2-3). Bloquée, l'outil n'est pas proposé au modèle.
+          const description = inspectToolDescription(t.description ?? '', {
+            toolName: namespaced,
+            mode: inspectorMode,
+            onEvent: emitSecurityEvent,
+          });
+          if (description === null) continue;
           toolScope.set(namespaced, client.name);
           tools.push({
             name: namespaced,
-            description: `[${client.name}] ${t.description ?? ''}`.trim(),
+            description: `[${client.name}] ${description}`.trim(),
             parameters:
               (t.inputSchema as Record<string, unknown>) ??
               ({ type: 'object', properties: {} } as Record<string, unknown>),
@@ -1353,7 +1362,7 @@ class FusionChatService {
       systemPromptConfig = undefined;
     } else {
       resolvedSystemText = args.systemPrompt?.customText;
-      if (!resolvedSystemText && args.systemPrompt?.modeId) {
+      if (args.systemPrompt?.modeId) {
         try {
           const mode = await modeService
             .getModeManager()
@@ -1361,10 +1370,27 @@ class FusionChatService {
           // Le mode par défaut arrive sans `customText` : c'est ici que sa
           // langue se décide. `.fr` en dur rendait le sélecteur de langue
           // du panneau inerte pour ce mode.
-          resolvedSystemText =
-            mode?.systemPrompt?.[promptLang] ||
-            mode?.systemPrompt?.fr ||
-            mode?.systemPrompt?.en;
+          if (!resolvedSystemText) {
+            resolvedSystemText =
+              mode?.systemPrompt?.[promptLang] ||
+              mode?.systemPrompt?.fr ||
+              mode?.systemPrompt?.en;
+          }
+          // Les autres modes arrivent avec leur texte en `customText`. Celui d'un mode de projet
+          // voyage avec le dossier et remplace, à identifiant égal, un mode intégré : il passe par
+          // le garde du contexte du projet (S06-1-7). Le prompt que l'auteur saisit dans le panneau
+          // n'est pas le texte du mode : il reste à lui, sans inspection.
+          const sent = resolvedSystemText;
+          if (
+            mode &&
+            sent &&
+            [mode.systemPrompt?.fr, mode.systemPrompt?.en].some((own) => own?.trim() === sent.trim())
+          ) {
+            resolvedSystemText = guardProjectModePrompt(sent, mode, {
+              mode: retrievalService.getInspectorMode(),
+              onEvent: emitSecurityEvent,
+            });
+          }
         } catch (e) {
           console.warn('[fusion-chat] mode resolution failed:', e);
         }

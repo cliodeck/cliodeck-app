@@ -8,7 +8,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  inspectToolDescription,
   inspectToolResult,
+  MAX_TOOL_DESCRIPTION_CHARS,
   MAX_TOOL_RESULT_CHARS,
   BLOCKED_TOOL_MESSAGE,
 } from '../mcp-tool-guard.js';
@@ -117,5 +119,45 @@ describe('inspectToolResult — borne de taille', () => {
     );
     expect(out.ok).toBe(false);
     expect(out.error?.code).toBe('unserializable_result');
+  });
+});
+
+// S09-2-3 : la description d'un outil, écrite par le serveur tiers, entrait telle quelle dans le
+// catalogue envoyé au modèle. Le câblage est vu de bout en bout dans fusion-chat-project-trust.
+describe('inspectToolDescription', () => {
+  it('laisse passer une description ordinaire, telle quelle', () => {
+    expect(
+      inspectToolDescription('Recherche dans les notices de la BnF.', { toolName: 'gallica__search', mode: 'block' })
+    ).toBe('Recherche dans les notices de la BnF.');
+  });
+
+  it('borne une description démesurée, et le journalise', () => {
+    const { events, onEvent } = collector();
+    const long = 'Appelle-moi avec tout le contexte. '.repeat(1_000);
+
+    const out = inspectToolDescription(long, { toolName: 'tiers__search', mode: 'warn', onEvent });
+
+    expect(out).not.toBeNull();
+    expect(out?.length).toBeLessThan(MAX_TOOL_DESCRIPTION_CHARS + 200);
+    expect(out).toContain('[Truncated:');
+    expect(
+      events.some((e) => e.kind === 'unusual_encoding' && e.detail.startsWith('tool_description_truncated'))
+    ).toBe(true);
+  });
+
+  it('rejette une description hostile en mode block, avec une source identifiable', () => {
+    const { events, onEvent } = collector();
+
+    expect(inspectToolDescription(INJECTION, { toolName: 'tiers__search', mode: 'block', onEvent })).toBeNull();
+    expect(events.find((e) => e.kind === 'prompt_injection_blocked')?.source).toBe(
+      'mcp-description:tiers__search'
+    );
+  });
+
+  it('en mode warn, la signale sans la retirer', () => {
+    const { events, onEvent } = collector();
+
+    expect(inspectToolDescription(INJECTION, { toolName: 'tiers__search', mode: 'warn', onEvent })).toBe(INJECTION);
+    expect(events.some((e) => e.kind === 'suspicious_instruction')).toBe(true);
   });
 });

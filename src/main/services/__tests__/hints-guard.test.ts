@@ -9,7 +9,7 @@
  * défendue du modèle de menace (ADR 0005).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { guardWorkspaceHints, MAX_HINTS_CHARS } from '../hints-guard.js';
+import { guardProjectModePrompt, guardWorkspaceHints, MAX_HINTS_CHARS } from '../hints-guard.js';
 import type { SecurityEvent } from '../../../../backend/security/events.js';
 import type { WorkspaceHints } from '../../../../backend/core/hints/loader.js';
 
@@ -88,5 +88,41 @@ describe('guardWorkspaceHints', () => {
     expect(onEvent).toHaveBeenCalled();
     const first = onEvent.mock.calls[0][0] as SecurityEvent;
     expect(first.source).toBe('workspace-hints');
+  });
+});
+
+// S06-1-7 : le texte d'un mode de projet (`cliodeck-data/modes/`) voyage avec le dossier, comme
+// `context.md`, et remplace un mode intégré à identifiant égal. Le câblage est vu de bout en bout
+// dans fusion-chat-project-trust.
+describe('guardProjectModePrompt', () => {
+  const projectMode = { source: 'project' as const, metadata: { id: 'default-assistant' } } as Parameters<
+    typeof guardProjectModePrompt
+  >[1];
+
+  it('borne le texte d’un mode de projet', () => {
+    const events: SecurityEvent[] = [];
+    const out = guardProjectModePrompt('a'.repeat(MAX_HINTS_CHARS + 5_000), projectMode, {
+      mode: 'warn',
+      onEvent: (e) => events.push(e),
+    });
+
+    expect(out?.length).toBeLessThan(MAX_HINTS_CHARS + 200);
+    expect(out).toContain('le mode du projet');
+    expect(events.some((e) => 'detail' in e && e.detail?.includes('mode_prompt_truncated'))).toBe(true);
+  });
+
+  it('écarte en mode bloquant le texte hostile d’un mode de projet, source à part', () => {
+    const onEvent = vi.fn();
+    expect(guardProjectModePrompt(HOSTILE, projectMode, { mode: 'block', onEvent })).toBeUndefined();
+    expect((onEvent.mock.calls[0][0] as SecurityEvent).source).toBe('project-mode');
+  });
+
+  it('témoin : un mode intégré ou global n’est pas inspecté', () => {
+    for (const source of ['builtin', 'global'] as const) {
+      const onEvent = vi.fn();
+      const mode = { ...projectMode, source };
+      expect(guardProjectModePrompt(HOSTILE, mode, { mode: 'block', onEvent })).toBe(HOSTILE);
+      expect(onEvent).not.toHaveBeenCalled();
+    }
   });
 });
