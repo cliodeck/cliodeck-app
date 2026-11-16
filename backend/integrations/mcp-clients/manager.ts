@@ -195,18 +195,44 @@ export class MCPClientManager {
     );
   }
 
+  /**
+   * Retire le client : son nom redevient libre pour register() (S09-1-3). Le slot sort de la table
+   * avant la fermeture, l'événement final part après : qui relit la liste à cet événement ne le
+   * voit plus. Il part même pour un client déjà arrêté, car la barre d'état ne relit qu'à un
+   * `state_changed`. Un crash ou une reprise tardifs de l'ancien slot ne touchent pas un client
+   * réinscrit sous le même nom.
+   */
+  async unregister(name: string): Promise<void> {
+    const slot = this.slots.get(name);
+    if (!slot) return;
+    this.slots.delete(name);
+    slot.stopRequested = true;
+    this.cancelRetry(slot);
+    slot.readySinceMs = null;
+    const handle = slot.handle;
+    slot.handle = null;
+    if (handle) await this.closeHandle(handle);
+    const from = slot.instance.state;
+    slot.instance = { ...slot.instance, state: 'stopped', generation: slot.instance.generation + 1 };
+    this.emit({ kind: 'state_changed', at: now(), name, from, to: 'stopped', reason: 'unregistered' });
+  }
+
   async callTool(
     name: string,
     tool: string,
     args: Record<string, unknown>
   ): Promise<{ ok: boolean; result?: unknown; error?: MCPClientError }> {
-    const slot = this.requireSlot(name);
-    if (slot.instance.state !== 'ready' || !slot.handle) {
+    // Retiré pendant un tour de chat qui avait reçu ses outils : une erreur rendue, comme pour un
+    // client arrêté, jamais levée, ce qui finirait le tour.
+    const slot = this.slots.get(name);
+    if (!slot || slot.instance.state !== 'ready' || !slot.handle) {
       return {
         ok: false,
         error: {
           code: 'client_not_ready',
-          message: `MCP client "${name}" is in state "${slot.instance.state}"`,
+          message: slot
+            ? `MCP client "${name}" is in state "${slot.instance.state}"`
+            : `MCP client "${name}" is not registered`,
           at: now(),
         },
       };
@@ -321,9 +347,9 @@ export class MCPClientManager {
   }
 
   private onCrash(slot: Slot, handle: MCPClientHandle, err: MCPClientError): void {
-    // Fermeture voulue (arrêt, échec, handle remplacé) : le SDK appelle quand même onclose, et ce
-    // n'est pas un incident. Rien n'est journalisé ni relancé.
-    if (slot.handle !== handle || slot.stopRequested) return;
+    // Fermeture voulue (arrêt, échec, handle remplacé, client retiré) : le SDK appelle quand même
+    // onclose, et ce n'est pas un incident. Rien n'est journalisé ni relancé.
+    if (!this.isCurrent(slot) || slot.handle !== handle || slot.stopRequested) return;
     this.emit({ kind: 'error', at: now(), name: slot.cfg.name, error: err });
     // Resté prêt assez longtemps : incident nouveau, avec sa propre reprise.
     if (slot.readySinceMs !== null && Date.now() - slot.readySinceMs >= this.stabilityWindowMs) {
@@ -341,9 +367,14 @@ export class MCPClientManager {
     // autre, et stop() l'annule.
     slot.retryTimer = setTimeout(() => {
       slot.retryTimer = null;
-      if (slot.stopRequested) return;
+      if (slot.stopRequested || !this.isCurrent(slot)) return;
       void this.attemptConnect(slot, true);
     }, this.retryDelayMs);
+  }
+
+  /** Ce slot est-il toujours celui de son nom ? Faux une fois retiré, même si le nom a été réinscrit. */
+  private isCurrent(slot: Slot): boolean {
+    return this.slots.get(slot.cfg.name) === slot;
   }
 
   private cancelRetry(slot: Slot): void {

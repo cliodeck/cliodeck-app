@@ -261,18 +261,19 @@ describe('vraie fabrique SDK et mini-serveur stdio : arrêté veut dire arrêté
     await rm(root, { recursive: true, force: true });
   });
 
-  it('« Supprimer » : arrêté, toujours arrêté 2,5 s plus tard, et plus aucun processus', async () => {
+  it('« Supprimer » : retiré, toujours absent 2,5 s plus tard, et plus aucun processus', async () => {
     expect((await mcpClientsService.addClient(client())).state).toBe('ready');
     expect(pids()).toHaveLength(1);
 
     await mcpClientsService.removeClient('mini');
     const stoppedAt = events.length;
-    expect(stateOf('mini')).toBe('stopped');
+    // Retiré, plus seulement arrêté : la liste ne le montre plus (S09-1-3).
+    expect(stateOf('mini')).toBeUndefined();
 
     // La reprise fantôme partait à 500 ms : on la laisse largement passer.
     await new Promise((resolve) => setTimeout(resolve, 2_500));
 
-    expect(stateOf('mini')).toBe('stopped');
+    expect(stateOf('mini')).toBeUndefined();
     expect(events.slice(stoppedAt)).toEqual([]);
     expect(pids()).toHaveLength(1);
     expect(pids().filter(alive)).toEqual([]);

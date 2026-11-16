@@ -26,6 +26,8 @@ vi.mock('../secure-storage.js', () => ({
 
 import { mcpClientsService } from '../mcp-clients-service.js';
 import { SECRET_SENTINEL } from '../mcp-env-secrets.js';
+import { MCPClientManager } from '../../../../backend/integrations/mcp-clients/manager.js';
+import type { MCPClientConfig as ManagerClientConfig } from '../../../../backend/integrations/mcp-clients/types.js';
 
 const HOSTILE = {
   name: 'helper',
@@ -166,5 +168,92 @@ describe('loadProject — garde d’approbation des serveurs MCP', () => {
     expect(names).toContain('mini');
     expect(names).not.toContain('helper');
     expect(mcpClientsService.list().find((c) => c.name === 'mini')?.state).toBe('ready');
+  });
+});
+
+/**
+ * S09-1-3 : retirer puis réajouter un serveur du même nom levait « already registered », alors que
+ * config.json avait déjà été réécrit ; la liste montrait l'ancien serveur, et c'était l'ancienne
+ * commande qui restait inscrite. Service réel, workspace temporaire ; commandes absentes : un
+ * démarrage échoue vite, sans réseau.
+ */
+describe('retirer puis réajouter un serveur MCP du même nom (S09-1-3)', () => {
+  const originalGate = mcpClientsService.approvalGate;
+  const gallica = (args: string[]) => ({
+    name: 'gallica',
+    transport: 'stdio' as const,
+    command: '/nonexistent/cliodeck-gallica',
+    args,
+  });
+  let root: string;
+  let registered: ManagerClientConfig[];
+
+  const configFile = (): string => path.join(root, '.cliodeck', 'config.json');
+  const readConfig = (): Promise<string> => fs.readFile(configFile(), 'utf8');
+  const disk = async (): Promise<{ mcpClients?: unknown[]; secrets_scope?: unknown }> => JSON.parse(await readConfig());
+
+  beforeEach(async () => {
+    secrets.clear();
+    registered = [];
+    const register = MCPClientManager.prototype.register;
+    vi.spyOn(MCPClientManager.prototype, 'register').mockImplementation(function (this: MCPClientManager, cfg) {
+      registered.push(structuredClone(cfg));
+      register.call(this, cfg);
+    });
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    mcpClientsService.approvalGate = originalGate;
+    await mcpClientsService.unload();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it('pas d’erreur, une seule entrée en liste et dans config.json, avec le nouvel argument', async () => {
+    root = await makeWorkspace([]);
+    await mcpClientsService.loadProject(root);
+    await mcpClientsService.addClient(gallica(['--mauvais']));
+
+    await mcpClientsService.removeClient('gallica');
+    // Retiré veut dire retiré : la liste ne garde pas un client arrêté.
+    expect(mcpClientsService.list()).toEqual([]);
+
+    await expect(mcpClientsService.addClient(gallica(['--corrige']))).resolves.toMatchObject({ name: 'gallica' });
+
+    expect(mcpClientsService.list().map((c) => c.name)).toEqual(['gallica']);
+    expect((await disk()).mcpClients).toEqual([gallica(['--corrige'])]);
+    // C'est la nouvelle commande qui est inscrite, pas l'ancienne.
+    const last = registered.at(-1)?.config;
+    expect(last?.transport === 'stdio' ? last.args : null).toEqual(['--corrige']);
+  });
+
+  it('nom encore inscrit dans le manager (config.json retouché à la main) : refusé, config.json inchangé', async () => {
+    root = await makeWorkspace([gallica(['--ancien'])]);
+    mcpClientsService.approvalGate = async () => 'approved';
+    await mcpClientsService.loadProject(root);
+    expect(mcpClientsService.list().map((c) => c.name)).toEqual(['gallica']);
+    // L'historien retire le serveur de config.json à la main, projet ouvert.
+    await fs.writeFile(configFile(), JSON.stringify({ schema_version: 2, name: 'test', mcpClients: [] }), 'utf8');
+    const before = await readConfig();
+
+    await expect(mcpClientsService.addClient(gallica(['--nouveau']))).rejects.toThrow(/already registered/);
+
+    expect(await readConfig()).toBe(before);
+  });
+
+  it('stdio sans commande : refusé avant l’écriture, config.json inchangé, aucune clé gardée', async () => {
+    root = await makeWorkspace([]);
+    await mcpClientsService.loadProject(root);
+    const before = await readConfig();
+
+    await expect(
+      mcpClientsService.addClient({ name: 'sans-commande', transport: 'stdio', env: { ARCHIVE_API_KEY: 'cle-test' } })
+    ).rejects.toThrow(/requires a command/);
+
+    expect(await readConfig()).toBe(before);
+    expect((await disk()).secrets_scope).toBeUndefined();
+    // La clé rangée sous la portée née dans cette écriture, qui n'a pas eu lieu, est retirée.
+    expect([...secrets.keys()]).toEqual([]);
+    expect(mcpClientsService.list()).toEqual([]);
   });
 });
