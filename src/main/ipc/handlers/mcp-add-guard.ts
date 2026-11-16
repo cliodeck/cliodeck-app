@@ -6,9 +6,11 @@
  * dep, RAG-injected content) could therefore achieve RCE. This module provides
  * the three pre-spawn checks:
  *
- *   1. Whitelist the `command` (known interpreters or validated absolute paths).
+ *   1. Whitelist the `command` (known interpreters or validated absolute paths),
+ *      or, for SSE, accept only an http(s) URL.
  *   2. Sanitize the `env` map (key shape + no control chars in values).
- *   3. Require a native confirmation dialog from the user in the main process.
+ *   3. Require a native confirmation dialog from the user in the main process,
+ *      for SSE too: the arguments of tool calls are sent to its URL.
  *
  * Separation of concerns: env-value whitelisting (e.g. secret-redaction) is
  * handled downstream in `sdk-factory.ts` per the sibling task and is NOT done
@@ -21,6 +23,8 @@
 import path from 'path';
 import fs from 'fs/promises';
 import type { Dialog } from 'electron';
+import { t } from '../../i18n.js';
+import { isSensitiveEnvVarName } from '../../services/mcp-env-secrets.js';
 
 /** Interpreters allowed as bare (un-pathed) commands. */
 export const ALLOWED_BARE_COMMANDS = new Set<string>([
@@ -49,11 +53,14 @@ export type McpAddValidation =
   | { ok: false; reason: string };
 
 /**
- * Validate the command + env of an incoming stdio MCP add request. SSE is
- * handled separately (no spawn, only a URL to open).
+ * Validate the command + env of an incoming stdio MCP add request. An SSE
+ * request spawns nothing: only its URL is checked, which must be http(s)
+ * (S09-2-3: `file://` or `javascript:` is not the address of a server).
  */
 export function validateMcpAddRequest(req: McpAddRequest): McpAddValidation {
-  if (req.transport !== 'stdio') return { ok: true };
+  if (req.transport !== 'stdio') {
+    return isHttpUrl(req.url) ? { ok: true } : { ok: false, reason: 'sse_url_invalid' };
+  }
 
   const cmd = req.command;
   if (!cmd || typeof cmd !== 'string' || !cmd.trim()) {
@@ -101,40 +108,87 @@ export function validateMcpAddRequest(req: McpAddRequest): McpAddValidation {
   return { ok: true };
 }
 
+function isHttpUrl(url: string | undefined): boolean {
+  if (!url || CONTROL_CHARS_RE.test(url)) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Env keys that decide which program actually runs, or where it is downloaded from: `PATH` picks
+ * the `npx` that is executed, the others the registry `npx`, `pip` or `uvx` fetch the package
+ * from (S09-1-22). `HOME`, `XDG_*`, `APPDATA`, `LOCALAPPDATA` and `USERPROFILE` do it through the
+ * configuration files they point to (`~/.npmrc`, `pip.conf`, `uv.toml`, Python's user
+ * site-packages). The dialog names them in a warning.
+ */
+export function redirectsCommand(key: string): boolean {
+  return (
+    ['PATH', 'HOME', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE'].includes(key) ||
+    /^(NPM_CONFIG_|PIP_|UV_|XDG_)/.test(key) ||
+    /(_REGISTRY|_INDEX_URL)$/.test(key)
+  );
+}
+
 export interface ConfirmOptions {
   dialog: Pick<Dialog, 'showMessageBox'>;
   parentWindow?: Electron.BrowserWindow | null;
 }
 
 /**
- * Show a native modal dialog summarizing the command, args, env keys (values
- * are shown redacted — a long API key would mask the diff). Returns true only
+ * The lines of the dialog that describe a stdio server: command, args, env. Every env value is
+ * shown, except those of the keys that look like secrets: a value hidden from the author cannot be
+ * judged, and the author cannot spot a redirection by its name alone.
+ */
+function stdioDetail(req: McpAddRequest): string[] {
+  const env = Object.entries(req.env ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const shown = (key: string): boolean => !isSensitiveEnvVarName(key);
+  // Only the keys whose value is shown: the warning asks the author to check it.
+  const redirects = env.map(([key]) => key).filter((key) => shown(key) && redirectsCommand(key));
+  const args = (req.args ?? []).join(' ');
+  return [
+    t('mcpConfirmCommand').replace('{{command}}', () => req.command ?? ''),
+    args ? t('mcpConfirmArgs').replace('{{args}}', () => args) : t('mcpConfirmArgsNone'),
+    env.length > 0
+      ? t('mcpConfirmEnv').replace('{{env}}', () =>
+          env.map(([key, value]) => (shown(key) ? `${key}=${value}` : key)).join(', ')
+        )
+      : t('mcpConfirmEnvNone'),
+    ...(redirects.length > 0
+      ? ['', t('mcpConfirmEnvRedirect').replace('{{keys}}', () => redirects.join(', '))]
+      : []),
+    '',
+    t('mcpConfirmStdioWarning'),
+  ];
+}
+
+/**
+ * Show a native modal dialog describing the server: the command, args and env of a stdio server
+ * (secret values hidden), or the URL of an SSE server and what is sent to it. Returns true only
  * when the user explicitly clicks "Add".
  */
 export async function confirmMcpAdd(
   req: McpAddRequest,
   { dialog, parentWindow }: ConfirmOptions
 ): Promise<boolean> {
-  if (req.transport !== 'stdio') return true;
-
-  const envKeys = req.env ? Object.keys(req.env).sort() : [];
   const detail = [
-    `Name: ${req.name}`,
-    `Command: ${req.command ?? '(none)'}`,
-    `Args: ${(req.args ?? []).join(' ') || '(none)'}`,
-    `Env keys: ${envKeys.join(', ') || '(none)'}`,
+    t('mcpConfirmName').replace('{{name}}', () => req.name),
+    ...(req.transport === 'stdio'
+      ? stdioDetail(req)
+      : [t('mcpConfirmUrl').replace('{{url}}', () => req.url ?? ''), '', t('mcpConfirmSseWarning')]),
   ].join('\n');
 
   const res = await dialog.showMessageBox(parentWindow ?? undefined!, {
     type: 'warning',
-    buttons: ['Cancel', 'Add MCP server'],
+    buttons: [t('mcpConfirmCancel'), t('mcpConfirmAccept')],
     defaultId: 0,
     cancelId: 0,
-    title: 'Confirm MCP server',
-    message: `Add MCP server "${req.name}"?`,
-    detail:
-      detail +
-      '\n\nThis will spawn a local process with the above command now, and again whenever you restart this server. Only confirm if you trust this source.',
+    title: t('mcpConfirmTitle'),
+    message: t('mcpConfirmMessage').replace('{{name}}', () => req.name),
+    detail,
   });
   return res.response === 1;
 }

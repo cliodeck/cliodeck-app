@@ -58,5 +58,19 @@
   "settingsRecoveredConfig": "Le fichier des réglages de ClioDeck ne se lisait plus. Il a été mis de côté, tel quel, sous le nom :\n{{path}}\n\nClioDeck repart des réglages par défaut, et la liste des projets récents est vide : vos projets, eux, ne sont pas touchés. Rouvrez-les par Fichier → Ouvrir projet.",
   "settingsRecoveredSecrets": "Le fichier des clés API de ClioDeck ne se lisait plus. Il a été mis de côté, tel quel, sous le nom :\n{{path}}\n\nLes clés API qu'il contenait (LLM, Zotero, MCP) ne sont plus enregistrées : ressaisissez-les dans les Paramètres.",
   "settingsUnreadableTitle": "ClioDeck ne peut pas démarrer",
-  "settingsUnreadableMessage": "Les réglages de ClioDeck n'ont pas pu être lus :\n{{error}}\n\nVérifiez que ce fichier est bien sur le disque et que vous avez le droit de le lire, puis relancez ClioDeck."
+  "settingsUnreadableMessage": "Les réglages de ClioDeck n'ont pas pu être lus :\n{{error}}\n\nVérifiez que ce fichier est bien sur le disque et que vous avez le droit de le lire, puis relancez ClioDeck.",
+  "mcpConfirmTitle": "Confirmer le serveur MCP",
+  "mcpConfirmMessage": "Ajouter le serveur MCP « {{name}} » ?",
+  "mcpConfirmCancel": "Annuler",
+  "mcpConfirmAccept": "Ajouter le serveur MCP",
+  "mcpConfirmName": "Nom : {{name}}",
+  "mcpConfirmCommand": "Commande : {{command}}",
+  "mcpConfirmArgs": "Arguments : {{args}}",
+  "mcpConfirmArgsNone": "Arguments : aucun",
+  "mcpConfirmEnv": "Variables d'environnement : {{env}}",
+  "mcpConfirmEnvNone": "Variables d'environnement : aucune",
+  "mcpConfirmEnvRedirect": "Ces variables décident du programme réellement lancé, ou du registre d'où il est téléchargé, directement ou par les fichiers de configuration qu'elles désignent : {{keys}}. Vérifiez leur valeur.",
+  "mcpConfirmStdioWarning": "Cette commande lancera un processus local maintenant, puis à chaque redémarrage de ce serveur. Ne confirmez que si vous faites confiance à sa source.",
+  "mcpConfirmUrl": "Adresse : {{url}}",
+  "mcpConfirmSseWarning": "ClioDeck se connectera à cette adresse maintenant, puis à chaque redémarrage de ce serveur. Quand l'assistant appelle un outil de ce serveur, les arguments de l'appel partent vers cette adresse : ils peuvent contenir des extraits de la conversation, du manuscrit ou des notes, même avec un modèle local. Ne confirmez que si vous faites confiance à cette adresse."
 }

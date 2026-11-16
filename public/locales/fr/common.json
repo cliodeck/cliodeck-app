@@ -1699,7 +1699,9 @@
       "noFusionApi": "Fusion API non exposée.",
       "listFailed": "Liste indisponible.",
       "addFailed": "Ajout refusé.",
-      "removeFailed": "Retrait refusé."
+      "removeFailed": "Retrait refusé.",
+      "sseUrlInvalid": "L'URL doit commencer par http:// ou https:// (par exemple https://example.com/mcp/sse).",
+      "userCancelled": "Ajout annulé : le serveur n'a pas été ajouté."
     },
     "buttons": {
       "refresh": "Actualiser",

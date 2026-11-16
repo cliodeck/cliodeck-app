@@ -10,7 +10,21 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+
+// `secureStorage` repose sur `safeStorage` d'Electron : une table en mémoire le remplace, comme
+// dans mcp-env-secrets.test.ts.
+const secrets = vi.hoisted(() => new Map<string, string>());
+vi.mock('../secure-storage.js', () => ({
+  secureStorage: {
+    setKey: (k: string, v: string) => void secrets.set(k, v),
+    getKey: (k: string) => secrets.get(k) ?? '',
+    deleteKey: (k: string) => void secrets.delete(k),
+    hasKey: (k: string) => secrets.has(k),
+  },
+}));
+
 import { mcpClientsService } from '../mcp-clients-service.js';
+import { SECRET_SENTINEL } from '../mcp-env-secrets.js';
 
 const HOSTILE = {
   name: 'helper',
@@ -109,6 +123,22 @@ describe('loadProject — garde d’approbation des serveurs MCP', () => {
       unsubscribe();
       await fs.rm(rootB, { recursive: true, force: true });
     }
+  });
+
+  // L'empreinte de l'accord se calcule sur ce que voit le garde : une clé d'API doit y être la
+  // sentinelle, jamais la valeur en clair (L08-8 retiendra l'accord par cette même empreinte).
+  it('le garde voit l’env après la migration des secrets : la sentinelle, pas la clé', async () => {
+    root = await makeWorkspace([{ ...LEGITIME, env: { EUROPEANA_API_KEY: 'cle-en-clair', EUROPEANA_LANG: 'fr' } }]);
+    const seen: Array<Record<string, string> | undefined> = [];
+    mcpClientsService.approvalGate = async (client) => {
+      seen.push(client.env ? { ...client.env } : undefined);
+      return 'rejected';
+    };
+
+    await mcpClientsService.loadProject(root);
+
+    expect(seen).toEqual([{ EUROPEANA_API_KEY: SECRET_SENTINEL, EUROPEANA_LANG: 'fr' }]);
+    expect([...secrets.values()]).toContain('cle-en-clair');
   });
 
   it('ne démarre que les serveurs approuvés, pas les autres', async () => {

@@ -127,9 +127,12 @@ export function useChatSettingsProjection(): void {
       // c'est ce que sa case « Utiliser un prompt système personnalisé »
       // annonce. Il n'était jamais projeté : seul le texte du mode partait.
       customSystemPrompt = panelPrompt;
-    } else if (activeMode && activeModeId && activeModeId !== 'default-assistant') {
-      customSystemPrompt = activeMode.systemPrompt[promptLanguage];
     }
+    // Le texte du mode ne part jamais d'ici : seul son identifiant, que le
+    // main relit dans la langue du tour (L04-9). La copie de `modeStore` n'est
+    // relue qu'à l'ouverture du sélecteur de modes : elle pouvait être le mode
+    // du projet précédent, ou une version antérieure de son fichier, et entrait
+    // alors dans le prompt sans passer par le garde des modes de projet.
     setChatSettings({
       modeId: modeIdForPrompt,
       customSystemPrompt,

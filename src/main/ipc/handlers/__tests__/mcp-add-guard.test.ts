@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import fs from 'fs/promises';
 import { readFileSync } from 'fs';
 import os from 'os';
@@ -9,8 +9,23 @@ import {
   appendMcpAudit,
   ALLOWED_BARE_COMMANDS,
 } from '../mcp-add-guard.js';
+import { loadMenuTranslations, setLanguage } from '../../../i18n.js';
 
 const LOCALES = path.resolve(__dirname, '../../../../../public/locales');
+
+function menuText(lang: string, key: string): string {
+  return (JSON.parse(readFileSync(path.join(LOCALES, lang, 'menu.json'), 'utf8')) as Record<string, string>)[key];
+}
+
+// Les vrais textes de `menu.json` : seul le dossier de l'app est simulé.
+vi.mock('electron', () => ({
+  app: { isPackaged: false, getAppPath: () => path.resolve(__dirname, '../../../../..') },
+}));
+
+beforeAll(() => {
+  loadMenuTranslations();
+  setLanguage('en');
+});
 
 describe('validateMcpAddRequest — command whitelist', () => {
   it('accepts whitelisted bare interpreters', () => {
@@ -82,13 +97,28 @@ describe('validateMcpAddRequest — command whitelist', () => {
     if (!r.ok) expect(r.reason).toMatch(/^env_value_control_chars:/);
   });
 
-  it('passes through sse requests (no command to validate)', () => {
+  it('accepts an http(s) sse url (no command to validate)', () => {
     const r = validateMcpAddRequest({
       name: 'remote',
       transport: 'sse',
       url: 'https://example.com/mcp',
     });
     expect(r).toEqual({ ok: true });
+    expect(
+      validateMcpAddRequest({ name: 'local', transport: 'sse', url: 'http://127.0.0.1:9/sse' })
+    ).toEqual({ ok: true });
+  });
+
+  // S09-2-3 : l'URL d'un serveur SSE n'était pas regardée. Ce n'est pas l'adresse d'un serveur.
+  it('rejects an sse url that is not http(s), or missing', () => {
+    for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'ftp://example.com/sse', 'pas une url']) {
+      const r = validateMcpAddRequest({ name: 'remote', transport: 'sse', url });
+      expect(r, url).toEqual({ ok: false, reason: 'sse_url_invalid' });
+    }
+    expect(validateMcpAddRequest({ name: 'remote', transport: 'sse' })).toEqual({
+      ok: false,
+      reason: 'sse_url_invalid',
+    });
   });
 });
 
@@ -155,6 +185,133 @@ describe('confirmMcpAdd — native dialog gate', () => {
     const detail = showMessageBox.mock.calls[0][1].detail as string;
     expect(detail).not.toMatch(/project load/i);
     expect(detail).toMatch(/\bnow\b/);
+  });
+
+  // S09-2-3 : un serveur SSE passait sans dialogue, au motif qu'il ne lance aucun processus. Mais
+  // les arguments des appels d'outils partent vers son adresse.
+  it('asks for an sse server too, shows its url, and returns false on cancel', async () => {
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+    const ok = await confirmMcpAdd(
+      { name: 'archives', transport: 'sse', url: 'https://collecte.example/sse' },
+      { dialog: { showMessageBox } }
+    );
+    expect(ok).toBe(false);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
+    const opts = showMessageBox.mock.calls[0][1];
+    expect(opts.detail).toContain('https://collecte.example/sse');
+    // Ce qui part : les arguments des appels d'outils, même avec un modèle local.
+    expect(opts.detail).toMatch(/arguments/i);
+    expect(opts.defaultId).toBe(0);
+    expect(opts.cancelId).toBe(0);
+  });
+
+  // S09-1-22 : une variable qui redirige la commande (PATH, registre de paquets) n'était montrée
+  // que par son nom. La valeur d'une clé d'API reste masquée.
+  it('shows the value of the env keys that redirect the command, never that of an API key', async () => {
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+    await confirmMcpAdd(
+      {
+        name: 'europeana',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@cliodeck/mcp-europeana'],
+        env: {
+          PATH: '/Users/x/piege/bin',
+          NPM_CONFIG_REGISTRY: 'https://registre-hostile.example/',
+          PIP_INDEX_URL: 'https://pip.example/simple',
+          UV_DEFAULT_INDEX: 'https://uv.example/simple',
+          YARN_REGISTRY: 'https://yarn.example/',
+          EUROPEANA_API_KEY: 'cle-secrete',
+        },
+      },
+      { dialog: { showMessageBox } }
+    );
+    const detail = showMessageBox.mock.calls[0][1].detail as string;
+    expect(detail).toContain('PATH=/Users/x/piege/bin');
+    expect(detail).toContain('NPM_CONFIG_REGISTRY=https://registre-hostile.example/');
+    expect(detail).toContain('PIP_INDEX_URL=https://pip.example/simple');
+    expect(detail).toContain('UV_DEFAULT_INDEX=https://uv.example/simple');
+    expect(detail).toContain('YARN_REGISTRY=https://yarn.example/');
+    expect(detail).toContain('EUROPEANA_API_KEY');
+    expect(detail).not.toContain('cle-secrete');
+  });
+
+  // Revue de L04-9 : HOME, XDG_CONFIG_HOME, APPDATA, USERPROFILE redirigent la commande par les
+  // fichiers de configuration qu'ils désignent (~/.npmrc, pip.conf, uv.toml) : leur nom seul ne
+  // permettait pas de juger. Toute valeur qui n'est pas un secret se montre.
+  it('shows the value of every non-sensitive key, and warns about HOME and its kin', async () => {
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+    await confirmMcpAdd(
+      {
+        name: 'europeana',
+        transport: 'stdio',
+        command: 'npx',
+        env: {
+          HOME: '/Users/x/Projet recu/.home',
+          XDG_CONFIG_HOME: '/Users/x/Projet recu/.config',
+          APPDATA: 'C:\\Recu\\AppData',
+          LOCALAPPDATA: 'C:\\Recu\\Local',
+          USERPROFILE: 'C:\\Recu',
+          EUROPEANA_LANG: 'fr',
+        },
+      },
+      { dialog: { showMessageBox } }
+    );
+    const detail = showMessageBox.mock.calls[0][1].detail as string;
+    expect(detail).toContain('HOME=/Users/x/Projet recu/.home');
+    expect(detail).toContain('XDG_CONFIG_HOME=/Users/x/Projet recu/.config');
+    expect(detail).toContain('APPDATA=C:\\Recu\\AppData');
+    expect(detail).toContain('LOCALAPPDATA=C:\\Recu\\Local');
+    expect(detail).toContain('USERPROFILE=C:\\Recu');
+    expect(detail).toContain('EUROPEANA_LANG=fr');
+    // L'avertissement nomme les variables qui redirigent la commande, pas les autres.
+    const warning = detail.split('\n').find((line) => line.includes('APPDATA') && !line.includes('='));
+    expect(warning).toBeDefined();
+    for (const key of ['HOME', 'XDG_CONFIG_HOME', 'LOCALAPPDATA', 'USERPROFILE']) expect(warning).toContain(key);
+    expect(warning).not.toContain('EUROPEANA_LANG');
+  });
+
+  it('never shows the value of a sensitive key, even one that redirects the command', async () => {
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+    await confirmMcpAdd(
+      {
+        name: 'europeana',
+        transport: 'stdio',
+        command: 'uvx',
+        env: {
+          UV_INDEX_PRIVATE_PASSWORD: 's3cret-uv',
+          NPM_CONFIG__AUTH_TOKEN: 'npm-tok',
+          EUROPEANA_API_KEY: '__cliodeck_secret__',
+        },
+      },
+      { dialog: { showMessageBox } }
+    );
+    const detail = showMessageBox.mock.calls[0][1].detail as string;
+    for (const key of ['UV_INDEX_PRIVATE_PASSWORD', 'NPM_CONFIG__AUTH_TOKEN', 'EUROPEANA_API_KEY']) {
+      expect(detail).toContain(key);
+    }
+    expect(detail).not.toContain('s3cret-uv');
+    expect(detail).not.toContain('npm-tok');
+    expect(detail).not.toContain('__cliodeck_secret__');
+    // Aucune valeur montrée : pas d'avertissement qui demande de les vérifier.
+    expect(detail).not.toContain(menuText('en', 'mcpConfirmEnvRedirect').split('{{')[0]);
+  });
+
+  // Le dialogue était en anglais quelle que soit la langue de l'app.
+  it('speaks the language of the app', async () => {
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
+    setLanguage('fr');
+    try {
+      await confirmMcpAdd(
+        { name: 'fs', transport: 'stdio', command: 'npx' },
+        { dialog: { showMessageBox } }
+      );
+    } finally {
+      setLanguage('en');
+    }
+    const opts = showMessageBox.mock.calls[0][1];
+    expect(opts.buttons[0]).toBe('Annuler');
+    expect(opts.message).toContain('« fs »');
   });
 });
 

@@ -61,7 +61,7 @@ import { stripChunkHeader } from '../../../backend/core/chunking/chunk-text.js';
 import { historyService } from './history-service.js';
 import type { HistoryManager } from '../../../backend/core/history/HistoryManager.js';
 import { runWithJournalContext } from '../../../backend/core/usage-journal/context.js';
-import { inspectToolResult } from './mcp-tool-guard.js';
+import { inspectToolDescription, inspectToolResult, inspectToolSchema } from './mcp-tool-guard.js';
 import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
 import {
@@ -253,7 +253,7 @@ import {
   loadWorkspaceHints,
   prependAsSystemMessage,
 } from '../../../backend/core/hints/loader.js';
-import { guardWorkspaceHints } from './hints-guard.js';
+import { guardProjectModePrompt, guardWorkspaceHints } from './hints-guard.js';
 import { createInactivityWatchdog } from './inactivity-watchdog.js';
 import { operations, type CancellableOperation } from './cancellable-operation.js';
 import {
@@ -320,7 +320,11 @@ export function resolvePromptLanguage(
 export interface FusionChatSystemPromptOptions {
   /** Mode id — resolved to text via `modeService.getModeManager()`. */
   modeId?: string;
-  /** Free-form override; takes precedence over the resolved mode text. */
+  /**
+   * The prompt the author typed in the chat panel; takes precedence over the
+   * resolved mode text. Never the mode's own text: the renderer sends its id
+   * (L04-9), and the text of a project mode goes through the guard here.
+   */
   customText?: string;
   /**
    * Langue des consignes que l'application écrit elle-même : texte du mode
@@ -590,6 +594,9 @@ export function summarizeOptionsFor(turnOpts: TurnOptions): CompleteOptions {
     think: false,
   };
 }
+
+/** Le mode intégré par défaut : celui qu'affiche le sélecteur quand le mode actif est introuvable. */
+const DEFAULT_MODE_ID = 'default-assistant';
 
 export function isFreeMode(sp: FusionChatSystemPromptOptions | undefined): boolean {
   if (!sp) return false;
@@ -954,18 +961,25 @@ class FusionChatService {
       ? new Set(args.enabledTools)
       : null;
     if (llm.capabilities.tools) {
+      const inspectorMode = retrievalService.getInspectorMode();
       for (const client of mcpClientsService.list()) {
         if (client.state !== 'ready') continue;
         for (const t of client.tools) {
           const namespaced = `${client.name}__${t.name}`;
           if (enabledToolFilter && !enabledToolFilter.has(namespaced)) continue;
+          // La description et le schéma d'entrée viennent du serveur tiers et entrent dans le
+          // prompt : bornés et inspectés comme ses résultats (S09-2-3). Bloqué, l'outil n'est pas
+          // proposé au modèle.
+          const guardOpts = { toolName: namespaced, mode: inspectorMode, onEvent: emitSecurityEvent };
+          const description = inspectToolDescription(t.description ?? '', guardOpts);
+          if (description === null) continue;
+          const parameters = inspectToolSchema(t.inputSchema, guardOpts);
+          if (parameters === null) continue;
           toolScope.set(namespaced, client.name);
           tools.push({
             name: namespaced,
-            description: `[${client.name}] ${t.description ?? ''}`.trim(),
-            parameters:
-              (t.inputSchema as Record<string, unknown>) ??
-              ({ type: 'object', properties: {} } as Record<string, unknown>),
+            description: `[${client.name}] ${description}`.trim(),
+            parameters,
           });
         }
       }
@@ -1338,9 +1352,13 @@ class FusionChatService {
 
     // --- System-prompt composition ----------------------------------------
     // Precedence (legacy parity):
-    //   1. explicit customText (UI `useCustomSystemPrompt` + `customSystemPrompt`)
-    //   2. resolved mode text (modeId → ResolvedMode.systemPrompt.fr by default)
-    //   3. nothing — fall back to whatever the provider / registry defaults do
+    //   1. explicit customText: the prompt the author typed in the chat panel
+    //      (`useCustomSystemPrompt` + `customSystemPrompt`), never inspected;
+    //   2. the mode's text, resolved HERE from `modeId` in the turn's language;
+    //   3. nothing — fall back to whatever the provider / registry defaults do.
+    // The renderer sends the mode's id, never its text (L04-9): its copy of the
+    // active mode is only reloaded when the mode selector opens, so it could be
+    // the mode of the previous project, or an older version of the file.
     // `.cliohints` were already prepended above and sit *below* the system
     // override inside the message list.
     let resolvedSystemText: string | undefined;
@@ -1355,16 +1373,30 @@ class FusionChatService {
       resolvedSystemText = args.systemPrompt?.customText;
       if (!resolvedSystemText && args.systemPrompt?.modeId) {
         try {
-          const mode = await modeService
-            .getModeManager()
-            .getMode(args.systemPrompt.modeId);
-          // Le mode par défaut arrive sans `customText` : c'est ici que sa
-          // langue se décide. `.fr` en dur rendait le sélecteur de langue
-          // du panneau inerte pour ce mode.
-          resolvedSystemText =
+          // Un identifiant inconnu du projet (mode du projet précédent, mode de projet ou global
+          // disparu : `activeModeId` est persisté) retombe sur le mode par défaut. C'est celui que
+          // le sélecteur affiche alors (`modes[0]` de `modeStore`), et dont le texte partait avant
+          // L04-9 (seconde revue). Il peut venir du projet : il passe aussi par le garde.
+          const modeManager = modeService.getModeManager();
+          const mode =
+            (await modeManager.getMode(args.systemPrompt.modeId)) ??
+            (await modeManager.getMode(DEFAULT_MODE_ID));
+          // La langue du mode se décide ici : `.fr` en dur rendait le
+          // sélecteur de langue du panneau inerte.
+          const modeText =
             mode?.systemPrompt?.[promptLang] ||
             mode?.systemPrompt?.fr ||
             mode?.systemPrompt?.en;
+          // Le texte d'un mode de projet voyage avec le dossier et remplace, à identifiant égal, un
+          // mode intégré : il passe par le garde du contexte du projet (S06-1-7). Bloqué, aucun
+          // texte de mode n'est injecté. Un mode intégré ou global passe tel quel.
+          resolvedSystemText =
+            mode && modeText
+              ? guardProjectModePrompt(modeText, mode, {
+                  mode: retrievalService.getInspectorMode(),
+                  onEvent: emitSecurityEvent,
+                })
+              : modeText;
         } catch (e) {
           console.warn('[fusion-chat] mode resolution failed:', e);
         }
