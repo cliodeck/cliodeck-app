@@ -31,7 +31,7 @@ import {
   launchCommand,
   mcpServerName,
   resolveServerName,
-  mergeServerEntry,
+  installClaudeDesktopEntry,
   type ClaudeDesktopPlatform,
 } from '../../../../backend/mcp-server/client-install.js';
 import { configManager } from '../../services/config-manager.js';
@@ -816,8 +816,8 @@ export function setupFusionHandlers(): void {
    *
    * Le fichier appartient à Claude Desktop et contient déjà les serveurs de
    * l'utilisateur : on fusionne, on ne remplace jamais, et on dépose une
-   * copie `.bak` avant d'écrire. Action explicite seulement — jamais au
-   * démarrage.
+   * copie horodatée avant d'écrire (`installClaudeDesktopEntry`). Action
+   * explicite seulement — jamais au démarrage.
    */
   ipcMain.handle('fusion:mcpServer:configureClaudeDesktop', async () => {
     const root = projectManager.getCurrentProjectPath();
@@ -849,34 +849,17 @@ export function setupFusionHandlers(): void {
       const block = (cfg.mcpServer as { serverName?: unknown } | undefined) ?? {};
       const serverName = resolveServerName(block.serverName, root);
 
-      let existing: Record<string, unknown> | null = null;
-      if (fsSync.existsSync(target)) {
-        const raw = await fs.readFile(target, 'utf8');
-        try {
-          existing = JSON.parse(raw) as Record<string, unknown>;
-        } catch {
-          // Un fichier illisible ne doit pas être écrasé en silence : on
-          // s'arrête et l'utilisateur décide.
-          return errorResponse(
-            new Error(`${target} n'est pas un JSON valide ; corrigez-le avant de continuer.`)
-          );
-        }
-        await fs.copyFile(target, `${target}.bak`);
-      } else {
-        await fs.mkdir(path.dirname(target), { recursive: true });
-      }
-
-      const { config, status } = mergeServerEntry(existing, serverName, {
+      // Un fichier illisible n'est jamais écrasé : l'erreur le nomme, et l'utilisateur décide.
+      const { status, backupPath } = await installClaudeDesktopEntry(target, serverName, {
         command,
         args: [root],
       });
-      await fs.writeFile(target, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 
       return successResponse({
         path: target,
         serverName,
         status,
-        backedUp: existing !== null,
+        backedUp: backupPath !== null,
         claudeCodeCommand: claudeCodeCommand(serverName, { command, args: [root] }, platform),
       });
     } catch (e) {

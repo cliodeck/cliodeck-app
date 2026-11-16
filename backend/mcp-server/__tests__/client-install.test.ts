@@ -7,11 +7,15 @@
  * où il n'existe pas.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'child_process';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import os from 'os';
+import path from 'path';
 import {
   claudeDesktopConfigPath,
   claudeCodeCommand,
+  installClaudeDesktopEntry,
   launchCommand,
   mcpServerName,
   mergeServerEntry,
@@ -99,6 +103,147 @@ describe('mergeServerEntry — même serveur sous un ancien nom', () => {
     const autre = { command: entry.command, args: ['/Users/h/These'] };
     const { config } = mergeServerEntry({ mcpServers: { These: autre } }, 'ARTICLE_Building-our-forge', entry);
     expect((config.mcpServers as Record<string, unknown>).These).toEqual(autre);
+  });
+});
+
+/**
+ * L'interface demande d'ajouter `EUROPEANA_API_KEY` dans l'entrée du projet (`mcpHint`) : c'est le
+ * seul endroit où Claude Desktop la lit. Reconfigurer remplaçait l'entrée par `{ command, args }`
+ * et l'effaçait (S10-1-36).
+ */
+describe('mergeServerEntry — ce que l’utilisateur a ajouté à l’entrée reste', () => {
+  const entry = { command: '/Applications/ClioDeck.app/Contents/Resources/bin/cliodeck-mcp', args: ['/Users/h/These'] };
+  const env = { EUROPEANA_API_KEY: 'cle-test-A' };
+
+  it('même commande, même projet : rien ne change, env compris', () => {
+    const existing = { mcpServers: { These: { ...entry, env } } };
+    const { config, status } = mergeServerEntry(existing, 'These', entry);
+
+    expect(status).toBe('unchanged');
+    expect((config.mcpServers as Record<string, unknown>).These).toEqual({ ...entry, env });
+  });
+
+  it('projet déplacé : l’entrée est remplacée, son env reste', () => {
+    const existing = { mcpServers: { These: { command: entry.command, args: ['/Volumes/Ancien/These'], env } } };
+    const { config, status } = mergeServerEntry(existing, 'These', entry);
+
+    expect(status).toBe('replaced');
+    expect((config.mcpServers as Record<string, unknown>).These).toEqual({ ...entry, env });
+  });
+
+  it('jumeau sous un autre nom : retiré, et son env passe à l’entrée du projet', () => {
+    const existing = {
+      mcpServers: { 'These (ancien nom)': { ...entry, env }, jdh: { command: 'node', args: ['x.js'] } },
+    };
+    const { config, status } = mergeServerEntry(existing, 'These', entry);
+
+    expect(status).toBe('replaced');
+    expect(config.mcpServers).toEqual({ jdh: { command: 'node', args: ['x.js'] }, These: { ...entry, env } });
+  });
+});
+
+/**
+ * L'écriture de `claude_desktop_config.json` : le fichier d'une autre application, où l'utilisateur
+ * a ses propres serveurs. La copie `.bak` était réécrite à chaque clic, même sans changement : au
+ * deuxième clic, la version qui portait la clé était perdue (S10-1-36).
+ */
+describe('installClaudeDesktopEntry', () => {
+  const entry = { command: '/Applications/ClioDeck.app/Contents/Resources/bin/cliodeck-mcp', args: ['/Users/h/These'] };
+  let dir: string;
+  let target: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'cliodeck-claude-desktop-'));
+    target = path.join(dir, 'Claude', 'claude_desktop_config.json');
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const backups = (): string[] =>
+    readdirSync(path.dirname(target))
+      .filter((f) => f !== path.basename(target))
+      .sort();
+
+  it('deux écritures qui changent l’entrée : deux copies distinctes, la première garde la clé', async () => {
+    const first = { mcpServers: { These: { command: entry.command, args: ['/Volumes/A/These'], env: { EUROPEANA_API_KEY: 'cle-test-A' } } } };
+    mkdirSync(path.dirname(target), { recursive: true });
+    const original = `${JSON.stringify(first, null, 2)}\n`;
+    writeFileSync(target, original);
+
+    const r1 = await installClaudeDesktopEntry(target, 'These', { command: entry.command, args: ['/Volumes/B/These'] });
+    const r2 = await installClaudeDesktopEntry(target, 'These', entry);
+
+    expect(r1.status).toBe('replaced');
+    expect(r2.status).toBe('replaced');
+    const copies = backups();
+    expect(copies).toHaveLength(2);
+    expect(copies.every((f) => /^claude_desktop_config\.json\..+\.bak$/.test(f))).toBe(true);
+    // La copie d'avant le premier clic est intacte, octet pour octet, et lisible du seul utilisateur.
+    expect(copies.map((f) => readFileSync(path.join(path.dirname(target), f), 'utf8'))).toContain(original);
+    if (process.platform !== 'win32') {
+      expect(copies.map((f) => statSync(path.join(path.dirname(target), f)).mode & 0o777)).toEqual([0o600, 0o600]);
+    }
+    const written = JSON.parse(readFileSync(target, 'utf8')) as { mcpServers: Record<string, unknown> };
+    expect(written.mcpServers.These).toEqual({ ...entry, env: { EUROPEANA_API_KEY: 'cle-test-A' } });
+  });
+
+  it('sans changement : ni écriture, ni copie', async () => {
+    mkdirSync(path.dirname(target), { recursive: true });
+    const content = `${JSON.stringify({ mcpServers: { These: { ...entry, env: { EUROPEANA_API_KEY: 'cle-test-A' } } } }, null, 2)}\n`;
+    writeFileSync(target, content);
+    const before = statSync(target);
+
+    const result = await installClaudeDesktopEntry(target, 'These', entry);
+
+    expect(result).toEqual({ status: 'unchanged', backupPath: null });
+    expect(backups()).toEqual([]);
+    expect(readFileSync(target, 'utf8')).toBe(content);
+    expect(statSync(target).mtimeMs).toBe(before.mtimeMs);
+    expect(statSync(target).ino).toBe(before.ino);
+  });
+
+  it('deux copies au même instant ne s’écrasent pas', async () => {
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, JSON.stringify({ mcpServers: { These: { command: entry.command, args: ['/A'] } } }));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-16T10:30:00.000Z'));
+    try {
+      const r1 = await installClaudeDesktopEntry(target, 'These', { command: entry.command, args: ['/B'] });
+      const r2 = await installClaudeDesktopEntry(target, 'These', { command: entry.command, args: ['/C'] });
+
+      expect(r1.backupPath).not.toBeNull();
+      expect(r2.backupPath).not.toBeNull();
+      expect(r1.backupPath).not.toBe(r2.backupPath);
+    } finally {
+      vi.useRealTimers();
+    }
+    const copies = backups().map((f) => JSON.parse(readFileSync(path.join(path.dirname(target), f), 'utf8')));
+    expect(copies.map((c) => c.mcpServers.These.args[0]).sort()).toEqual(['/A', '/B']);
+  });
+
+  it('fichier absent : dossier créé, entrée ajoutée, aucune copie', async () => {
+    const result = await installClaudeDesktopEntry(target, 'These', entry);
+
+    expect(result).toEqual({ status: 'added', backupPath: null });
+    expect(backups()).toEqual([]);
+    expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({ mcpServers: { These: entry } });
+  });
+
+  it.each([
+    ['JSON invalide', Buffer.from('{ "mcpServers": { , }')],
+    ['pas un objet', Buffer.from('[1, 2]')],
+    ['mcpServers qui n’est pas un objet', Buffer.from('{ "mcpServers": [{ "command": "node" }] }')],
+    ['pas en UTF-8', Buffer.from([0x7b, 0x22, 0xe9, 0x22, 0x3a, 0x31, 0x7d])],
+  ])('%s : refusé, fichier intact, aucune copie', async (_label, bytes) => {
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, bytes);
+
+    await expect(installClaudeDesktopEntry(target, 'These', entry)).rejects.toThrow(target);
+
+    expect(readFileSync(target).equals(bytes)).toBe(true);
+    expect(backups()).toEqual([]);
   });
 });
 
