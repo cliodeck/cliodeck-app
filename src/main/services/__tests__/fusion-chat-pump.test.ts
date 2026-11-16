@@ -115,6 +115,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createHash } from 'crypto';
 
 interface Sent { channel: string; payload: unknown }
 
@@ -1656,6 +1657,40 @@ describe('nom d’outil MCP envoyé au modèle (S09-1-23)', () => {
     // Le message rejoué au modèle porte le nom qu'il a lui-même employé.
     const replayed = bench.seenMessages[1]?.find((m) => m.role === 'assistant' && m.toolCalls?.length);
     expect(replayed?.toolCalls?.[0]?.name).toMatch(WIRE);
+  });
+
+  it('un nom brut valide égal au nom assaini d’un autre outil : deux noms envoyés, chaque appel chez son serveur (revue de l’orchestrateur)', async () => {
+    // « a b__x » s'assainit en `a_b__x_<6 hex du SHA-256 de « a b__x »>` : un serveur `a_b` dont
+    // l'outil s'appelle `x_<ces 6 hex>` a ce même nom, valide tel quel. Le service doit tenir la liste
+    // des noms déjà donnés dans le tour, sinon le second remplace le premier dans sa table.
+    const h = createHash('sha256').update('a b__x').digest('hex').slice(0, 6);
+    bench.tools = true;
+    vi.spyOn(mcpClientsService, 'list').mockReturnValue([
+      {
+        name: 'a b',
+        state: 'ready',
+        generation: 1,
+        tools: [{ name: 'x', description: 'premier', inputSchema: { type: 'object', properties: {} } }],
+      },
+      {
+        name: 'a_b',
+        state: 'ready',
+        generation: 1,
+        tools: [{ name: `x_${h}`, description: 'deuxième', inputSchema: { type: 'object', properties: {} } }],
+      },
+    ]);
+    const callTool = vi.spyOn(mcpClientsService, 'callTool').mockResolvedValue({ ok: true, result: 'ok' });
+    cloudModelCalls('premier');
+
+    const sent = startWithTools(['a b__x', `a_b__x_${h}`]);
+    await vi.waitFor(() => expect(terminal(sent)).toBeDefined(), WAIT);
+
+    expect(terminal(sent)?.error).toBeUndefined();
+    const names = (bench.seenOpts[0]?.tools ?? []).map((t) => t.name);
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    for (const n of names) expect(n).toMatch(WIRE);
+    expect(callTool).toHaveBeenCalledWith('a b', 'x', { q: 'Vichy' });
   });
 
   it('security-events.jsonl : description, schéma et résultat de `a.b` sont signalés sous le nom brut, jamais sous le nom envoyé', async () => {
