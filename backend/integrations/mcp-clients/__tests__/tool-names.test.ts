@@ -77,6 +77,13 @@ describe('buildWireToolName — le nom d’outil MCP envoyé au modèle', () => 
     for (const wire of [client, both, other]) expect(wire).toMatch(WIRE);
     expect(client).toContain('__search');
     expect(new Set([client, both, other]).size).toBe(3);
+    // Les deux moitiés prennent leur repli, le séparateur reste lisible (revue de l'orchestrateur).
+    expect(both).toMatch(/^mcp__tool_[0-9a-f]{6}$/);
+  });
+
+  it('les `_` répétés se réduisent : le séparateur `__` reste le seul double', () => {
+    const wire = buildWireToolName('Archives  _ BnF', 'a.._b', none);
+    expect(wire).toMatch(/^Archives_BnF__a_b_[0-9a-f]{6}$/);
   });
 
   it('dernier recours : un nom déjà pris est remplacé par un nom libre, valide', () => {
