@@ -200,7 +200,8 @@ export class MCPClientManager {
    * avant la fermeture, l'événement final part après : qui relit la liste à cet événement ne le
    * voit plus. Il part même pour un client déjà arrêté, car la barre d'état ne relit qu'à un
    * `state_changed`. Un crash ou une reprise tardifs de l'ancien slot ne touchent pas un client
-   * réinscrit sous le même nom.
+   * réinscrit sous le même nom : `stopRequested` posé et le handle détaché ici les arrêtent, et rien
+   * ne lève plus ce drapeau, puisque `start()` ne retrouve plus ce slot par son nom.
    */
   async unregister(name: string): Promise<void> {
     const slot = this.slots.get(name);
@@ -372,7 +373,12 @@ export class MCPClientManager {
     }, this.retryDelayMs);
   }
 
-  /** Ce slot est-il toujours celui de son nom ? Faux une fois retiré, même si le nom a été réinscrit. */
+  /**
+   * Ce slot est-il toujours celui de son nom ? Faux une fois retiré, même si le nom a été réinscrit.
+   * Garde défensif, dans `onCrash` et la reprise programmée : aujourd'hui, `stopRequested` et le
+   * handle détaché par `unregister` arrêtent déjà tout slot retiré, et aucun test ne peut le faire agir
+   * seul. Il ne sert que si `unregister` change un jour.
+   */
   private isCurrent(slot: Slot): boolean {
     return this.slots.get(slot.cfg.name) === slot;
   }

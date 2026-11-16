@@ -509,6 +509,10 @@ describe('MCPClientManager : arrêté veut dire arrêté, un seul handle par cli
  * Retirer un client libère son nom (S09-1-3) : le manager n'avait pas de `unregister`, le slot
  * d'un client supprimé restait inscrit, arrêté, et le réajouter sous le même nom levait « already
  * registered », alors que config.json avait déjà été réécrit.
+ *
+ * Les tests de crash et de reprise tardifs prouvent un comportement que `stopRequested` et le handle
+ * détaché par `unregister` assurent. Le garde d'identité du slot (`isCurrent`) est défensif : ils
+ * passent sans lui.
  */
 describe('MCPClientManager.unregister : le nom redevient libre', () => {
   afterEach(() => {

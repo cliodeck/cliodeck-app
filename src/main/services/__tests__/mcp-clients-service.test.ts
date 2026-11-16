@@ -635,6 +635,72 @@ describe('clés des serveurs MCP : une portée par projet (S09-1-6)', () => {
     }
   );
 
+  /**
+   * Projet qui a déjà sa portée (L08-8, revue) : `discardUnsavedScope` ne vaut que pour une portée née
+   * dans l'écriture, et la clé rangée sous une portée enregistrée restait dans le coffre, sans entrée
+   * dans config.json. Le client `europeana`, déclaré, a la sienne, qui doit rester.
+   */
+  describe('ajout qui n’est pas écrit, sur un projet qui a déjà sa portée', () => {
+    const SCOPE = '11111111-2222-3333-4444-555555555555';
+    const EUROPEANA_KEY = `mcp.project.${SCOPE}.client.europeana.env.EUROPEANA_API_KEY`;
+
+    async function projectWithScope(): Promise<string> {
+      const root = await makeProject([]);
+      writeFileSync(
+        configOf(root),
+        JSON.stringify(
+          { schema_version: 2, name: 'p', secrets_scope: SCOPE, mcpClients: [europeana(SECRET_SENTINEL)] },
+          null,
+          2
+        )
+      );
+      secrets.set(EUROPEANA_KEY, 'cle-test-A');
+      await mcpClientsService.loadProject(root);
+      return root;
+    }
+
+    it.skipIf(process.getuid?.() === 0)(
+      'écriture qui échoue : la clé rangée par cette tentative est retirée, celle du client déclaré reste',
+      async () => {
+        const rootA = await projectWithScope();
+        const before = readFileSync(configOf(rootA), 'utf8');
+        chmodSync(configOf(rootA), 0o444);
+
+        await expect(
+          mcpClientsService.addClient({
+            name: 'gallica',
+            transport: 'stdio',
+            command: '/nonexistent/gallica-mcp',
+            env: { GALLICA_API_KEY: 'cle-test-G' },
+          })
+        ).rejects.toMatchObject({ code: 'EACCES' });
+
+        expect(readFileSync(configOf(rootA), 'utf8')).toBe(before);
+        expect([...secrets.entries()]).toEqual([[EUROPEANA_KEY, 'cle-test-A']]);
+      }
+    );
+
+    it('stdio sans commande : refusé, aucune clé gardée sous la portée du projet', async () => {
+      const rootA = await projectWithScope();
+      const before = readFileSync(configOf(rootA), 'utf8');
+
+      await expect(
+        mcpClientsService.addClient({ name: 'gallica', transport: 'stdio', env: { GALLICA_API_KEY: 'cle-test-G' } })
+      ).rejects.toThrow(/requires a command/);
+
+      expect(readFileSync(configOf(rootA), 'utf8')).toBe(before);
+      expect([...secrets.entries()]).toEqual([[EUROPEANA_KEY, 'cle-test-A']]);
+    });
+
+    it('nom déjà déclaré : refusé, la clé du client déclaré n’est ni remplacée ni retirée', async () => {
+      await projectWithScope();
+
+      await expect(mcpClientsService.addClient(europeana('autre-cle'))).rejects.toThrow(/already exists/);
+
+      expect([...secrets.entries()]).toEqual([[EUROPEANA_KEY, 'cle-test-A']]);
+    });
+  });
+
   it('aucune clé déclarée : ni portée ni écriture', async () => {
     const rootA = await makeProject([{ name: 'local', transport: 'stdio', command: '/nonexistent/x', env: { LANG: 'fr' } }]);
     const before = readFileSync(configOf(rootA), 'utf8');

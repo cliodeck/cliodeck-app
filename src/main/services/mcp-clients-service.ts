@@ -307,8 +307,9 @@ class MCPClientsService {
     if (!root || !manager) {
       throw new Error('No project loaded');
     }
-    // La portée née dans cette écriture, si elle échoue : ce qui a été rangé dessous est retiré.
-    const unsaved: string[] = [];
+    // Les secrets que cette tentative range, et sous quelle portée : si config.json ne s'écrit pas,
+    // rien ne les nomme, et ils sont retirés.
+    const stored: Array<{ scope: string; scopeCreated: boolean }> = [];
     // Ce que le manager inscrira, établi dans l'écriture : tout ce qui ferait lever register() est
     // refusé avant que config.json change (S09-1-3), et aucun slot n'existe tant qu'il n'est pas écrit.
     let registration: ManagerClientConfig | undefined;
@@ -329,9 +330,11 @@ class MCPClientsService {
         // persisted plain values; this catches new ones at the door.
         // Sous la portée du projet, créée dans cette écriture s'il n'en a pas (S09-1-6).
         if (clientHasSecrets(client)) {
-          const created = secretsScopeOf(cfg) === null;
+          const scopeCreated = secretsScopeOf(cfg) === null;
           const scope = ensureSecretsScope(cfg);
-          if (created) unsaved.push(scope);
+          // Noté après les deux refus, jamais pour eux : la clé d'un client déclaré du même nom n'est
+          // pas à cette tentative. Avant de ranger : un rangement interrompu se retire aussi.
+          stored.push({ scope, scopeCreated });
           migrateClientEnvSecrets(scope, client);
         }
         // Lève pour un stdio sans commande ou un SSE sans adresse : rien n'est écrit.
@@ -339,7 +342,20 @@ class MCPClientsService {
         cfg.mcpClients = [...existing, client];
       });
     } catch (e) {
-      for (const lost of unsaved) discardUnsavedScope(lost, [client]);
+      for (const { scope, scopeCreated } of stored) {
+        if (scopeCreated) {
+          discardUnsavedScope(scope, [client]);
+          continue;
+        }
+        // Portée déjà enregistrée : les secrets des autres clients servent, seuls ceux de ce nom
+        // partent. Le nom est libre dans config.json (refus « already exists » plus haut) : rien
+        // ne les relit.
+        try {
+          deleteClientEnvSecrets(scope, client);
+        } catch (err) {
+          console.warn('[mcp-clients] secrets d’un ajout non écrit impossibles à retirer:', err);
+        }
+      }
       throw e;
     }
     // Écrit : l'ajout est fait, dans le config.json de CE projet. Si un autre projet s'est ouvert
