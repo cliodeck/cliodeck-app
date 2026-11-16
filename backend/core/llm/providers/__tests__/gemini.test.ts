@@ -247,6 +247,72 @@ describe('GeminiProvider — signatures de pensée des appels d’outils', () =>
 });
 
 /**
+ * `functionResponse.response` et `functionCall.args` sont des `Struct` : un objet JSON, rien d'autre.
+ * Un résultat d'outil tronqué devenait une chaîne JSON, que l'adaptateur reparsait en chaîne et
+ * envoyait telle quelle ; un tableau passait de même (S05-1-26). L'historique peut venir d'ailleurs que
+ * du moteur : les arguments rejoués sont gardés ici aussi.
+ *
+ * Le corps est lu sur un `fetch` simulé : rien ne part vers Google.
+ */
+describe('GeminiProvider — réponse et arguments d’outil toujours en objet', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  type Part = {
+    functionCall?: { name: string; args: unknown };
+    functionResponse?: { name: string; response: unknown };
+  };
+
+  /** Le corps envoyé pour un historique [question, appel d'outil, réponse de l'outil]. */
+  async function sentParts(toolArguments: string, toolContent: string): Promise<Part[]> {
+    const bodies: Array<{ contents: Array<{ parts: Part[] }> }> = [];
+    vi.stubGlobal('fetch', async (_input: string | URL, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      const sse = `data: ${JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
+      })}\n\n`;
+      return new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+    });
+    const provider = new GeminiProvider({ apiKey: 'test-key', model: 'gemini-2.5-flash', baseUrl: 'http://mock.gemini/v1beta' });
+    for await (const _chunk of provider.chat([
+      { role: 'user', content: 'Qui était le préfet de police en 1934 ?' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'zotero__search', arguments: toolArguments }] },
+      { role: 'tool', toolCallId: 'c1', content: toolContent },
+    ])) {
+      // le flux est consommé pour que la requête parte
+    }
+    expect(bodies).toHaveLength(1);
+    return bodies[0].contents.flatMap((c) => c.parts);
+  }
+
+  const responseOf = (parts: Part[]) => parts.find((p) => p.functionResponse)?.functionResponse?.response;
+  const argsOf = (parts: Part[]) => parts.find((p) => p.functionCall)?.functionCall?.args;
+
+  it.each<[string, string, unknown]>([
+    ['une chaîne JSON', JSON.stringify('x'), { result: 'x' }],
+    ['un tableau', '[1,2]', { result: [1, 2] }],
+    ['un nombre', '42', { result: 42 }],
+    ['null', 'null', { result: null }],
+    ['du texte', 'Jean Chiappe', { result: 'Jean Chiappe' }],
+  ])('un résultat d’outil qui n’est pas un objet (%s) part enveloppé', async (_cas, content, expected) => {
+    expect(responseOf(await sentParts('{"q":"Chiappe"}', content))).toEqual(expected);
+  });
+
+  it('témoin : un objet JSON part tel quel', async () => {
+    expect(responseOf(await sentParts('{"q":"Chiappe"}', '{"hits":[]}'))).toEqual({ hits: [] });
+  });
+
+  it.each(['[1]', '"Chiappe"', 'null', '{"q": "Chiap'])('des arguments rejoués qui ne sont pas un objet (%s) partent en {}', async (args) => {
+    expect(argsOf(await sentParts(args, '{"hits":[]}'))).toEqual({});
+  });
+
+  it('témoin : des arguments en objet sont rejoués tels quels', async () => {
+    expect(argsOf(await sentParts('{"q":"Chiappe"}', '{"hits":[]}'))).toEqual({ q: 'Chiappe' });
+  });
+});
+
+/**
  * Les modèles Gemini qui réfléchissent (2.5, 3, 4) comptent leurs jetons de pensée dans
  * `maxOutputTokens` (« including thought tokens »), et à la limite pendant la réflexion rendent
  * « truncated or empty output » avec `MAX_TOKENS` (page « Thinking », lue le 2026-11-13). Une étape

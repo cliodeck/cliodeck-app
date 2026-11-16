@@ -113,6 +113,14 @@ function now(): string {
 }
 
 /**
+ * `functionResponse.response` et `functionCall.args` sont des `Struct` protobuf : un objet JSON, pas
+ * une chaîne, un nombre, un tableau ni `null` (S05-1-26).
+ */
+function isStruct(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
  * Map ChatMessage[] to Gemini's contents + systemInstruction. Gemini accepts
  * exactly one systemInstruction; multiple system turns are concatenated.
  * Consecutive same-role messages are merged into a single content (Gemini
@@ -153,14 +161,16 @@ function toGeminiPayload(
     if (m.role === 'tool') {
       const fnName = (m.toolCallId && idToName.get(m.toolCallId)) || m.name;
       if (!fnName) continue;
-      let parsed: Record<string, unknown> = {};
+      // Un résultat qui n'est pas un objet JSON (le texte d'un outil MCP, une chaîne, un tableau)
+      // part enveloppé : Gemini refuse une `response` qui n'est pas un objet.
+      let parsed: unknown;
       try {
         parsed = JSON.parse(m.content);
       } catch {
-        parsed = { result: m.content };
+        parsed = m.content;
       }
       pushPart('user', {
-        functionResponse: { name: fnName, response: parsed },
+        functionResponse: { name: fnName, response: isStruct(parsed) ? parsed : { result: parsed } },
       });
       continue;
     }
@@ -170,7 +180,8 @@ function toGeminiPayload(
       }
       for (const tc of m.toolCalls) {
         idToName.set(tc.id, tc.name);
-        let parsed: Record<string, unknown> = {};
+        // Le moteur rejoue `{}` pour des arguments invalides ; l'historique peut venir d'ailleurs.
+        let parsed: unknown = {};
         try {
           parsed = tc.arguments ? JSON.parse(tc.arguments) : {};
         } catch {
@@ -178,7 +189,7 @@ function toGeminiPayload(
         }
         const thoughtSignature = signatureFor(tc.id);
         pushPart('model', {
-          functionCall: { name: tc.name, args: parsed },
+          functionCall: { name: tc.name, args: isStruct(parsed) ? parsed : {} },
           ...(thoughtSignature ? { thoughtSignature } : {}),
         });
       }
