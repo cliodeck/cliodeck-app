@@ -19,7 +19,7 @@ import type {
   MCPToolDescriptor,
 } from './types.js';
 import type { MCPClientHandle, MCPClientFactory } from './manager.js';
-import { buildMCPSpawnEnv } from './env-filter.js';
+import { buildMCPSpawnEnv, mcpSpawnParentEnv } from './env-filter.js';
 
 const CLIENT_INFO = { name: 'cliodeck', version: '2.0.0' };
 
@@ -61,7 +61,9 @@ export const realMCPClientFactory: MCPClientFactory = (
         const stdio = new StdioClientTransport({
           command: cfg.config.command,
           args: cfg.config.args ?? [],
-          env: buildMCPSpawnEnv(cfg.config.env),
+          // PATH complété : depuis le Dock, celui de launchd ne trouve ni npx, ni node, ni uvx
+          // (S09-1-10). Un PATH déclaré par le client reste prioritaire.
+          env: buildMCPSpawnEnv(cfg.config.env, mcpSpawnParentEnv()),
           cwd: cfg.config.cwd,
         });
         stdio.onerror = (err: Error): void =>

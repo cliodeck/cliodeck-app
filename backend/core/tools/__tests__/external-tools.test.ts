@@ -38,9 +38,43 @@ describe('extendedToolPath', () => {
     expect(extendedToolPath('/opt/homebrew/bin:/usr/bin', 'darwin').split(':').filter((p) => p === '/opt/homebrew/bin')).toHaveLength(1);
   });
 
-  it('accepte un PATH vide', () => {
+  // Une entrée vide (`…:/opt/local/bin:`) ferait chercher la commande dans le dossier courant.
+  it('accepte un PATH vide, sans y laisser d’entrée vide', () => {
     expect(extendedToolPath('', 'win32')).toBe('');
-    expect(extendedToolPath('', 'darwin').startsWith('/opt/homebrew/bin:')).toBe(true);
+    expect(extendedToolPath('', 'darwin').split(':')).toEqual([
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/Library/TeX/texbin',
+      '/usr/texbin',
+      '/opt/local/bin',
+    ]);
+  });
+
+  it('compare élément par élément : `/usr/local/bin2` ne masque pas `/usr/local/bin`', () => {
+    expect(extendedToolPath('/usr/local/bin2:/usr/bin', 'darwin').split(':')).toContain('/usr/local/bin');
+  });
+
+  // Les serveurs MCP y ajoutent ceux de uv, Volta et nvm (S09-1-10).
+  it('ajoute les emplacements supplémentaires en tête, une seule fois', () => {
+    const extended = extendedToolPath('/Users/h/.volta/bin:/usr/bin', 'darwin', [
+      '/Users/h/.local/bin',
+      '/Users/h/.volta/bin',
+    ]);
+    expect(extended.split(':')).toEqual([
+      '/Users/h/.local/bin',
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/Library/TeX/texbin',
+      '/usr/texbin',
+      '/opt/local/bin',
+      '/Users/h/.volta/bin',
+      '/usr/bin',
+    ]);
+  });
+
+  it('sous Windows, ignore aussi les emplacements supplémentaires', () => {
+    const windowsPath = 'C:\\Windows\\system32';
+    expect(extendedToolPath(windowsPath, 'win32', ['/Users/h/.local/bin'])).toBe(windowsPath);
   });
 });
 

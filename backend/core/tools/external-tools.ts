@@ -33,14 +33,21 @@ export function toolFinderCommand(platform: NodeJS.Platform = process.platform):
   return platform === 'win32' ? 'where' : 'which';
 }
 
-/** Le PATH à donner aux outils d'export — inchangé sous Windows. */
+/**
+ * Le PATH à donner aux outils d'export — inchangé sous Windows. `extraDirs` passent en tête,
+ * devant Homebrew : les serveurs MCP y ajoutent ceux de uv, Volta et nvm (S09-1-10).
+ */
 export function extendedToolPath(
   currentPath: string,
   platform: NodeJS.Platform = process.platform,
+  extraDirs: readonly string[] = [],
 ): string {
   if (platform === 'win32') return currentPath;
-  const missing = UNIX_TOOL_PATHS.filter((p) => !currentPath.includes(p));
-  return [...missing, currentPath].join(delimiter);
+  // Élément par élément : une sous-chaîne (`/usr/local/bin2`) ne vaut pas présence.
+  const present = new Set(currentPath.split(delimiter));
+  const missing = [...new Set([...extraDirs, ...UNIX_TOOL_PATHS])].filter((p) => !present.has(p));
+  // Un PATH vide ne laisse pas d'entrée vide à la fin : elle vaudrait le dossier courant.
+  return [...missing, ...(currentPath ? [currentPath] : [])].join(delimiter);
 }
 
 export interface FindToolDeps {

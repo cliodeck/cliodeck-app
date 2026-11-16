@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildMCPSpawnEnv } from '../env-filter.js';
+import { buildMCPSpawnEnv, mcpSpawnParentEnv } from '../env-filter.js';
 
 describe('buildMCPSpawnEnv', () => {
   it('inherits whitelisted vars from parent', () => {
@@ -107,5 +107,92 @@ describe('buildMCPSpawnEnv', () => {
     });
     expect(env.PATH).toBe('/usr/bin');
     expect(env).not.toHaveProperty('HOME');
+  });
+});
+
+/**
+ * Lancée depuis le Dock ou le Finder, l'app reçoit le PATH de launchd : `npx`, `node` et `uvx`
+ * y échouaient en « spawn ENOENT » (S09-1-10).
+ */
+describe('mcpSpawnParentEnv : le PATH d’une app lancée depuis le Dock', () => {
+  const LAUNCHD_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
+  const NVM_VERSIONS = '/Users/h/.nvm/versions/node';
+  const noNvm = (dir: string): string[] => {
+    throw Object.assign(new Error(`ENOENT: no such file or directory, scandir '${dir}'`), { code: 'ENOENT' });
+  };
+  const darwin = { home: '/Users/h', platform: 'darwin' as const, readdir: noNvm };
+
+  it('ajoute Homebrew, /usr/local/bin, ~/.local/bin (uv) et Volta devant le PATH de launchd', () => {
+    const env = mcpSpawnParentEnv({ PATH: LAUNCHD_PATH, HOME: '/Users/h', LANG: 'fr_FR.UTF-8' }, darwin);
+    const dirs = (env.PATH ?? '').split(':');
+    expect(dirs).toEqual(
+      expect.arrayContaining(['/opt/homebrew/bin', '/usr/local/bin', '/Users/h/.local/bin', '/Users/h/.volta/bin'])
+    );
+    expect(env.PATH?.endsWith(`:${LAUNCHD_PATH}`)).toBe(true);
+    expect(env.HOME).toBe('/Users/h');
+    expect(env.LANG).toBe('fr_FR.UTF-8');
+  });
+
+  it('vaut aussi sous Linux : ~/.local/bin est celui de uv', () => {
+    const env = mcpSpawnParentEnv({ PATH: '/usr/bin:/bin' }, { ...darwin, home: '/home/h', platform: 'linux' });
+    expect((env.PATH ?? '').split(':')).toContain('/home/h/.local/bin');
+  });
+
+  it('sans nvm : aucun dossier nvm, aucune erreur, les autres emplacements quand même', () => {
+    const env = mcpSpawnParentEnv({ PATH: LAUNCHD_PATH }, darwin);
+    expect(env.PATH).not.toContain('.nvm');
+    expect((env.PATH ?? '').split(':')).toContain('/opt/homebrew/bin');
+  });
+
+  it('nvm : la version la plus haute, comparée par numéros et non par ordre alphabétique', () => {
+    const env = mcpSpawnParentEnv(
+      { PATH: LAUNCHD_PATH },
+      {
+        ...darwin,
+        readdir: (dir) => (dir === NVM_VERSIONS ? ['v9.11.2', 'v22.12.0', 'v18.20.4', 'v22.2.0', '.cache'] : noNvm(dir)),
+      }
+    );
+    const nvmDirs = (env.PATH ?? '').split(':').filter((d) => d.includes('.nvm'));
+    expect(nvmDirs).toEqual([`${NVM_VERSIONS}/v22.12.0/bin`]);
+  });
+
+  // Lancée d'un terminal après `nvm use 20`, l'app hérite de la version choisie : la plus haute
+  // ne doit pas passer devant elle.
+  it('nvm déjà dans le PATH hérité : la version choisie reste la seule, aucune autre devant elle', () => {
+    const v20 = `${NVM_VERSIONS}/v20.11.1/bin`;
+    const env = mcpSpawnParentEnv(
+      { PATH: `${v20}:/usr/bin:/bin` },
+      { ...darwin, readdir: (dir) => (dir === NVM_VERSIONS ? ['v20.11.1', 'v22.12.0'] : noNvm(dir)) }
+    );
+    const nvmDirs = (env.PATH ?? '').split(':').filter((d) => d.includes('.nvm'));
+    expect(nvmDirs).toEqual([v20]);
+  });
+
+  it('sous Windows, l’env part tel quel', () => {
+    const parent = { Path: 'C:\\Windows\\system32', USERPROFILE: 'C:\\Users\\h' };
+    const env = mcpSpawnParentEnv(parent, { home: 'C:\\Users\\h', platform: 'win32', readdir: () => ['v22.12.0'] });
+    expect(env).toEqual(parent);
+  });
+
+  // Une entrée vide du PATH vaut le dossier courant, que la configuration du client peut fixer
+  // (`cwd`) : un PATH absent n'en laissait aucune avant la correction.
+  it('un HOME vide ou un PATH absent n’ajoutent ni dossier relatif ni entrée vide, cherchés dans le dossier courant', () => {
+    for (const [parent, home] of [
+      [{ PATH: LAUNCHD_PATH }, ''],
+      [{}, '/Users/h'],
+      [{}, ''],
+    ] as const) {
+      const env = mcpSpawnParentEnv(parent, { ...darwin, home });
+      expect((env.PATH ?? '').split(':').filter((d) => !d.startsWith('/'))).toEqual([]);
+    }
+  });
+
+  it('un PATH déclaré par le client reste prioritaire, et l’env reçu n’est pas modifié', () => {
+    const parent = { PATH: LAUNCHD_PATH };
+    const userEnv = { PATH: '/custom/bin' };
+    const env = buildMCPSpawnEnv(userEnv, mcpSpawnParentEnv(parent, darwin));
+    expect(env.PATH).toBe('/custom/bin');
+    expect(parent).toEqual({ PATH: LAUNCHD_PATH });
+    expect(userEnv).toEqual({ PATH: '/custom/bin' });
   });
 });
