@@ -69,7 +69,7 @@
   "mcpConfirmArgsNone": "Arguments : aucun",
   "mcpConfirmEnv": "Variables d'environnement : {{env}}",
   "mcpConfirmEnvNone": "Variables d'environnement : aucune",
-  "mcpConfirmEnvRedirect": "Les variables suivies de leur valeur décident du programme réellement lancé, ou du registre d'où il est téléchargé : vérifiez-les.",
+  "mcpConfirmEnvRedirect": "Ces variables décident du programme réellement lancé, ou du registre d'où il est téléchargé, directement ou par les fichiers de configuration qu'elles désignent : {{keys}}. Vérifiez leur valeur.",
   "mcpConfirmStdioWarning": "Cette commande lancera un processus local maintenant, puis à chaque redémarrage de ce serveur. Ne confirmez que si vous faites confiance à sa source.",
   "mcpConfirmUrl": "Adresse : {{url}}",
   "mcpConfirmSseWarning": "ClioDeck se connectera à cette adresse maintenant, puis à chaque redémarrage de ce serveur. Quand l'assistant appelle un outil de ce serveur, les arguments de l'appel partent vers cette adresse : ils peuvent contenir des extraits de la conversation, du manuscrit ou des notes, même avec un modèle local. Ne confirmez que si vous faites confiance à cette adresse."

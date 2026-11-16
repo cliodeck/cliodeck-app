@@ -61,6 +61,16 @@ const EMPTY_FORM: FormState = {
   url: '',
 };
 
+/**
+ * Refus d'un ajout que la section dit par une phrase : l'adresse SSE sans `http(s)://` et la
+ * question refusée, que tout ajout SSE pose depuis L04-9. Les autres motifs restent en code brut
+ * jusqu'à L12-8.
+ */
+const ADD_REFUSALS = new Map<string, string>([
+  ['mcp_add_rejected:sse_url_invalid', 'mcp.errors.sseUrlInvalid'],
+  ['mcp_add_rejected:user_cancelled', 'mcp.errors.userCancelled'],
+]);
+
 function stateColor(state: ClientInstance['state']): string {
   switch (state) {
     case 'ready':
@@ -136,8 +146,13 @@ export const MCPClientsSection: React.FC = () => {
         await refresh();
       } else {
         // Un autre projet ouvert pendant l'ajout : une phrase, jamais le code du refus.
+        const refusal = res.error ? ADD_REFUSALS.get(res.error) : undefined;
         setError(
-          refusedAsProjectChanged(res) ? t('hints.reasons.projectChanged') : (res.error ?? t('mcp.errors.addFailed'))
+          refusedAsProjectChanged(res)
+            ? t('hints.reasons.projectChanged')
+            : refusal
+              ? t(refusal)
+              : (res.error ?? t('mcp.errors.addFailed'))
         );
       }
     } finally {

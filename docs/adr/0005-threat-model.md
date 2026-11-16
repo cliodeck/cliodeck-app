@@ -18,9 +18,9 @@ received from someone else, colleague or not, is **not** trusted (this
 line used to say that "a colleague who shares a `.cliodeck/` folder is
 not adversarial"). The MCP servers its `.cliodeck/config.json` declares,
 stdio or SSE, need the user's approval; the text it puts into the prompt
-(`context.md`, project modes, MCP tool descriptions) goes through
-`SourceInspector`. The code already assumed so (`hints-guard.ts`,
-`mcp-approval-gate.ts`).
+(`context.md`, project modes, the descriptions and input schemas of MCP
+tools) goes through `SourceInspector`. The code already assumed so
+(`hints-guard.ts`, `mcp-approval-gate.ts`).
 
 **Semi-trusted**: third-party MCP servers configured by the user. They
 may expose tools that return hostile content (prompt injection, data

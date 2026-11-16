@@ -23,9 +23,10 @@
  *     neutre — le modèle apprend que l'outil a échoué, pas ce que le
  *     serveur voulait lui dire.
  *
- * Les descriptions d'outils passent par les mêmes deux protections
- * (`inspectToolDescription`) : elles entrent dans le catalogue envoyé au
- * modèle, écrites par le même serveur tiers.
+ * Les descriptions d'outils et leurs schémas d'entrée passent par les mêmes
+ * deux protections (`inspectToolDescription`, `inspectToolSchema`) : ils
+ * entrent dans le catalogue envoyé au modèle, écrits par le même serveur
+ * tiers.
  *
  * Le module est volontairement pur (aucun import Electron) pour être
  * testable ; le service lui injecte le mode, le puits d'événements et
@@ -195,4 +196,127 @@ export function inspectToolDescription(
   const inspector = new SourceInspector({ mode: opts.mode, onEvent: opts.onEvent });
   const outcome = inspector.inspect([{ id: opts.toolName, source, content: text }]);
   return outcome.blocked.length > 0 ? null : text;
+}
+
+/**
+ * Budget d'une chaîne de prose du schéma d'entrée (`description`, `title`) :
+ * une phrase ou deux suffisent à dire ce qu'attend un champ.
+ */
+export const MAX_SCHEMA_TEXT_CHARS = 1_000;
+
+/**
+ * Budget du schéma d'entrée sérialisé, une fois sa prose bornée : celui d'un
+ * résultat d'outil. Au-delà, ce n'est plus la forme d'un appel mais un
+ * document, et aucune troncature ne laisse un schéma valide : l'outil sort du
+ * catalogue, dans tous les modes.
+ */
+export const MAX_TOOL_SCHEMA_CHARS = MAX_TOOL_RESULT_CHARS;
+
+/** Profondeur au-delà de laquelle un schéma n'est plus parcouru. */
+const MAX_SCHEMA_DEPTH = 32;
+
+/** Schéma d'un outil qui n'en déclare pas : aucun argument. Neuf à chaque appel. */
+const emptySchema = (): Record<string, unknown> => ({ type: 'object', properties: {} });
+
+/** Clés dont la valeur est de la prose lue par le modèle, bornée une à une. */
+const SCHEMA_TEXT_KEYS = new Set(['description', 'title']);
+
+class SchemaTooDeep extends Error {}
+
+/**
+ * Copie du schéma dont chaque `description` et chaque `title` de type chaîne
+ * est borné. Une propriété qui s'appelle `description` a pour valeur un
+ * sous-schéma, pas une chaîne : elle est parcourue, pas bornée.
+ */
+function boundSchemaText(value: unknown, depth: number, truncated: { count: number }): unknown {
+  if (depth > MAX_SCHEMA_DEPTH) throw new SchemaTooDeep();
+  if (Array.isArray(value)) return value.map((item) => boundSchemaText(item, depth + 1, truncated));
+  if (value === null || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (SCHEMA_TEXT_KEYS.has(key) && typeof child === 'string' && child.length > MAX_SCHEMA_TEXT_CHARS) {
+      truncated.count += 1;
+      out[key] =
+        child.slice(0, MAX_SCHEMA_TEXT_CHARS) +
+        ` [Truncated: ${child.length} characters, only the first ${MAX_SCHEMA_TEXT_CHARS} are shown.]`;
+    } else {
+      out[key] = boundSchemaText(child, depth + 1, truncated);
+    }
+  }
+  return out;
+}
+
+/**
+ * Borne et inspecte le schéma d'entrée qu'un serveur MCP donne d'un de ses
+ * outils (revue de L04-9). Il part avec le catalogue, écrit par le même
+ * serveur que la description : la description de chaque propriété, les
+ * titres, les valeurs permises. Une injection s'y déplaçait.
+ *
+ *  1. Chaque `description` et chaque `title` est borné, dans une copie : la
+ *     forme du schéma reste, et le modèle sait toujours quoi envoyer.
+ *  2. Un schéma qui reste démesuré, ou trop profond pour être lu, est
+ *     écarté.
+ *  3. Le schéma sérialisé est inspecté, sans l'adresse de son méta-schéma
+ *     (`$schema`, que porte tout schéma généré par zod) : un lien de plus
+ *     par outil et par tour dans le journal de sécurité, pour rien.
+ *
+ * Rend le schéma à envoyer, ou `null` : l'outil sort alors du catalogue.
+ */
+export function inspectToolSchema(
+  schema: unknown,
+  opts: InspectToolDescriptionOptions
+): Record<string, unknown> | null {
+  if (schema === undefined || schema === null) return emptySchema();
+  const at = opts.now ?? (() => new Date().toISOString());
+  const source = `mcp-schema:${opts.toolName}`;
+
+  const truncated = { count: 0 };
+  let bounded: unknown;
+  let serialized: string;
+  try {
+    bounded = boundSchemaText(schema, 0, truncated);
+    serialized = JSON.stringify(bounded, (key, value: unknown) => (key === '$schema' ? undefined : value));
+  } catch (e) {
+    if (!(e instanceof SchemaTooDeep)) throw e;
+    opts.onEvent?.({
+      kind: 'unusual_encoding',
+      source,
+      chunkId: opts.toolName,
+      detail: `tool_schema_too_deep: more than ${MAX_SCHEMA_DEPTH} levels`,
+      severity: 'medium',
+      at: at(),
+    });
+    return null;
+  }
+
+  if (truncated.count > 0) {
+    opts.onEvent?.({
+      kind: 'unusual_encoding',
+      source,
+      chunkId: opts.toolName,
+      detail: `tool_schema_truncated: ${truncated.count} texts over ${MAX_SCHEMA_TEXT_CHARS} chars`,
+      severity: 'low',
+      at: at(),
+    });
+  }
+
+  if (serialized.length > MAX_TOOL_SCHEMA_CHARS) {
+    opts.onEvent?.({
+      kind: 'unusual_encoding',
+      source,
+      chunkId: opts.toolName,
+      detail: `tool_schema_too_large: ${serialized.length} of ${MAX_TOOL_SCHEMA_CHARS} chars`,
+      severity: 'medium',
+      at: at(),
+    });
+    return null;
+  }
+
+  const inspector = new SourceInspector({ mode: opts.mode, onEvent: opts.onEvent });
+  const outcome = inspector.inspect([{ id: opts.toolName, source, content: serialized }]);
+  if (outcome.blocked.length > 0) return null;
+  // Un schéma qui n'est pas un objet (le SDK MCP en exige un) : l'outil n'annonce aucun argument.
+  return bounded !== null && typeof bounded === 'object' && !Array.isArray(bounded)
+    ? (bounded as Record<string, unknown>)
+    : emptySchema();
 }

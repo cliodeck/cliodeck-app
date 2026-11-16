@@ -24,6 +24,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import type { Dialog } from 'electron';
 import { t } from '../../i18n.js';
+import { isSensitiveEnvVarName } from '../../services/mcp-env-secrets.js';
 
 /** Interpreters allowed as bare (un-pathed) commands. */
 export const ALLOWED_BARE_COMMANDS = new Set<string>([
@@ -120,12 +121,14 @@ function isHttpUrl(url: string | undefined): boolean {
 /**
  * Env keys that decide which program actually runs, or where it is downloaded from: `PATH` picks
  * the `npx` that is executed, the others the registry `npx`, `pip` or `uvx` fetch the package
- * from (S09-1-22). The dialog shows their value.
+ * from (S09-1-22). `HOME`, `XDG_*`, `APPDATA`, `LOCALAPPDATA` and `USERPROFILE` do it through the
+ * configuration files they point to (`~/.npmrc`, `pip.conf`, `uv.toml`, Python's user
+ * site-packages). The dialog names them in a warning.
  */
 export function redirectsCommand(key: string): boolean {
   return (
-    key === 'PATH' ||
-    /^(NPM_CONFIG_|PIP_|UV_)/.test(key) ||
+    ['PATH', 'HOME', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE'].includes(key) ||
+    /^(NPM_CONFIG_|PIP_|UV_|XDG_)/.test(key) ||
     /(_REGISTRY|_INDEX_URL)$/.test(key)
   );
 }
@@ -135,30 +138,37 @@ export interface ConfirmOptions {
   parentWindow?: Electron.BrowserWindow | null;
 }
 
-/** The lines of the dialog that describe a stdio server: command, args, env. */
+/**
+ * The lines of the dialog that describe a stdio server: command, args, env. Every env value is
+ * shown, except those of the keys that look like secrets: a value hidden from the author cannot be
+ * judged, and the author cannot spot a redirection by its name alone.
+ */
 function stdioDetail(req: McpAddRequest): string[] {
   const env = Object.entries(req.env ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const redirects = env.some(([key]) => redirectsCommand(key));
+  const shown = (key: string): boolean => !isSensitiveEnvVarName(key);
+  // Only the keys whose value is shown: the warning asks the author to check it.
+  const redirects = env.map(([key]) => key).filter((key) => shown(key) && redirectsCommand(key));
   const args = (req.args ?? []).join(' ');
   return [
     t('mcpConfirmCommand').replace('{{command}}', () => req.command ?? ''),
     args ? t('mcpConfirmArgs').replace('{{args}}', () => args) : t('mcpConfirmArgsNone'),
     env.length > 0
       ? t('mcpConfirmEnv').replace('{{env}}', () =>
-          // Other values stay hidden: a long API key would mask the rest.
-          env.map(([key, value]) => (redirectsCommand(key) ? `${key}=${value}` : key)).join(', ')
+          env.map(([key, value]) => (shown(key) ? `${key}=${value}` : key)).join(', ')
         )
       : t('mcpConfirmEnvNone'),
-    ...(redirects ? ['', t('mcpConfirmEnvRedirect')] : []),
+    ...(redirects.length > 0
+      ? ['', t('mcpConfirmEnvRedirect').replace('{{keys}}', () => redirects.join(', '))]
+      : []),
     '',
     t('mcpConfirmStdioWarning'),
   ];
 }
 
 /**
- * Show a native modal dialog describing the server: the command, args and env keys of a stdio
- * server (values hidden, except for the keys that redirect the command), or the URL of an SSE
- * server and what is sent to it. Returns true only when the user explicitly clicks "Add".
+ * Show a native modal dialog describing the server: the command, args and env of a stdio server
+ * (secret values hidden), or the URL of an SSE server and what is sent to it. Returns true only
+ * when the user explicitly clicks "Add".
  */
 export async function confirmMcpAdd(
   req: McpAddRequest,

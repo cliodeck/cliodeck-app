@@ -151,8 +151,12 @@ export interface BrainstormChatRetrievalSettings {
 
 export interface BrainstormChatSettings {
   modeId?: string;
+  /**
+   * Le prompt saisi dans le panneau du chat (`''` en mode libre). Jamais le
+   * texte du mode : le main le relit à partir de `modeId` (L04-9).
+   */
   customSystemPrompt?: string;
-  /** Langue des consignes écrites par l'application (mode par défaut, bloc de contexte). */
+  /** Langue des consignes écrites par l'application (texte du mode, bloc de contexte). */
   promptLanguage?: 'fr' | 'en';
   retrieval?: BrainstormChatRetrievalSettings;
   /**

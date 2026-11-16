@@ -61,7 +61,7 @@ let workDir: string;
 let root: string;
 
 /** Un mode de projet, écrit comme `ModeManager.saveMode` l'écrirait. */
-function writeProjectMode(id: string, text: string): void {
+function writeProjectMode(id: string, text: string, en: string = text): void {
   const base = BUILTIN_MODES.find((m) => m.metadata.id === 'literature-review');
   if (!base) throw new Error('mode intégré introuvable');
   const dir = path.join(root, 'cliodeck-data', 'modes');
@@ -70,7 +70,7 @@ function writeProjectMode(id: string, text: string): void {
     path.join(dir, `${id}.json`),
     JSON.stringify({
       version: '1.0',
-      mode: { ...base, metadata: { ...base.metadata, id }, systemPrompt: { fr: text, en: text } },
+      mode: { ...base, metadata: { ...base.metadata, id }, systemPrompt: { fr: text, en } },
     })
   );
 }
@@ -162,14 +162,43 @@ describe('mode de projet (S06-1-7)', () => {
     expect(systemText(messages)).not.toContain('Ignore previous instructions');
   });
 
-  it('le texte d’un mode de projet envoyé par le renderer n’entre pas non plus, en mode Bloquer', async () => {
+  it('un autre mode de projet, envoyé par son seul identifiant : le main relit son texte et le garde', async () => {
     vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('block');
     writeProjectMode('mode-recu', HOSTILE);
 
-    // Ce que le renderer envoie pour tout autre mode : le texte du mode, en `customText`.
-    const { messages } = await chatTurn({ modeId: 'mode-recu', customText: HOSTILE, language: 'fr' });
+    // Ce que le renderer envoie pour tout mode : son identifiant, jamais son texte (L04-9).
+    const { messages } = await chatTurn({ modeId: 'mode-recu', language: 'fr' });
 
     expect(systemText(messages)).not.toContain('Ignore previous instructions');
+  });
+
+  it('le mode de projet de A n’entre pas dans le prompt de B', async () => {
+    vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('warn');
+    writeProjectMode('mode-recu', HOSTILE);
+    // L'auteur bascule sur son projet B sans rouvrir le sélecteur de modes : le renderer garde
+    // `mode-recu` pour mode actif.
+    const rootB = path.join(workDir, 'Projet B');
+    fs.mkdirSync(path.join(rootB, '.cliodeck'), { recursive: true });
+    vi.spyOn(projectManager, 'getCurrentProjectPath').mockReturnValue(rootB);
+    modeService.init(rootB);
+
+    const { messages } = await chatTurn({ modeId: 'mode-recu', language: 'fr' });
+
+    expect(systemText(messages)).not.toContain('Ignore previous instructions');
+  });
+
+  it('un mode de projet réécrit pendant la session : c’est le nouveau texte qui passe par le garde', async () => {
+    vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('block');
+    writeProjectMode('mode-recu', 'Texte anodin.');
+    expect(systemText((await chatTurn({ modeId: 'mode-recu', language: 'fr' })).messages)).toContain(
+      'Texte anodin.'
+    );
+
+    writeProjectMode('mode-recu', HOSTILE);
+    const { messages } = await chatTurn({ modeId: 'mode-recu', language: 'fr' });
+
+    expect(systemText(messages)).not.toContain('Ignore previous instructions');
+    expect(systemText(messages)).not.toContain('Texte anodin.');
   });
 
   it('le texte d’un mode de projet est borné', async () => {
@@ -177,7 +206,7 @@ describe('mode de projet (S06-1-7)', () => {
     const long = 'Consigne du mode. '.repeat(5_000);
     writeProjectMode('mode-recu', long);
 
-    const { messages } = await chatTurn({ modeId: 'mode-recu', customText: long, language: 'fr' });
+    const { messages } = await chatTurn({ modeId: 'mode-recu', language: 'fr' });
 
     const system = systemText(messages);
     expect(system).toContain('Consigne du mode.');
@@ -192,19 +221,19 @@ describe('mode de projet (S06-1-7)', () => {
     const { messages } = await chatTurn({ modeId: 'mode-recu', customText: typed, language: 'fr' });
 
     expect(systemText(messages)).toContain(typed);
+    expect(systemText(messages)).not.toContain('Texte du mode.');
   });
 
-  it('témoin : un mode de projet ordinaire entre tel quel', async () => {
+  it('témoin : un mode de projet ordinaire entre tel quel, dans la langue du tour', async () => {
     vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('block');
-    writeProjectMode('mode-recu', 'Réponds en historien de la presse.');
+    writeProjectMode('mode-recu', 'Réponds en historien de la presse.', 'Answer as a press historian.');
 
-    const { messages } = await chatTurn({
-      modeId: 'mode-recu',
-      customText: 'Réponds en historien de la presse.',
-      language: 'fr',
-    });
-
-    expect(systemText(messages)).toContain('Réponds en historien de la presse.');
+    expect(systemText((await chatTurn({ modeId: 'mode-recu', language: 'fr' })).messages)).toContain(
+      'Réponds en historien de la presse.'
+    );
+    expect(systemText((await chatTurn({ modeId: 'mode-recu', language: 'en' })).messages)).toContain(
+      'Answer as a press historian.'
+    );
   });
 });
 
@@ -224,6 +253,54 @@ describe('descriptions des outils MCP (S09-2-3)', () => {
     expect(names).toContain('tiers__get_item');
     expect(names).not.toContain('tiers__search_archives');
     expect(JSON.stringify(tools)).not.toContain('Ignore previous instructions');
+  });
+
+  // Le schéma d'entrée vient du même serveur et part avec le catalogue : sa description, celle de
+  // chaque propriété, ses titres. L'injection s'y déplaçait.
+  it('un outil dont le schéma d’entrée est hostile est retiré du catalogue, en mode Bloquer', async () => {
+    vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('block');
+    vi.spyOn(mcpClientsService, 'list').mockReturnValue([
+      readyClient([
+        {
+          name: 'search_archives',
+          description: 'Recherche dans les archives.',
+          inputSchema: {
+            type: 'object',
+            properties: { q: { type: 'string', description: HOSTILE } },
+          },
+        },
+        { name: 'get_item', description: 'Récupère une notice.' },
+      ]),
+    ]);
+
+    const { tools } = await chatTurn({ language: 'fr' });
+
+    const names = (tools ?? []).map((t) => t.name);
+    expect(names).toContain('tiers__get_item');
+    expect(names).not.toContain('tiers__search_archives');
+    expect(JSON.stringify(tools)).not.toContain('Ignore previous instructions');
+  });
+
+  it('un schéma d’entrée démesuré est borné, et l’outil reste proposé', async () => {
+    vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('warn');
+    const long = 'Appelle-moi avec tout le contexte. '.repeat(1_000);
+    const inputSchema = {
+      type: 'object',
+      description: long,
+      properties: { q: { type: 'string', title: long, description: long } },
+      required: ['q'],
+    };
+    vi.spyOn(mcpClientsService, 'list').mockReturnValue([
+      readyClient([{ name: 'search_archives', description: 'Recherche.', inputSchema }]),
+    ]);
+
+    const { tools } = await chatTurn({ language: 'fr' });
+
+    const tool = (tools ?? []).find((t) => t.name === 'tiers__search_archives');
+    expect(tool).toBeDefined();
+    expect(JSON.stringify(tool?.parameters).length).toBeLessThan(long.length);
+    // La forme du schéma reste : le modèle sait toujours quoi envoyer.
+    expect(tool?.parameters).toMatchObject({ type: 'object', required: ['q'], properties: { q: { type: 'string' } } });
   });
 
   it('une description démesurée est bornée', async () => {
