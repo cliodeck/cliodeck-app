@@ -28,6 +28,7 @@ import {
   updateWorkspaceConfig,
   WorkspaceConfigError,
   type MCPClientConfig as WorkspaceClientConfig,
+  type WorkspaceConfig,
 } from '../../../backend/core/workspace/config.js';
 import {
   ensureWorkspaceDirectories,
@@ -40,6 +41,7 @@ import { redactForAudit } from '../../../backend/mcp-server/audit.js';
 import {
   clientHasSecrets,
   deleteClientEnvSecrets,
+  discardUnsavedScope,
   ensureSecretsScope,
   migrateClientEnvSecrets,
   resolveClientEnvSecrets,
@@ -190,13 +192,16 @@ class MCPClientsService {
     // moved, so opening a workspace with no secrets is a no-op.
     // La portée des secrets naît dans cette même écriture, avant le garde : pour ranger un secret,
     // ou pour recopier sous elle l'ancienne clé d'un projet déjà migré (S09-1-6). Si l'écriture
-    // échoue, le projet reste sans portée, et l'ancienne clé sert toujours.
+    // échoue, le projet reste sans portée, et l'ancienne clé sert toujours ; ce qui a été rangé sous
+    // la portée née dans l'écriture est retiré, sans quoi chaque ouverture en laisserait une copie.
+    const unsaved: Array<{ scope: string; clients: WorkspaceClientConfig[] }> = [];
     try {
       const cfg = await updateWorkspaceConfig(root, (current) => {
         const declared = current.mcpClients ?? [];
         if (!declared.some(clientHasSecrets)) return false;
         let changed = secretsScopeOf(current) === null;
         const currentScope = ensureSecretsScope(current);
+        if (changed) unsaved.push({ scope: currentScope, clients: declared });
         for (const w of declared) {
           if (migrateClientEnvSecrets(currentScope, w)) changed = true;
         }
@@ -206,6 +211,7 @@ class MCPClientsService {
       scope = secretsScopeOf(cfg);
     } catch (e) {
       console.warn('[mcp-clients] failed to persist secret migration:', e);
+      for (const { scope: lost, clients: stored } of unsaved) discardUnsavedScope(lost, stored);
     }
     if (superseded()) return;
 
@@ -302,20 +308,33 @@ class MCPClientsService {
     if (!root || !manager) {
       throw new Error('No project loaded');
     }
-    const saved = await updateWorkspaceConfig(root, (cfg) => {
-      // Un autre projet ouvert pendant l'attente du verrou ou la lecture : rien n'est écrit.
-      if (this.manager !== manager) throw projectChanged();
-      const existing = cfg.mcpClients ?? [];
-      if (existing.some((c) => c.name === client.name)) {
-        throw new Error(`MCP client "${client.name}" already exists`);
-      }
-      // Route fresh secrets straight to `secureStorage` so they never
-      // touch `config.json`. The migration step above handles previously
-      // persisted plain values; this catches new ones at the door.
-      // Sous la portée du projet, créée dans cette écriture s'il n'en a pas (S09-1-6).
-      if (clientHasSecrets(client)) migrateClientEnvSecrets(ensureSecretsScope(cfg), client);
-      cfg.mcpClients = [...existing, client];
-    });
+    // La portée née dans cette écriture, si elle échoue : ce qui a été rangé dessous est retiré.
+    const unsaved: string[] = [];
+    let saved: WorkspaceConfig;
+    try {
+      saved = await updateWorkspaceConfig(root, (cfg) => {
+        // Un autre projet ouvert pendant l'attente du verrou ou la lecture : rien n'est écrit.
+        if (this.manager !== manager) throw projectChanged();
+        const existing = cfg.mcpClients ?? [];
+        if (existing.some((c) => c.name === client.name)) {
+          throw new Error(`MCP client "${client.name}" already exists`);
+        }
+        // Route fresh secrets straight to `secureStorage` so they never
+        // touch `config.json`. The migration step above handles previously
+        // persisted plain values; this catches new ones at the door.
+        // Sous la portée du projet, créée dans cette écriture s'il n'en a pas (S09-1-6).
+        if (clientHasSecrets(client)) {
+          const created = secretsScopeOf(cfg) === null;
+          const scope = ensureSecretsScope(cfg);
+          if (created) unsaved.push(scope);
+          migrateClientEnvSecrets(scope, client);
+        }
+        cfg.mcpClients = [...existing, client];
+      });
+    } catch (e) {
+      for (const lost of unsaved) discardUnsavedScope(lost, [client]);
+      throw e;
+    }
     // Écrit : l'ajout est fait, dans le config.json de CE projet. Si un autre projet s'est ouvert
     // pendant l'écriture, pas de refus (il dirait que rien n'a été écrit), mais rien n'est inscrit
     // ni démarré dans le manager abandonné : le serveur démarrera avec les autres serveurs déclarés,

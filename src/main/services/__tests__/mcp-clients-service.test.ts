@@ -598,6 +598,40 @@ describe('clés des serveurs MCP : une portée par projet (S09-1-6)', () => {
     }
   );
 
+  it.skipIf(process.getuid?.() === 0)(
+    'config.json qui ne s’écrit pas, clé en clair : rien ne reste rangé sous une portée qui n’a pas pu s’écrire',
+    async () => {
+      const rootA = await makeProject([europeana('cle-test-A')]);
+      const before = readFileSync(configOf(rootA), 'utf8');
+      chmodSync(configOf(rootA), 0o444);
+
+      await mcpClientsService.loadProject(rootA);
+      await mcpClientsService.loadProject(rootA);
+
+      // La clé est restée en clair dans config.json, et le serveur la reçoit à chaque chargement.
+      expect(readFileSync(configOf(rootA), 'utf8')).toBe(before);
+      expect(registered.filter((c) => c.name === 'europeana')).toHaveLength(2);
+      expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-A', EUROPEANA_LANG: 'fr' });
+      // Aucune copie orpheline, une de plus à chaque ouverture.
+      expect([...secrets.keys()]).toEqual([]);
+    }
+  );
+
+  it.skipIf(process.getuid?.() === 0)(
+    'addClient dont l’écriture échoue : la clé ne reste pas sous une portée inconnue de config.json',
+    async () => {
+      const rootA = await makeProject([]);
+      await mcpClientsService.loadProject(rootA);
+      const before = readFileSync(configOf(rootA), 'utf8');
+      chmodSync(configOf(rootA), 0o444);
+
+      await expect(mcpClientsService.addClient(europeana('cle-test-A'))).rejects.toMatchObject({ code: 'EACCES' });
+
+      expect(readFileSync(configOf(rootA), 'utf8')).toBe(before);
+      expect([...secrets.keys()]).toEqual([]);
+    }
+  );
+
   it('aucune clé déclarée : ni portée ni écriture', async () => {
     const rootA = await makeProject([{ name: 'local', transport: 'stdio', command: '/nonexistent/x', env: { LANG: 'fr' } }]);
     const before = readFileSync(configOf(rootA), 'utf8');

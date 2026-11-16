@@ -6,7 +6,7 @@
  * l'efface comme le reste, plutôt que de le supposer.
  */
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 
@@ -16,11 +16,16 @@ const place = vi.hoisted(() => ({ dir: '' }));
 vi.mock('electron', () => {
   const app = { getPath: () => place.dir, getVersion: () => '0.0.0' };
   const ipcMain = { on: () => undefined };
-  // Chiffrement factice mais réversible, comme dans secure-storage.test.ts.
+  // Chiffrement factice mais réversible, comme dans secure-storage.test.ts. Un chiffré qui n'est
+  // pas le sien (`v10…`, écrit par l'autre identité de l'app) est refusé, comme par Chromium.
   const safeStorage = {
     isEncryptionAvailable: () => true,
     encryptString: (s: string) => Buffer.from(`enc:${s}`, 'utf8'),
-    decryptString: (b: Buffer) => b.toString('utf8').slice(4),
+    decryptString: (b: Buffer) => {
+      const s = b.toString('utf8');
+      if (!s.startsWith('enc:')) throw new Error('Error while decrypting the ciphertext provided to safeStorage.decryptString.');
+      return s.slice(4);
+    },
   };
   return { default: { app, ipcMain, safeStorage }, app, ipcMain, safeStorage };
 });
@@ -84,5 +89,37 @@ describe('secrets MCP dans le vrai magasin', () => {
     ]) {
       expect(secureStorage.getKey(key)).toBe('');
     }
+  });
+
+  it('clé du projet présente mais illisible à ce lancement : ni remplacée par l’ancienne clé, ni servie à sa place', async () => {
+    await secureStorage.init();
+    // La clé du projet, chiffrée par l'autre identité de l'app (app empaquetée contre `npx electron .`),
+    // et une ancienne clé globale lisible ici, écrite pour un autre projet.
+    const own = Buffer.from('v10cle-propre-A', 'latin1').toString('base64');
+    const legacy = Buffer.from('enc:cle-ancienne-B', 'utf8').toString('base64');
+    writeFileSync(
+      storeFile,
+      JSON.stringify({
+        mcp: {
+          project: { [SCOPE_A]: { client: { europeana: { env: { EUROPEANA_API_KEY: own } } } } },
+          client: { europeana: { env: { EUROPEANA_API_KEY: legacy } } },
+        },
+      })
+    );
+    const before = readFileSync(storeFile);
+
+    // Comme une clé illisible d'avant la portée : absente pour ce lancement, et rien d'effacé.
+    expect(resolveClientEnvSecrets(SCOPE_A, 'europeana', { EUROPEANA_API_KEY: SECRET_SENTINEL, LANG: 'fr' })).toEqual({
+      LANG: 'fr',
+    });
+    expect(readFileSync(storeFile).equals(before)).toBe(true);
+    expect(secureStorage.unreadableKeys()).toContain(secretKeyFor(SCOPE_A, 'europeana', 'EUROPEANA_API_KEY'));
+
+    // Une portée sans clé à elle reçoit toujours l'ancienne : seul le cas d'une clé présente change.
+    expect(resolveClientEnvSecrets(SCOPE_B, 'europeana', { EUROPEANA_API_KEY: SECRET_SENTINEL })).toEqual({
+      EUROPEANA_API_KEY: 'cle-ancienne-B',
+    });
+
+    secureStorage.revokeAll();
   });
 });

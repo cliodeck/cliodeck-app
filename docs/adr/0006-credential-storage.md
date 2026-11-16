@@ -63,7 +63,11 @@ The following are routed to secureStorage (never written to `config.json`):
    projet, sous `mcp.project.<secrets_scope>.client.<nom>.env.<VAR>`, où
    `secrets_scope` est un UUID gardé dans le `config.json` du projet. La clé
    d'avant, `mcp.client.<nom>.env.<VAR>`, commune à tous les projets, est lue
-   en repli et recopiée sous la portée, jamais supprimée.
+   en repli et recopiée sous la portée, jamais supprimée. Le repli ne vaut
+   que pour une clé absente de la portée : une clé du projet présente mais
+   illisible à ce lancement reste en place, absente pour ce lancement. Une
+   portée née dans une écriture de `config.json` qui échoue ne garde aucun
+   secret.
 4. **Private API URLs** — URLs in MCP client configs or provider configs
    that point to private/authenticated endpoints should be treated as
    sensitive when they contain credentials (e.g., basic auth in URL).

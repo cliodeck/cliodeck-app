@@ -26,12 +26,15 @@
  * écrasait la clé de l'autre, supprimer le client dans l'un l'effaçait. Chaque
  * projet porte donc un identifiant, `secrets_scope` dans `config.json`, créé
  * dans l'écriture qui range son premier secret, ou au premier chargement d'un
- * projet déjà migré. La sentinelle ne change pas : l'empreinte d'un serveur
- * approuvé (`fingerprintClient`) non plus.
+ * projet déjà migré. Si cette écriture échoue, ce qui a été rangé sous la portée
+ * est retiré (`discardUnsavedScope`). La sentinelle ne change pas : l'empreinte
+ * d'un serveur approuvé (`fingerprintClient`) non plus.
  *
  * Les clés d'avant, `mcp.client.<nom>.env.<VAR>`, sont lues en repli et
  * recopiées sous la portée, jamais supprimées : un autre projet, pas encore
  * rouvert, peut en dépendre. Elles restent jusqu'à « Révoquer toutes les clés ».
+ * Le repli ne vaut que pour une clé absente de la portée, jamais pour une clé
+ * présente mais illisible à ce lancement.
  *
  * Non-goals:
  *   - This is not a full vault. Values are encrypted at rest by
@@ -124,11 +127,19 @@ export function migrateClientEnvSecrets(scope: string, client: WorkspaceClientCo
  * La clé du projet, sinon l'ancienne clé globale, recopiée sous la portée sans être supprimée.
  * Sans portée (`config.json` n'a pas pu s'écrire), l'ancienne clé seule : jamais de serveur privé
  * de sa clé parce que la portée n'existe pas. Une recopie qui échoue n'empêche pas de la servir.
+ *
+ * Une clé du projet présente mais illisible à ce lancement (chiffrée par l'autre identité de l'app,
+ * entrée « Safe Storage » recréée) reste la clé du projet : absente pour ce lancement, comme toute
+ * clé illisible, et listée dans Réglages → Sécurité. L'ancienne clé n'est qu'un pont pour un projet
+ * dont la clé n'a jamais été rangée sous sa portée, et elle peut être celle d'un autre projet : ni
+ * servie à sa place, ni recopiée par-dessus, ce qui perdrait la clé du projet pour tous les lancements.
  */
 function readSecret(scope: string | null, clientName: string, envKey: string): string {
   if (scope) {
-    const own = secureStorage.getKey(secretKeyFor(scope, clientName, envKey));
+    const key = secretKeyFor(scope, clientName, envKey);
+    const own = secureStorage.getKey(key);
     if (own) return own;
+    if (secureStorage.hasKey(key)) return '';
   }
   const legacy = secureStorage.getKey(legacySecretKeyFor(clientName, envKey));
   if (legacy && scope) {
@@ -178,5 +189,22 @@ export function deleteClientEnvSecrets(scope: string, client: WorkspaceClientCon
   for (const envKey of Object.keys(client.env)) {
     if (!isSensitiveEnvVarName(envKey)) continue;
     secureStorage.deleteKey(secretKeyFor(scope, client.name, envKey));
+  }
+}
+
+/**
+ * Retire les secrets rangés sous une portée née dans une écriture de `config.json` qui a échoué
+ * (fichier en lecture seule, disque plein) : la portée n'y est pas, rien ne les relira, et chaque
+ * nouvel essai en rangerait d'autres. La valeur en clair est restée là d'où elle venait
+ * (`config.json`, ou le formulaire d'ajout) : rien n'est perdu. Ne jamais l'appeler sur une portée
+ * déjà enregistrée, dont les secrets servent.
+ */
+export function discardUnsavedScope(scope: string, clients: readonly WorkspaceClientConfig[]): void {
+  for (const client of clients) {
+    try {
+      deleteClientEnvSecrets(scope, client);
+    } catch (err) {
+      console.warn('[mcp-env-secrets] secrets d’une portée non enregistrée impossibles à retirer:', err);
+    }
   }
 }
