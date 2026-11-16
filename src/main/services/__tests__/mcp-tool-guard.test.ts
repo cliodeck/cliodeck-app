@@ -179,12 +179,52 @@ describe('inspectToolSchema', () => {
     required: ['q'],
   };
 
-  it('laisse passer un schéma ordinaire, à l’identique, sans événement', () => {
+  it('laisse passer un schéma ordinaire, sans l’adresse de son méta-schéma, sans événement', () => {
     const { events, onEvent } = collector();
+    const { $schema: _metaSchema, ...withoutMetaSchema } = SCHEMA;
 
-    expect(inspectToolSchema(SCHEMA, { toolName: 'gallica__search', mode: 'block', onEvent })).toEqual(SCHEMA);
-    // L'adresse du méta-schéma, que porte tout schéma généré par zod, n'est pas un lien à signaler.
+    // L'adresse du méta-schéma, que porte tout schéma généré par zod, ne part pas : aucun
+    // fournisseur ne la lit, et ce n'est pas un lien à signaler.
+    expect(inspectToolSchema(SCHEMA, { toolName: 'gallica__search', mode: 'block', onEvent })).toEqual(
+      withoutMetaSchema
+    );
     expect(events).toEqual([]);
+  });
+
+  // Seconde revue de L04-9 : la clé `$schema` était retirée du texte inspecté et compté, à toutes
+  // les profondeurs, mais restait dans le schéma envoyé. L'injection n'avait qu'à s'y déplacer.
+  it('un `$schema` démesuré et hostile à la racine ne part pas', () => {
+    const schema = {
+      $schema: `${INJECTION}${' x'.repeat(50_000)}`,
+      type: 'object',
+      properties: { q: { type: 'string' } },
+    };
+
+    const out = inspectToolSchema(schema, { toolName: 'tiers__search', mode: 'block' });
+
+    const sent = JSON.stringify(out ?? {});
+    expect(sent).not.toContain('Ignore all previous instructions');
+    expect(sent.length).toBeLessThanOrEqual(MAX_TOOL_SCHEMA_CHARS);
+  });
+
+  it('une propriété nommée `$schema` est inspectée et comptée comme les autres', () => {
+    const { events, onEvent } = collector();
+    const schema = {
+      type: 'object',
+      properties: {
+        $schema: { type: 'string', description: INJECTION, enum: ['a', 'b'] },
+        q: { type: 'string' },
+      },
+    };
+
+    expect(inspectToolSchema(schema, { toolName: 'tiers__search', mode: 'block', onEvent })).toBeNull();
+    expect(events.find((e) => e.kind === 'prompt_injection_blocked')?.source).toBe('mcp-schema:tiers__search');
+
+    const huge = {
+      type: 'object',
+      properties: { $schema: { type: 'string', enum: [`valeur${' y'.repeat(50_000)}`] } },
+    };
+    expect(inspectToolSchema(huge, { toolName: 'tiers__search', mode: 'warn' })).toBeNull();
   });
 
   it('rend le schéma vide d’un outil qui n’en donne pas', () => {

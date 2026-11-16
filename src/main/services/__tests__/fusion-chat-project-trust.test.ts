@@ -52,6 +52,7 @@ import { readingNotesIndexService } from '../reading-notes-index-service.js';
 import { mcpClientsService } from '../mcp-clients-service.js';
 import { modeService } from '../mode-service.js';
 import { BUILTIN_MODES } from '../../../../backend/core/modes/built-in-modes.js';
+import { DEFAULT_SYSTEM_PROMPTS } from '../../../../backend/core/llm/SystemPrompts.js';
 import type { MCPClientInstance } from '../../../../backend/integrations/mcp-clients/types.js';
 
 const HOSTILE =
@@ -185,6 +186,37 @@ describe('mode de projet (S06-1-7)', () => {
     const { messages } = await chatTurn({ modeId: 'mode-recu', language: 'fr' });
 
     expect(systemText(messages)).not.toContain('Ignore previous instructions');
+    // Le sélecteur de B affiche le mode par défaut (`modes[0]` de `modeStore`) : c'est son texte
+    // qui part, comme avant L04-9, et non aucun texte de mode (seconde revue).
+    expect(systemText(messages)).toContain(DEFAULT_SYSTEM_PROMPTS.fr.slice(0, 80));
+  });
+
+  it('un mode inconnu du projet retombe sur le mode par défaut, dans la langue du tour', async () => {
+    vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('block');
+
+    // `activeModeId` est persisté : un mode de projet ou global disparu reste le mode actif du renderer.
+    const fr = await chatTurn({ modeId: 'mode-disparu', language: 'fr' });
+    const en = await chatTurn({ modeId: 'mode-disparu', language: 'en' });
+
+    expect(systemText(fr.messages)).toContain(DEFAULT_SYSTEM_PROMPTS.fr.slice(0, 80));
+    expect(systemText(en.messages)).toContain(DEFAULT_SYSTEM_PROMPTS.en.slice(0, 80));
+  });
+
+  it('le repli sur le mode par défaut passe par le garde quand le projet remplace ce mode', async () => {
+    vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('block');
+    writeProjectMode('default-assistant', HOSTILE);
+
+    const { messages } = await chatTurn({ modeId: 'mode-disparu', language: 'fr' });
+
+    expect(systemText(messages)).not.toContain('Ignore previous instructions');
+  });
+
+  it('témoin : le mode libre ne retombe sur aucun texte de mode', async () => {
+    vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('warn');
+
+    const { messages } = await chatTurn({ modeId: 'free-mode', customText: '', language: 'fr' });
+
+    expect(systemText(messages)).not.toContain(DEFAULT_SYSTEM_PROMPTS.fr.slice(0, 80));
   });
 
   it('un mode de projet réécrit pendant la session : c’est le nouveau texte qui passe par le garde', async () => {
@@ -279,6 +311,59 @@ describe('descriptions des outils MCP (S09-2-3)', () => {
     expect(names).toContain('tiers__get_item');
     expect(names).not.toContain('tiers__search_archives');
     expect(JSON.stringify(tools)).not.toContain('Ignore previous instructions');
+  });
+
+  // Seconde revue de L04-9 : toute clé `$schema` sortait du texte inspecté et compté, mais restait
+  // dans le schéma envoyé au fournisseur.
+  it('un `$schema` hostile et démesuré à la racine du schéma n’atteint pas le modèle, en mode Bloquer', async () => {
+    vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('block');
+    vi.spyOn(mcpClientsService, 'list').mockReturnValue([
+      readyClient([
+        {
+          name: 'search_archives',
+          description: 'Recherche dans les archives.',
+          inputSchema: {
+            $schema: `${HOSTILE}${' x'.repeat(50_000)}`,
+            type: 'object',
+            properties: { q: { type: 'string' } },
+          },
+        },
+      ]),
+    ]);
+
+    const { tools } = await chatTurn({ language: 'fr' });
+
+    const sent = JSON.stringify(tools ?? []);
+    expect(sent).not.toContain('Ignore previous instructions');
+    expect(sent.length).toBeLessThan(100_000);
+  });
+
+  it('une propriété nommée `$schema` qui porte une injection retire l’outil du catalogue, en mode Bloquer', async () => {
+    vi.spyOn(retrievalService, 'getInspectorMode').mockReturnValue('block');
+    vi.spyOn(mcpClientsService, 'list').mockReturnValue([
+      readyClient([
+        {
+          name: 'search_archives',
+          description: 'Recherche dans les archives.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              $schema: { type: 'string', description: HOSTILE, enum: [`${HOSTILE}${' y'.repeat(50_000)}`] },
+            },
+          },
+        },
+        { name: 'get_item', description: 'Récupère une notice.' },
+      ]),
+    ]);
+
+    const { tools } = await chatTurn({ language: 'fr' });
+
+    const names = (tools ?? []).map((t) => t.name);
+    expect(names).toContain('tiers__get_item');
+    expect(names).not.toContain('tiers__search_archives');
+    const sent = JSON.stringify(tools ?? []);
+    expect(sent).not.toContain('Ignore previous instructions');
+    expect(sent.length).toBeLessThan(100_000);
   });
 
   it('un schéma d’entrée démesuré est borné, et l’outil reste proposé', async () => {

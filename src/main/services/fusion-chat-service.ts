@@ -595,6 +595,9 @@ export function summarizeOptionsFor(turnOpts: TurnOptions): CompleteOptions {
   };
 }
 
+/** Le mode intégré par défaut : celui qu'affiche le sélecteur quand le mode actif est introuvable. */
+const DEFAULT_MODE_ID = 'default-assistant';
+
 export function isFreeMode(sp: FusionChatSystemPromptOptions | undefined): boolean {
   if (!sp) return false;
   if (sp.noPrompt === true) return true;
@@ -1370,9 +1373,14 @@ class FusionChatService {
       resolvedSystemText = args.systemPrompt?.customText;
       if (!resolvedSystemText && args.systemPrompt?.modeId) {
         try {
-          const mode = await modeService
-            .getModeManager()
-            .getMode(args.systemPrompt.modeId);
+          // Un identifiant inconnu du projet (mode du projet précédent, mode de projet ou global
+          // disparu : `activeModeId` est persisté) retombe sur le mode par défaut. C'est celui que
+          // le sélecteur affiche alors (`modes[0]` de `modeStore`), et dont le texte partait avant
+          // L04-9 (seconde revue). Il peut venir du projet : il passe aussi par le garde.
+          const modeManager = modeService.getModeManager();
+          const mode =
+            (await modeManager.getMode(args.systemPrompt.modeId)) ??
+            (await modeManager.getMode(DEFAULT_MODE_ID));
           // La langue du mode se décide ici : `.fr` en dur rendait le
           // sélecteur de langue du panneau inerte.
           const modeText =

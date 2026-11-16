@@ -227,6 +227,14 @@ class SchemaTooDeep extends Error {}
  * Copie du schéma dont chaque `description` et chaque `title` de type chaîne
  * est borné. Une propriété qui s'appelle `description` a pour valeur un
  * sous-schéma, pas une chaîne : elle est parcourue, pas bornée.
+ *
+ * L'adresse du méta-schéma (`$schema` à la racine, que pose tout schéma
+ * généré par zod) ne passe pas dans la copie : aucun fournisseur ne la lit,
+ * et c'était un lien de plus par outil et par tour dans le journal de
+ * sécurité. Ce qui ne part pas n'a pas à être inspecté. Partout ailleurs, une
+ * clé `$schema` reste, inspectée et comptée comme les autres : une propriété
+ * qui s'appelle ainsi a pour valeur un sous-schéma (seconde revue de L04-9,
+ * où l'exemption valait à toutes les profondeurs, pour une clé envoyée).
  */
 function boundSchemaText(value: unknown, depth: number, truncated: { count: number }): unknown {
   if (depth > MAX_SCHEMA_DEPTH) throw new SchemaTooDeep();
@@ -234,6 +242,7 @@ function boundSchemaText(value: unknown, depth: number, truncated: { count: numb
   if (value === null || typeof value !== 'object') return value;
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
+    if (depth === 0 && key === '$schema' && typeof child === 'string') continue;
     if (SCHEMA_TEXT_KEYS.has(key) && typeof child === 'string' && child.length > MAX_SCHEMA_TEXT_CHARS) {
       truncated.count += 1;
       out[key] =
@@ -256,9 +265,9 @@ function boundSchemaText(value: unknown, depth: number, truncated: { count: numb
  *     forme du schéma reste, et le modèle sait toujours quoi envoyer.
  *  2. Un schéma qui reste démesuré, ou trop profond pour être lu, est
  *     écarté.
- *  3. Le schéma sérialisé est inspecté, sans l'adresse de son méta-schéma
- *     (`$schema`, que porte tout schéma généré par zod) : un lien de plus
- *     par outil et par tour dans le journal de sécurité, pour rien.
+ *  3. Le schéma sérialisé est inspecté tel qu'il part : ce que le modèle
+ *     lit est exactement ce qui a été compté et inspecté. Seule l'adresse
+ *     du méta-schéma, à la racine, n'y est plus (`boundSchemaText`).
  *
  * Rend le schéma à envoyer, ou `null` : l'outil sort alors du catalogue.
  */
@@ -275,7 +284,7 @@ export function inspectToolSchema(
   let serialized: string;
   try {
     bounded = boundSchemaText(schema, 0, truncated);
-    serialized = JSON.stringify(bounded, (key, value: unknown) => (key === '$schema' ? undefined : value));
+    serialized = JSON.stringify(bounded);
   } catch (e) {
     if (!(e instanceof SchemaTooDeep)) throw e;
     opts.onEvent?.({
