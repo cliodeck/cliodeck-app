@@ -312,6 +312,27 @@ describe('vraie fabrique SDK et mini-serveur stdio : arrêté veut dire arrêté
     expect(pids()).toHaveLength(1);
     expect(pids().filter(alive)).toEqual([]);
   }, 15_000);
+
+  // A10 : le journal d'accès ne s'ouvre qu'au premier événement. Il doit quand même tout recevoir,
+  // dans le `.cliodeck` du projet (revue de l'orchestrateur).
+  it('le journal d’accès du projet reçoit les événements du serveur, jusqu’à son arrêt', async () => {
+    const accessLog = path.join(root, '.cliodeck', 'mcp-access.jsonl');
+    expect(existsSync(accessLog)).toBe(false);
+
+    expect((await mcpClientsService.addClient(client())).state).toBe('ready');
+    await mcpClientsService.unload();
+    // `end()` vide le flux en arrière-plan : on attend la ligne de l'arrêt, bornée.
+    await vi.waitFor(() => expect(readFileSync(accessLog, 'utf8')).toMatch(/"to":"stopped"/), { timeout: 5_000 });
+
+    const entries = readFileSync(accessLog, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { kind: string; name: string; to?: string });
+    expect(entries.every((e) => e.name === 'mini')).toBe(true);
+    expect(entries.filter((e) => e.kind === 'state_changed').map((e) => e.to)).toEqual(
+      expect.arrayContaining(['ready', 'stopped'])
+    );
+  }, 15_000);
 });
 
 /**
@@ -596,6 +617,25 @@ describe('clés des serveurs MCP : une portée par projet (S09-1-6)', () => {
     expect(diskOf(rootA).secrets_scope).toBe(scope);
     expect(seenByGate.map(fingerprintClient)).toEqual([fingerprintClient(seenByGate[0]), fingerprintClient(seenByGate[0])]);
     expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-test-A', EUROPEANA_LANG: 'fr' });
+  });
+
+  // A10 : l'écriture de la migration n'a lieu que s'il y a quelque chose à ranger. Une clé ajoutée en
+  // clair à la main, dans un projet qui a déjà sa portée, en est une (revue de l'orchestrateur).
+  it('projet qui a déjà sa portée, une clé ajoutée en clair dans config.json : rangée à l’ouverture', async () => {
+    const SCOPE = '11111111-2222-3333-4444-555555555555';
+    const rootA = await makeProject([]);
+    writeFileSync(
+      configOf(rootA),
+      JSON.stringify({ schema_version: 2, name: 'p', secrets_scope: SCOPE, mcpClients: [europeana('cle-en-clair')] }, null, 2)
+    );
+
+    await mcpClientsService.loadProject(rootA);
+
+    expect(diskOf(rootA).secrets_scope).toBe(SCOPE);
+    expect(diskOf(rootA).mcpClients[0].env).toEqual({ EUROPEANA_API_KEY: SECRET_SENTINEL, EUROPEANA_LANG: 'fr' });
+    expect(readFileSync(configOf(rootA), 'utf8')).not.toContain('cle-en-clair');
+    expect(secrets.get(`mcp.project.${SCOPE}.client.europeana.env.EUROPEANA_API_KEY`)).toBe('cle-en-clair');
+    expect(lastEnv()).toEqual({ EUROPEANA_API_KEY: 'cle-en-clair', EUROPEANA_LANG: 'fr' });
   });
 
   it.skipIf(process.getuid?.() === 0)(
