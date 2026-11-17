@@ -28,6 +28,7 @@ import { mcpClientsService } from '../mcp-clients-service.js';
 import { SECRET_SENTINEL } from '../mcp-env-secrets.js';
 import { MCPClientManager } from '../../../../backend/integrations/mcp-clients/manager.js';
 import type { MCPClientConfig as ManagerClientConfig } from '../../../../backend/integrations/mcp-clients/types.js';
+import type { ProjectHandle } from '../../../../backend/types/project-handle.js';
 
 const HOSTILE = {
   name: 'helper',
@@ -139,6 +140,70 @@ describe('loadProject — garde d’approbation des serveurs MCP', () => {
       unsubscribe();
       await fs.rm(rootB, { recursive: true, force: true });
     }
+  });
+
+  /**
+   * A10 : à l'ouverture d'un projet, la séquence passe son handle. Elle l'avorte dès qu'elle commence
+   * à fermer cette ouverture (bascule, fermeture, sortie de l'app), avant d'arriver au déchargement :
+   * une fermeture attend d'abord la fin d'un tour de chat, la sortie la file des bascules.
+   */
+  function handleFor(rootPath: string): ProjectHandle & { end(): void } {
+    const controller = new AbortController();
+    return {
+      path: rootPath,
+      epoch: 1,
+      signal: controller.signal,
+      isCurrent: () => !controller.signal.aborted,
+      assertCurrent: () => undefined,
+      end: () => controller.abort(),
+    };
+  }
+
+  it('handle fini pendant la question d’accord : rien ne démarre, même accepté (A10)', async () => {
+    root = await makeWorkspace([LOCAL]);
+    const handle = handleFor(root);
+    let approve!: () => void;
+    mcpClientsService.approvalGate = () => new Promise((resolve) => (approve = () => resolve('approved')));
+    const events: string[] = [];
+    const unsubscribe = mcpClientsService.subscribe((e) => events.push(`${e.name}:${e.kind}`));
+
+    try {
+      const loading = mcpClientsService.loadProject(root, handle);
+      await vi.waitFor(() => expect(approve).toBeTypeOf('function'), { timeout: 10_000 });
+      handle.end();
+      approve();
+      await loading;
+
+      expect(mcpClientsService.list()).toEqual([]);
+      expect(events).toEqual([]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('plusieurs serveurs, une question à la fois ; le projet fermé pendant la première, aucune autre (A10)', async () => {
+    root = await makeWorkspace([
+      { name: 'premier', transport: 'stdio', command: '/nonexistent/mcp-1' },
+      { name: 'second', transport: 'stdio', command: '/nonexistent/mcp-2' },
+    ]);
+    const handle = handleFor(root);
+    const asked: string[] = [];
+    let answer!: () => void;
+    mcpClientsService.approvalGate = (client) => {
+      asked.push(client.name);
+      // La suivante, si elle était posée, recevrait un refus : le test finit, et dit qu'elle l'a été.
+      if (asked.length > 1) return Promise.resolve('rejected');
+      return new Promise((resolve) => (answer = () => resolve('approved')));
+    };
+
+    const loading = mcpClientsService.loadProject(root, handle);
+    await vi.waitFor(() => expect(asked).toEqual(['premier']), { timeout: 10_000 });
+    handle.end();
+    answer();
+    await loading;
+
+    expect(asked).toEqual(['premier']);
+    expect(mcpClientsService.list()).toEqual([]);
   });
 
   // L'empreinte de l'accord se calcule sur ce que voit le garde : une clé d'API doit y être la

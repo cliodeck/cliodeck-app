@@ -271,11 +271,16 @@ describe('project:create — le projet créé a ses services, comme à l’ouver
     expect(projectManager.getCurrentProjectPath()).toBe(path.join(workDir, 'C'));
   });
 
-  it('un projet créé charge ses clients MCP sans attendre, comme avant (A10)', async () => {
+  it('un projet créé charge ses clients MCP sans attendre, une seule fois (A10)', async () => {
     await call('project:create', { name: 'C', type: 'article', path: workDir });
     await settle();
 
-    expect(mcpClientsService.loadProject).toHaveBeenCalledWith(path.join(workDir, 'C'));
+    // Par la séquence, comme toute ouverture : chargés deux fois, ils poseraient deux questions.
+    expect(mcpClientsService.loadProject).toHaveBeenCalledTimes(1);
+    expect(mcpClientsService.loadProject).toHaveBeenCalledWith(
+      path.join(workDir, 'C'),
+      expect.objectContaining({ path: path.join(workDir, 'C') })
+    );
   });
 
   it('un refus de création arrive avant toute fermeture : le projet ouvert reste, services compris', async () => {
@@ -292,7 +297,7 @@ describe('project:create — le projet créé a ses services, comme à l’ouver
 });
 
 describe('project:load — la bascule', () => {
-  it('n’appelle pas mcpClientsService.loadProject, et décharge le projet précédent (A10)', async () => {
+  it('charge les clients MCP de B, après le déchargement de A et l’ouverture des autres services (A10)', async () => {
     await call('project:create', { name: 'A', type: 'article', path: workDir });
     await settle();
     const fileB = makeProject('B');
@@ -303,9 +308,50 @@ describe('project:load — la bascule', () => {
     await settle();
 
     expect(loaded.success).toBe(true);
-    expect(mcpClientsService.loadProject).not.toHaveBeenCalled();
-    expect(h.events).toContain('mcp:unload');
+    expect(mcpClientsService.loadProject).toHaveBeenCalledTimes(1);
+    // Avec le handle de cette ouverture : le service s'arrête si elle est abandonnée.
+    const [root, handle] = vi.mocked(mcpClientsService.loadProject).mock.calls[0] as unknown as [
+      string,
+      { path: string; isCurrent(): boolean },
+    ];
+    expect(root).toBe(path.dirname(fileB));
+    expect(handle.path).toBe(path.dirname(fileB));
+    expect(handle.isCurrent()).toBe(true);
+    expect(h.events.indexOf('mcp:unload')).toBeGreaterThan(-1);
     expect(h.events.indexOf('mcp:unload')).toBeLessThan(h.events.indexOf('open:history:B'));
+    // En arrière-plan, après les autres : une question d'accord ne retient pas l'ouverture.
+    expect(h.events.indexOf('mcp:load:B')).toBeGreaterThan(h.events.indexOf('open:manuscript:B'));
+  });
+
+  it('une question d’accord sans réponse ne retient pas l’ouverture (A10)', async () => {
+    const fileA = makeProject('A');
+    // Le garde attend l'historien, qui ne répond pas.
+    vi.mocked(mcpClientsService.loadProject).mockImplementationOnce(() => new Promise<void>(() => undefined));
+
+    const loaded = await call<Reply>('project:load', fileA);
+
+    expect(loaded.success).toBe(true);
+    expect(mcpClientsService.loadProject).toHaveBeenCalledWith(path.dirname(fileA), expect.anything());
+    expect(projectManager.getCurrentProjectPath()).toBe(path.dirname(fileA));
+  });
+
+  it('ouverture refusée : aucun client du projet refusé ne se charge, et ceux de A reviennent avec lui (A10)', async () => {
+    const fileA = makeProject('A');
+    await call('project:load', fileA);
+    const fileB = makeProject('B');
+    vi.mocked(mcpClientsService.loadProject).mockClear();
+    h.events.length = 0;
+    const { tropyService } = await import('../../../services/tropy-service.js');
+    vi.mocked(tropyService.init).mockImplementationOnce(async () => {
+      throw new Error('panne');
+    });
+
+    const refused = await call<Reply>('project:load', fileB);
+    await settle();
+
+    expect(refused).toMatchObject({ success: false, restoredPath: path.dirname(fileA) });
+    expect(h.events).not.toContain('mcp:load:B');
+    expect(vi.mocked(mcpClientsService.loadProject).mock.calls.map(([root]) => label(root))).toEqual(['A']);
   });
 
   it('les services de A se ferment avant que ceux de B s’ouvrent ; les journaux se ferment après pdf', async () => {
@@ -364,6 +410,10 @@ describe('un tour de chat pendant la bascule (A17, Q11)', () => {
     expect(h.events.indexOf('chat:journal')).toBeGreaterThan(-1);
     expect(h.events.indexOf('chat:journal')).toBeLessThan(h.events.indexOf('close:history'));
     expect(h.events.indexOf('chat:journal')).toBeLessThan(h.events.indexOf('close:usage'));
+    // Ouverts en arrière-plan, après les autres, les clients MCP se ferment les premiers (A10) : leurs
+    // serveurs s'arrêtent avant que la fermeture attende la fin du tour.
+    expect(h.events.indexOf('mcp:unload')).toBeGreaterThan(-1);
+    expect(h.events.indexOf('mcp:unload')).toBeLessThan(h.events.indexOf('chat:journal'));
   });
 });
 

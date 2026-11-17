@@ -7,9 +7,10 @@
  * `.cliodeck` lié hors du projet (D18) : seul le service des modes s'ouvre, comme avant, ses modes
  * vivant hors de `.cliodeck`. Aucun autre n'ouvre une base, un index ou un journal à travers le lien.
  *
- * Les clients MCP ne démarrent pas à l'ouverture (A10) : leur chargement passe par une approbation,
- * et la rc.6 ne lance aucun processus tiers en ouvrant un projet. La table les décharge seulement, à
- * la bascule et à la fermeture.
+ * Les clients MCP se chargent à l'ouverture, en arrière-plan (A10) : un serveur que l'historien a
+ * accepté démarre sans nouvelle question, un serveur inconnu (projet reçu d'un tiers) attend son
+ * accord, et ni l'un ni l'autre ne retient l'ouverture. Lancés après les autres, ils se ferment les
+ * premiers : leurs serveurs s'arrêtent avant que la fermeture attende la fin d'un tour de chat.
  */
 import type { RebuildProgressEvent } from '../../../backend/types/rebuild-progress.js';
 import type { ProjectHandle } from '../../../backend/types/project-handle.js';
@@ -178,9 +179,12 @@ export function projectServices(): Service[] {
       close: () => bibliographyService.forget(),
     },
     {
-      // Déchargés à la bascule et à la fermeture ; jamais chargés ici (A10).
+      // Sans attente (A10) : une question d'accord laissée ouverte, ou un serveur long à démarrer (un
+      // premier `npx`), ne retient ni l'ouverture ni la file. Pas à travers un `.cliodeck` lié dehors :
+      // son `config.json` est celui d'un autre dossier. Déchargés à la bascule et à la fermeture.
       name: 'mcpClientsService',
-      mode: 'best-effort',
+      mode: 'background',
+      open: unlessLinked('mcpClientsService', (handle) => mcpClientsService.loadProject(handle.path, handle)),
       close: () => mcpClientsService.unload(),
     },
     {

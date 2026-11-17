@@ -42,7 +42,7 @@ vi.mock('../../../services/config-manager.js', () => ({
 vi.mock('../../../services/pdf-service.js', () => ({
   pdfService: { init: h.pdfInit, close: h.pdfClose, getCurrentProjectPath: () => null },
 }));
-// La création les charge sans attendre ; l'ouverture n'y touche pas ; la fermeture les décharge.
+// Chargés à l'ouverture, sauf à travers un `.cliodeck` lié dehors (A10) ; déchargés à la fermeture.
 vi.mock('../../../services/mcp-clients-service.js', () => ({
   mcpClientsService: { loadProject: vi.fn(async () => undefined), unload: vi.fn(async () => undefined) },
 }));
@@ -54,6 +54,7 @@ import { setupProjectHandlers } from '../project-handlers.js';
 import { modeService } from '../../../services/mode-service.js';
 import { usageJournalService } from '../../../services/usage-journal-service.js';
 import { historyService } from '../../../services/history-service.js';
+import { mcpClientsService } from '../../../services/mcp-clients-service.js';
 
 let workDir: string;
 let projectDir: string;
@@ -108,6 +109,7 @@ beforeEach(async () => {
   writeFileSync(path.join(projectDir, 'document.md'), '# Thèse\n');
   h.pdfInit.mockClear();
   h.pdfClose.mockClear();
+  vi.mocked(mcpClientsService.loadProject).mockClear();
   h.handlers.clear();
   setupProjectHandlers();
 });
@@ -131,6 +133,8 @@ describe.skipIf(!symlinkAvailable || !sqliteAvailable)('project:load — .cliode
     expect(folderState(outside)).toEqual(before);
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(h.pdfInit).not.toHaveBeenCalled();
+    // Aucun serveur MCP ne se lance pour un `config.json` lu à travers le lien (A10).
+    expect(mcpClientsService.loadProject).not.toHaveBeenCalled();
   });
 
   it('brain.db lié vers celui d’un autre projet : aucune table de ce projet n’y arrive', async () => {
@@ -200,6 +204,7 @@ describe.skipIf(!symlinkAvailable || !sqliteAvailable)('project:load — .cliode
     expect(folderState(outside)).toEqual(before);
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(h.pdfInit).not.toHaveBeenCalled();
+    expect(mcpClientsService.loadProject).not.toHaveBeenCalled();
   });
 
   it('project:create dans un dossier dont .cliodeck est lié dehors : créé, refusé, rien à l’autre bout', async () => {
@@ -216,6 +221,7 @@ describe.skipIf(!symlinkAvailable || !sqliteAvailable)('project:load — .cliode
     expect(result.configIssue).toEqual({ kind: 'linked_outside', path: link });
     expect(folderState(outside)).toEqual(before);
     expect(h.pdfInit).not.toHaveBeenCalled();
+    expect(mcpClientsService.loadProject).not.toHaveBeenCalled();
   });
 
   it('project:create refusé : les modes du projet, hors de .cliodeck, sont quand même les siens', async () => {
@@ -266,6 +272,8 @@ describe.skipIf(!symlinkAvailable || !sqliteAvailable)('project:load — .cliode
     expect(result.configIssue).toBeUndefined();
     expect(h.pdfInit).toHaveBeenCalledWith(projectDir, expect.any(Function), expect.objectContaining({ path: projectDir }));
     expect(readdirSync(path.join(projectDir, '.cliodeck'))).toContain('brain.db');
+    // Le témoin des refus ci-dessus : sans lien, les clients MCP du projet se chargent (A10).
+    expect(mcpClientsService.loadProject).toHaveBeenCalledWith(projectDir, expect.objectContaining({ path: projectDir }));
   });
 
   it('un lien qui reste dans le projet n’est pas refusé', async () => {

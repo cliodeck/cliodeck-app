@@ -194,10 +194,23 @@ describe('un config.json illisible n’est pas une configuration vide (S11-1-8)'
     expect(disk.vault).toEqual({ path: '/Volumes/Notes' });
   });
 
-  it('config.json absent : loadProject le crée, comme avant', async () => {
+  // A10 : `loadProject` passe à chaque ouverture de projet. Un projet sans serveur n'y gagne rien sur
+  // le disque : ni config.json, ni journal d'accès vide, ni dossiers de recettes.
+  it('config.json absent : loadProject ne crée rien dans .cliodeck, et un ajout le crée (A10)', async () => {
     await mcpClientsService.loadProject(root);
-    expect(existsSync(configFile)).toBe(true);
-    expect(JSON.parse(readFileSync(configFile, 'utf8')).name).toBe(path.basename(root));
+
+    expect(readdirSync(path.join(root, '.cliodeck'))).toEqual([]);
+    // Le projet reste chargé : l'ajout écrit config.json, comme avant.
+    await mcpClientsService.addClient({ ...CLIENT });
+    expect(JSON.parse(readFileSync(configFile, 'utf8')).mcpClients).toEqual([CLIENT]);
+  });
+
+  it('config.json sans serveur : loadProject n’ajoute rien à .cliodeck (A10)', async () => {
+    writeFileSync(configFile, JSON.stringify({ schema_version: 2, name: 'Thèse', mcpClients: [] }));
+
+    await mcpClientsService.loadProject(root);
+
+    expect(readdirSync(path.join(root, '.cliodeck'))).toEqual(['config.json']);
   });
 
   it('aucun secret à ranger : ouvrir un projet ne réécrit pas config.json', async () => {

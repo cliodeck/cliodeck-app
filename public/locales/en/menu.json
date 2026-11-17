@@ -63,6 +63,8 @@
   "mcpConfirmMessage": "Add MCP server “{{name}}”?",
   "mcpConfirmCancel": "Cancel",
   "mcpConfirmAccept": "Add MCP server",
+  "mcpConfirmLoadMessage": "This project declares the MCP server “{{name}}”. Start it?",
+  "mcpConfirmLoadAccept": "Start MCP server",
   "mcpConfirmName": "Name: {{name}}",
   "mcpConfirmCommand": "Command: {{command}}",
   "mcpConfirmArgs": "Arguments: {{args}}",
@@ -70,7 +72,7 @@
   "mcpConfirmEnv": "Environment variables: {{env}}",
   "mcpConfirmEnvNone": "Environment variables: none",
   "mcpConfirmEnvRedirect": "These variables decide which program actually runs, or which registry it is downloaded from, directly or through the configuration files they point to: {{keys}}. Check their value.",
-  "mcpConfirmStdioWarning": "This will spawn a local process with the above command now, and again whenever you restart this server. Only confirm if you trust this source.",
+  "mcpConfirmStdioWarning": "This will spawn a local process with the above command now, then, without asking again, whenever a project that declares this server is opened or you restart it. Only confirm if you trust this source.",
   "mcpConfirmUrl": "Address: {{url}}",
-  "mcpConfirmSseWarning": "ClioDeck will connect to this address now, and again whenever you restart this server. When the assistant calls one of this server's tools, the arguments of the call are sent to this address: they can contain excerpts of the conversation, the manuscript or the notes, even with a local model. Only confirm if you trust this address."
+  "mcpConfirmSseWarning": "ClioDeck will connect to this address now, then, without asking again, whenever a project that declares this server is opened or you restart it. When the assistant calls one of this server's tools, the arguments of the call are sent to this address: they can contain excerpts of the conversation, the manuscript or the notes, even with a local model. Only confirm if you trust this address."
 }
