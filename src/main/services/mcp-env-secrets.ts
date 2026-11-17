@@ -103,6 +103,23 @@ export function clientHasSecrets(client: WorkspaceClientConfig): boolean {
   );
 }
 
+/** Une valeur sensible encore en clair : celle que `migrateClientEnvSecrets` range. */
+function isPlainSecret(envKey: string, value: unknown): value is string {
+  return typeof value === 'string' && value !== SECRET_SENTINEL && isSensitiveEnvVarName(envKey);
+}
+
+/**
+ * La migration des secrets a-t-elle quelque chose à écrire pour ces clients, lus avec cette portée ?
+ * Une valeur sensible en clair à ranger, ou la portée à faire naître pour un projet qui a des
+ * secrets (S09-1-6). Lu sans verrou, sur ce que le chargement a déjà lu : ce test évite seulement
+ * l'écriture, et les dossiers qu'elle crée, à l'ouverture d'un projet qui n'a rien à migrer (A10).
+ * Le mutateur refait le sien sous le verrou.
+ */
+export function secretsMigrationDue(clients: WorkspaceClientConfig[], scope: string | null): boolean {
+  if (scope === null) return clients.some(clientHasSecrets);
+  return clients.some((client) => Object.entries(client.env ?? {}).some(([k, v]) => isPlainSecret(k, v)));
+}
+
 /**
  * Mutates `client` in place: every sensitive env value that is not yet
  * a sentinel is moved to `secureStorage` and replaced by `SECRET_SENTINEL`.
@@ -113,9 +130,7 @@ export function migrateClientEnvSecrets(scope: string, client: WorkspaceClientCo
   if (!client.env) return false;
   let migrated = false;
   for (const [envKey, value] of Object.entries(client.env)) {
-    if (typeof value !== 'string') continue;
-    if (value === SECRET_SENTINEL) continue;
-    if (!isSensitiveEnvVarName(envKey)) continue;
+    if (!isPlainSecret(envKey, value)) continue;
     secureStorage.setKey(secretKeyFor(scope, client.name, envKey), value);
     client.env[envKey] = SECRET_SENTINEL;
     migrated = true;

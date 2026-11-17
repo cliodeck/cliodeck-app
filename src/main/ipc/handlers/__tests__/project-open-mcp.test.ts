@@ -95,6 +95,7 @@ import { setupProjectHandlers, type ProjectHandlersHandle } from '../project-han
 import { setupFusionHandlers } from '../fusion-handlers.js';
 import { mcpClientsService } from '../../../services/mcp-clients-service.js';
 import { loadMenuTranslations, setLanguage } from '../../../i18n.js';
+import { SECRET_SENTINEL } from '../../../services/mcp-env-secrets.js';
 
 const SERVER = fileURLToPath(
   new URL('../../../../../backend/integrations/mcp-clients/__tests__/fixtures/mini-mcp-server.mjs', import.meta.url)
@@ -370,6 +371,78 @@ describe('ce que l’ouverture écrit dans .cliodeck (A10)', () => {
     await call('project:close');
 
     expect(listing(path.dirname(file))).toEqual(expected);
+  });
+
+  /** Un `config.json` qui déclare `clients`, avec la portée des secrets s'il y en a une. */
+  const declare = (dir: string, clients: unknown[], secretsScope?: string): void => {
+    mkdirSync(path.join(dir, '.cliodeck'));
+    writeFileSync(
+      path.join(dir, '.cliodeck', 'config.json'),
+      JSON.stringify({ schema_version: 2, name: 'P', mcpClients: clients, ...(secretsScope ? { secrets_scope: secretsScope } : {}) })
+    );
+  };
+  const absent = (env?: Record<string, string>) => ({
+    name: 'absent',
+    transport: 'stdio',
+    command: '/nonexistent/cliodeck-mcp-absent',
+    ...(env ? { env } : {}),
+  });
+  const SCOPE = '123e4567-e89b-42d3-a456-426614174000';
+
+  /**
+   * Un projet qui déclare un serveur, refusé : la question laisse sa ligne d'audit dans
+   * `mcp-access.jsonl`, et rien d'autre. Seul un secret en clair à ranger, ou une portée à faire
+   * naître, réécrit `config.json`, et la migration crée alors les dossiers de recettes
+   * (`ensureWorkspaceDirectories`). Sur `main`, l'ouverture ne chargeait aucun client : `config.json`
+   * seul restait.
+   */
+  const DECLARED: Array<[string, (dir: string) => void, string[]]> = [
+    ['serveur sans secret', (dir) => declare(dir, [absent()]), ['config.json', 'mcp-access.jsonl']],
+    [
+      'serveur au secret déjà rangé, portée connue',
+      (dir) => declare(dir, [absent({ API_TOKEN: SECRET_SENTINEL })], SCOPE),
+      ['config.json', 'mcp-access.jsonl'],
+    ],
+    [
+      'serveur au secret en clair, rangé à l’ouverture',
+      (dir) => declare(dir, [absent({ API_TOKEN: 'jeton-en-clair' })]),
+      ['config.json', 'mcp-access.jsonl', 'recipes', 'recipes-runs'],
+    ],
+  ];
+
+  it.each(DECLARED)('%s, refusé : seulement ce qui doit s’écrire', async (_label, prepare, expected) => {
+    const file = makeProject('P');
+    prepare(path.dirname(file));
+
+    await call('project:load', file);
+    await loaded();
+    await call('project:close');
+
+    expect(h.questions.map((q) => q.message)).toEqual([DECLARED_QUESTION('absent')]);
+    expect(listing(path.dirname(file))).toEqual(expected);
+  });
+
+  /**
+   * Sur `main`, `project:create` chargeait lui-même les clients MCP par `readOrInitWorkspaceConfig` :
+   * tout projet neuf recevait `config.json`, `mcp-access.jsonl`, `recipes/` et `recipes-runs/`
+   * (mesuré par le pilote). La création passe maintenant par la séquence, comme une ouverture, et ce
+   * chargement n'écrit rien. Dans l'app, les journaux et le corpus (simulés ici) y écrivent
+   * `brain.db` et `journal.db` ; `config.json` naît à la seconde ouverture, par la migration d'un
+   * `.cliodeck` sans lui (cas « .cliodeck sans config.json » ci-dessus), ou au premier réglage écrit.
+   */
+  it('créer un projet : le chargement des clients MCP n’écrit rien dans .cliodeck', async () => {
+    const created = await call<Reply & { path?: string }>('project:create', {
+      name: 'Neuf',
+      type: 'article',
+      path: workDir,
+    });
+    expect(created.success).toBe(true);
+    await loaded();
+    await call('project:close');
+
+    expect(h.questions).toEqual([]);
+    expect(existsSync(path.join(workDir, 'Neuf', 'project.json'))).toBe(true);
+    expect(listing(path.join(workDir, 'Neuf'))).toBeNull();
   });
 
   it('le dossier du projet disparaît pendant la question : rien n’est recréé à son ancien chemin', async () => {

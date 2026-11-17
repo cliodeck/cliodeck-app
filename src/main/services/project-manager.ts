@@ -455,7 +455,10 @@ export class ProjectManager {
       throw error;
     }
 
-    // Ensure flat .cliodeck/ layout (with config.json) from day 1. Idempotent.
+    // Un `.cliodeck` que le dossier portait déjà est mis à plat, comme à l'ouverture. Un dossier neuf
+    // n'en a pas : rien ne s'écrit ici. Depuis A10, le chargement des clients MCP ne crée plus
+    // `config.json` non plus : il naît au premier réglage écrit, ou à la seconde ouverture, par la
+    // migration d'un `.cliodeck` sans lui (`legacy-flat`). Idempotent.
     await autoMigrateWorkspace(projectPath);
     // Le dossier pouvait déjà porter un `.cliodeck` : mêmes conséquences qu'à l'ouverture.
     const configIssue = await workspaceConfigIssue(projectPath);

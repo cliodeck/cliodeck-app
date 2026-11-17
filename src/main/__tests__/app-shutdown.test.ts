@@ -94,6 +94,10 @@ vi.mock('../services/manuscript-index-service.js', () => ({
 vi.mock('../services/reading-notes-indexing.js', () => ({ indexReadingNotesInBackground: vi.fn() }));
 vi.mock('../services/mcp-clients-service.js', () => ({
   mcpClientsService: {
+    // Chargés à chaque ouverture, en arrière-plan (A10).
+    loadProject: vi.fn(async () => {
+      h.events.push('open:mcp');
+    }),
     unload: vi.fn(async () => {
       h.events.push('close:mcp');
       await h.mcpUnload?.();
@@ -429,6 +433,29 @@ describe('la vraie table des services : les journaux se ferment dans l’échéa
       services: projectServices(),
     });
   }
+
+  it('les clients MCP : chargés après les autres à l’ouverture, arrêtés les premiers à la sortie', async () => {
+    vi.useFakeTimers();
+    const warn = vi.mocked(console.warn);
+    const lifecycle = lifecycleOverRealTable();
+    expect((await lifecycle.open(PROJECT, {})).success).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Lancés sans attente, après tous les services attendus (A10).
+    const opens = h.events.filter((e) => e.startsWith('open:'));
+    expect(opens.at(-1)).toBe('open:mcp');
+    expect(opens.filter((e) => e === 'open:mcp')).toHaveLength(1);
+    expect(warn.mock.calls.flat().join(' ')).not.toMatch(/mcpClientsService/);
+    h.events.length = 0;
+    const { onQuit, exit } = quitHandlerFor(lifecycle);
+
+    await onQuit(quitEvent());
+
+    expect(exit).toHaveBeenCalledTimes(1);
+    // Fermés dans l'ordre inverse : les serveurs s'arrêtent avant tout autre service du projet.
+    expect(h.events.find((e) => e.startsWith('close:'))).toBe('close:mcp');
+    expect(h.events.indexOf('close:usage')).toBeLessThan(h.events.indexOf('exit'));
+  });
 
   it('un tour de chat qui ne se draine pas et des clients MCP sans réponse : les deux journaux se ferment avant app.exit', async () => {
     vi.useFakeTimers();

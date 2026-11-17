@@ -44,6 +44,7 @@ import {
   ensureSecretsScope,
   migrateClientEnvSecrets,
   resolveClientEnvSecrets,
+  secretsMigrationDue,
   secretsScopeOf,
 } from './mcp-env-secrets.js';
 
@@ -211,8 +212,7 @@ class MCPClientsService {
       if (e.kind !== 'absent') console.warn('[mcp-clients] config.json illisible, aucun serveur démarré:', e.message);
       return;
     }
-    // Aucun serveur déclaré : rien à ranger, à demander ni à démarrer. La migration des secrets, qui
-    // crée les dossiers de `.cliodeck` avant de lire, n'est pas appelée pour rien.
+    // Aucun serveur déclaré : rien à ranger, à demander ni à démarrer.
     if (superseded() || clients.length === 0) return;
 
     // Fusion 1.5: any sensitive env value still in plain text inside
@@ -223,26 +223,31 @@ class MCPClientsService {
     // ou pour recopier sous elle l'ancienne clé d'un projet déjà migré (S09-1-6). Si l'écriture
     // échoue, le projet reste sans portée, et l'ancienne clé sert toujours ; ce qui a été rangé sous
     // la portée née dans l'écriture est retiré, sans quoi chaque ouverture en laisserait une copie.
-    const unsaved: Array<{ scope: string; clients: WorkspaceClientConfig[] }> = [];
-    try {
-      const cfg = await updateWorkspaceConfig(root, (current) => {
-        const declared = current.mcpClients ?? [];
-        if (!declared.some(clientHasSecrets)) return false;
-        let changed = secretsScopeOf(current) === null;
-        const currentScope = ensureSecretsScope(current);
-        if (changed) unsaved.push({ scope: currentScope, clients: declared });
-        for (const w of declared) {
-          if (migrateClientEnvSecrets(currentScope, w)) changed = true;
-        }
-        return changed ? undefined : false;
-      });
-      clients = cfg.mcpClients ?? [];
-      scope = secretsScopeOf(cfg);
-    } catch (e) {
-      console.warn('[mcp-clients] failed to persist secret migration:', e);
-      for (const { scope: lost, clients: stored } of unsaved) discardUnsavedScope(lost, stored);
+    // Appelée seulement s'il y a quelque chose à écrire : `updateWorkspaceConfig` crée les dossiers
+    // de `.cliodeck` avant même le mutateur, et un projet reçu d'un tiers gagnait `recipes/` et
+    // `recipes-runs/` avant la question, même refusée (A10).
+    if (secretsMigrationDue(clients, scope)) {
+      const unsaved: Array<{ scope: string; clients: WorkspaceClientConfig[] }> = [];
+      try {
+        const cfg = await updateWorkspaceConfig(root, (current) => {
+          const declared = current.mcpClients ?? [];
+          if (!declared.some(clientHasSecrets)) return false;
+          let changed = secretsScopeOf(current) === null;
+          const currentScope = ensureSecretsScope(current);
+          if (changed) unsaved.push({ scope: currentScope, clients: declared });
+          for (const w of declared) {
+            if (migrateClientEnvSecrets(currentScope, w)) changed = true;
+          }
+          return changed ? undefined : false;
+        });
+        clients = cfg.mcpClients ?? [];
+        scope = secretsScopeOf(cfg);
+      } catch (e) {
+        console.warn('[mcp-clients] failed to persist secret migration:', e);
+        for (const { scope: lost, clients: stored } of unsaved) discardUnsavedScope(lost, stored);
+      }
+      if (superseded()) return;
     }
-    if (superseded()) return;
 
     // Ne JAMAIS démarrer ce que porte `config.json` sans l'avoir validé et
     // fait approuver : un projet partagé par un tiers exécuterait sinon la
