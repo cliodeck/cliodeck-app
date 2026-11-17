@@ -22,7 +22,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { launchApp } from './_helpers/launch';
+import { launchApp, leaveDialogs } from './_helpers/launch';
 
 const CONFIG_ON_DISK = {
   schema_version: 2,
@@ -91,6 +91,14 @@ async function openProject(app: ElectronApplication, window: Page, project: Proj
 
 const configToast = (window: Page) =>
   window.locator('.status-toast', { hasText: 'Réglages du projet illisibles' });
+
+/**
+ * La question que pose l'ouverture d'un projet qui déclare un serveur jamais accepté (A10). Le
+ * bouchon de `launchApp` la refuse (`cancelId`) : rien ne se connecte.
+ */
+const EUROPEANA_QUESTION = 'Ce projet déclare le serveur MCP « europeana ». Le démarrer ?';
+const questionsAsked = async (app: ElectronApplication) =>
+  (await leaveDialogs(app)).map((seen) => [seen.message, seen.response]);
 
 async function openMcpClients(window: Page): Promise<void> {
   await window.evaluate(() => window.dispatchEvent(new CustomEvent('show-settings-modal')));
@@ -199,6 +207,8 @@ test.describe('config.json illisible', () => {
         await window.keyboard.press('Escape');
 
         expect(readFileSync(project.configJson).equals(before)).toBe(true);
+        // Illisible, le fichier ne lance rien : aucune question sur le serveur qu'il déclare (A10).
+        expect(await questionsAsked(app)).toEqual([]);
       });
 
       // La fermeture non plus n'écrit rien.
@@ -312,6 +322,10 @@ test.describe('config.json illisible', () => {
       const status = await window.evaluate(() => window.electron.fusion.vault.status());
       expect(status).toMatchObject({ success: true, vaultPath: '/Volumes/Notes/Obsidian' });
       expect(JSON.parse(readFileSync(project.configJson, 'utf8')).mcpClients).toEqual(CONFIG_ON_DISK.mcpClients);
+      // Relu, le fichier déclare un serveur jamais accepté : une question à la réouverture, et une
+      // seule, refusée ; rien ne se connecte (A10). Illisible, il n'en posait aucune.
+      await expect.poll(() => questionsAsked(app), { timeout: 10_000 }).toEqual([[EUROPEANA_QUESTION, 0]]);
+      expect(await window.evaluate(() => window.electron.fusion.mcp.list())).toMatchObject({ success: true, clients: [] });
     });
   });
 
@@ -446,6 +460,8 @@ test('dossier parent renommé pendant la session : aucun squelette recréé, et 
 
   await withApp(async (app, window) => {
     await openProject(app, window, project);
+    // Le serveur déclaré, jamais accepté : la question de l'ouverture, refusée, avant de débrancher (A10).
+    await expect.poll(() => questionsAsked(app), { timeout: 10_000 }).toEqual([[EUROPEANA_QUESTION, 0]]);
     const editor = window.locator('.codemirror-editor .cm-content');
     await editor.click();
     await window.keyboard.press('Meta+End');

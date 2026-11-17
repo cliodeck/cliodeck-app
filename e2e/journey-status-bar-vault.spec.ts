@@ -14,8 +14,9 @@
  * d'embeddings, absent des tests : les notes sont écrites dans `brain.db` par le vrai magasin, comme
  * l'indexeur les écrit, avant l'ouverture du projet.
  *
- * L'indicateur MCP n'est pas vérifié ici : en rc.6, aucun client MCP ne se charge (A10), et la liste
- * des serveurs est vide dans l'app. Sa lecture est couverte par `StatusBar.test.tsx`.
+ * L'indicateur MCP n'est pas vérifié ici : ces projets ne déclarent aucun serveur. Il l'est dans
+ * `journey-mcp-project-open.spec.ts`, où les serveurs d'un projet démarrent à son ouverture (A10), et
+ * sa lecture dans `StatusBar.test.tsx`.
  */
 
 import { test, expect, type ElectronApplication, type Page } from '@playwright/test';
