@@ -136,6 +136,11 @@ export function redirectsCommand(key: string): boolean {
 export interface ConfirmOptions {
   dialog: Pick<Dialog, 'showMessageBox'>;
   parentWindow?: Electron.BrowserWindow | null;
+  /**
+   * The question comes from opening a project whose `config.json` declares the server (A10): the
+   * author adds nothing, the project does. Same detail, another message and accept button.
+   */
+  declaredByProject?: boolean;
 }
 
 /**
@@ -168,11 +173,11 @@ function stdioDetail(req: McpAddRequest): string[] {
 /**
  * Show a native modal dialog describing the server: the command, args and env of a stdio server
  * (secret values hidden), or the URL of an SSE server and what is sent to it. Returns true only
- * when the user explicitly clicks "Add".
+ * when the user explicitly clicks "Add" (or "Start", for a server the project declares).
  */
 export async function confirmMcpAdd(
   req: McpAddRequest,
-  { dialog, parentWindow }: ConfirmOptions
+  { dialog, parentWindow, declaredByProject = false }: ConfirmOptions
 ): Promise<boolean> {
   const detail = [
     t('mcpConfirmName').replace('{{name}}', () => req.name),
@@ -183,11 +188,11 @@ export async function confirmMcpAdd(
 
   const res = await dialog.showMessageBox(parentWindow ?? undefined!, {
     type: 'warning',
-    buttons: [t('mcpConfirmCancel'), t('mcpConfirmAccept')],
+    buttons: [t('mcpConfirmCancel'), t(declaredByProject ? 'mcpConfirmLoadAccept' : 'mcpConfirmAccept')],
     defaultId: 0,
     cancelId: 0,
     title: t('mcpConfirmTitle'),
-    message: t('mcpConfirmMessage').replace('{{name}}', () => req.name),
+    message: t(declaredByProject ? 'mcpConfirmLoadMessage' : 'mcpConfirmMessage').replace('{{name}}', () => req.name),
     detail,
   });
   return res.response === 1;
@@ -206,13 +211,19 @@ export interface AuditEntry {
 /**
  * Append one JSONL audit entry. Failures are swallowed (logged to console) —
  * losing an audit line must never prevent the security decision from landing.
+ *
+ * Only the log's own folder (`.cliodeck`) may be created, never its parents: the question can be
+ * answered minutes after the project opened (A10), and a project folder that disappeared meanwhile
+ * (renamed parent, unplugged volume) must not be recreated empty at its old path (L03-3b).
  */
 export async function appendMcpAudit(
   logPath: string,
   entry: AuditEntry
 ): Promise<void> {
   try {
-    await fs.mkdir(path.dirname(logPath), { recursive: true });
+    await fs.mkdir(path.dirname(logPath)).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EEXIST') throw err;
+    });
     await fs.appendFile(logPath, JSON.stringify(entry) + '\n', 'utf8');
   } catch (err) {
     console.warn('[mcp-add-guard] failed to write audit entry:', err);

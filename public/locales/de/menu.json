@@ -63,6 +63,8 @@
   "mcpConfirmMessage": "MCP-Server „{{name}}“ hinzufügen?",
   "mcpConfirmCancel": "Abbrechen",
   "mcpConfirmAccept": "MCP-Server hinzufügen",
+  "mcpConfirmLoadMessage": "Dieses Projekt gibt den MCP-Server „{{name}}“ an. Starten?",
+  "mcpConfirmLoadAccept": "MCP-Server starten",
   "mcpConfirmName": "Name: {{name}}",
   "mcpConfirmCommand": "Befehl: {{command}}",
   "mcpConfirmArgs": "Argumente: {{args}}",
@@ -70,7 +72,7 @@
   "mcpConfirmEnv": "Umgebungsvariablen: {{env}}",
   "mcpConfirmEnvNone": "Umgebungsvariablen: keine",
   "mcpConfirmEnvRedirect": "Diese Variablen bestimmen, welches Programm tatsächlich gestartet wird oder aus welcher Registry es heruntergeladen wird, direkt oder über die Konfigurationsdateien, auf die sie verweisen: {{keys}}. Prüfen Sie ihren Wert.",
-  "mcpConfirmStdioWarning": "Dieser Befehl startet jetzt einen lokalen Prozess und erneut bei jedem Neustart dieses Servers. Bestätigen Sie nur, wenn Sie seiner Quelle vertrauen.",
+  "mcpConfirmStdioWarning": "Dieser Befehl startet jetzt einen lokalen Prozess und erneut, ohne weitere Nachfrage, bei jedem Öffnen eines Projekts, das diesen Server angibt, und bei jedem Neustart des Servers. Bestätigen Sie nur, wenn Sie seiner Quelle vertrauen.",
   "mcpConfirmUrl": "Adresse: {{url}}",
-  "mcpConfirmSseWarning": "ClioDeck verbindet sich jetzt mit dieser Adresse und erneut bei jedem Neustart dieses Servers. Wenn der Assistent ein Tool dieses Servers aufruft, gehen die Argumente des Aufrufs an diese Adresse: Sie können Auszüge aus der Unterhaltung, dem Manuskript oder den Notizen enthalten, auch mit einem lokalen Modell. Bestätigen Sie nur, wenn Sie dieser Adresse vertrauen."
+  "mcpConfirmSseWarning": "ClioDeck verbindet sich jetzt mit dieser Adresse und erneut, ohne weitere Nachfrage, bei jedem Öffnen eines Projekts, das diesen Server angibt, und bei jedem Neustart des Servers. Wenn der Assistent ein Tool dieses Servers aufruft, gehen die Argumente des Aufrufs an diese Adresse: Sie können Auszüge aus der Unterhaltung, dem Manuskript oder den Notizen enthalten, auch mit einem lokalen Modell. Bestätigen Sie nur, wenn Sie dieser Adresse vertrauen."
 }

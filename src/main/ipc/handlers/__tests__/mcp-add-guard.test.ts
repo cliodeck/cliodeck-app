@@ -174,17 +174,54 @@ describe('confirmMcpAdd — native dialog gate', () => {
     expect(ok).toBe(false);
   });
 
-  it('says when the process starts: now, not on every project load (A10)', async () => {
-    // No MCP client starts when a project opens (A10): the server starts when
-    // it is added, and again when the user restarts it.
+  // A10 : un serveur accepté démarre aussi à chaque ouverture d'un projet qui le déclare, sans
+  // nouvelle question. Le dialogue le dit, stdio comme SSE, dans les trois langues.
+  it.each([
+    ['stdio', { name: 'fs', transport: 'stdio' as const, command: 'npx' }],
+    ['sse', { name: 'archives', transport: 'sse' as const, url: 'https://collecte.example/sse' }],
+  ])('says when the server starts: now, and on every opening of a project that declares it (%s, A10)', async (_t, req) => {
     const showMessageBox = vi.fn().mockResolvedValue({ response: 0 });
-    await confirmMcpAdd(
-      { name: 'fs', transport: 'stdio', command: 'npx' },
-      { dialog: { showMessageBox } }
-    );
+    await confirmMcpAdd(req, { dialog: { showMessageBox } });
     const detail = showMessageBox.mock.calls[0][1].detail as string;
-    expect(detail).not.toMatch(/project load/i);
     expect(detail).toMatch(/\bnow\b/);
+    expect(detail).toMatch(/without asking again/);
+    expect(detail).toMatch(/whenever a project that declares (it|this server) is opened/);
+    for (const [lang, opening] of [
+      ['fr', "ouverture d'un projet qui déclare"],
+      ['de', 'Öffnen eines Projekts'],
+    ]) {
+      const key = req.transport === 'stdio' ? 'mcpConfirmStdioWarning' : 'mcpConfirmSseWarning';
+      expect(menuText(lang, key)).toContain(opening);
+    }
+  });
+
+  // À l'ouverture d'un projet, l'historien n'ajoute rien : le projet déclare le serveur (A10).
+  it('asks about a server the project declares, not about adding one (A10)', async () => {
+    const showMessageBox = vi.fn().mockResolvedValue({ response: 1 });
+    const ok = await confirmMcpAdd(
+      { name: 'europeana', transport: 'stdio', command: 'npx', args: ['-y', '@cliodeck/mcp-europeana'] },
+      { dialog: { showMessageBox }, declaredByProject: true }
+    );
+    expect(ok).toBe(true);
+    const opts = showMessageBox.mock.calls[0][1];
+    expect(opts.message).toBe('This project declares the MCP server “europeana”. Start it?');
+    expect(opts.buttons).toEqual(['Cancel', 'Start MCP server']);
+    expect(opts.defaultId).toBe(0);
+    expect(opts.cancelId).toBe(0);
+    // Le même détail que pour un ajout : la commande, ses arguments, et ce qui s'ensuit.
+    expect(opts.detail).toContain('@cliodeck/mcp-europeana');
+    expect(opts.detail).toMatch(/without asking again/);
+    setLanguage('fr');
+    try {
+      await confirmMcpAdd({ name: 'europeana', transport: 'stdio', command: 'npx' }, {
+        dialog: { showMessageBox },
+        declaredByProject: true,
+      });
+    } finally {
+      setLanguage('en');
+    }
+    expect(showMessageBox.mock.calls[1][1].message).toBe('Ce projet déclare le serveur MCP « europeana ». Le démarrer ?');
+    expect(showMessageBox.mock.calls[1][1].buttons).toEqual(['Annuler', 'Démarrer le serveur MCP']);
   });
 
   // S09-2-3 : un serveur SSE passait sans dialogue, au motif qu'il ne lance aucun processus. Mais
@@ -333,5 +370,27 @@ describe('appendMcpAudit', () => {
     expect(line.decision).toBe('rejected');
     expect(line.reason).toBe('command_not_in_whitelist');
     expect(line.kind).toBe('mcp_add');
+  });
+
+  // A10 : la question d'accord se pose à l'ouverture, et l'historien peut y répondre des minutes
+  // plus tard. Le dossier du projet a pu disparaître entre-temps (parent renommé, volume débranché) :
+  // l'entrée du journal ne le recrée pas (L03-3b).
+  it('never recreates the folder of a project that has disappeared', async () => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-audit-'));
+    const gone = path.join(tmp, 'parent-renomme', 'These');
+    try {
+      await appendMcpAudit(path.join(gone, '.cliodeck', 'mcp-access.jsonl'), {
+        ts: '2026-11-17T00:00:00.000Z',
+        kind: 'mcp_add',
+        decision: 'accepted',
+        name: 'europeana',
+        transport: 'stdio',
+        command: 'npx',
+        reason: 'workspace_load',
+      });
+      await expect(fs.readdir(tmp)).resolves.toEqual([]);
+    } finally {
+      await fs.rm(tmp, { recursive: true, force: true });
+    }
   });
 });

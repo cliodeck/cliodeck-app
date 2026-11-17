@@ -6,14 +6,16 @@
  *     (`WorkspaceConfig.mcpClients`, flat shape) and adapt them to the
  *     manager's nested `MCPClientConfig`.
  *   - Own a single `MCPClientManager` instance with the real SDK factory.
- *   - Start clients on `loadProject()`, stop on `unload()`.
+ *   - Start clients on `loadProject()`, stop on `unload()`. La séquence des projets l'appelle à
+ *     chaque ouverture, en arrière-plan (A10).
  *   - Surface events to any number of listeners (IPC handlers subscribe).
  *
  * Design: this service is intentionally thin. All lifecycle / retry logic
  * lives in `MCPClientManager`. Persistence (read/write) is delegated to
- * `readOrInitWorkspaceConfig` / `updateWorkspaceConfig` so the single source
+ * `readWorkspaceConfig` / `updateWorkspaceConfig` so the single source
  * of truth for workspace state stays the v2 config.json file. Démarrer un
  * serveur peut prendre des minutes : jamais sous le verrou de ce fichier.
+ * Ouvrir un projet sans serveur n'écrit rien dans son `.cliodeck` (A10).
  */
 
 import { MCPClientManager } from '../../../backend/integrations/mcp-clients/manager.js';
@@ -24,16 +26,14 @@ import type {
 } from '../../../backend/integrations/mcp-clients/types.js';
 import { realMCPClientFactory } from '../../../backend/integrations/mcp-clients/sdk-factory.js';
 import {
-  readOrInitWorkspaceConfig,
+  readWorkspaceConfig,
   updateWorkspaceConfig,
   WorkspaceConfigError,
   type MCPClientConfig as WorkspaceClientConfig,
 } from '../../../backend/core/workspace/config.js';
-import {
-  ensureWorkspaceDirectories,
-  workspaceFiles,
-} from '../../../backend/core/workspace/layout.js';
+import { workspaceFiles } from '../../../backend/core/workspace/layout.js';
 import { workspaceLinkOutside } from '../../../backend/core/workspace/link-guard.js';
+import type { ProjectHandle } from '../../../backend/types/project-handle.js';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { redactForAudit } from '../../../backend/mcp-server/audit.js';
@@ -44,6 +44,7 @@ import {
   ensureSecretsScope,
   migrateClientEnvSecrets,
   resolveClientEnvSecrets,
+  secretsMigrationDue,
   secretsScopeOf,
 } from './mcp-env-secrets.js';
 
@@ -83,11 +84,61 @@ export function toManagerConfig(w: WorkspaceClientConfig, scope: string | null):
   };
 }
 
+/**
+ * Le journal d'accès d'un manager (`mcp-access.jsonl`), ouvert à sa première entrée : un projet sans
+ * serveur n'en gagne pas un vide à chaque ouverture (A10). Il ne crée aucun dossier, et jamais celui
+ * d'un projet disparu : `.cliodeck` existe dès qu'un serveur y est déclaré ou ajouté.
+ *
+ * Chaque manager a le sien, lié par closure : un callTool en vol sur l'ANCIEN manager peut se
+ * résoudre après la bascule de projet, et lire un champ du singleton à ce moment enverrait son entrée
+ * dans le mcp-access.jsonl du NOUVEAU projet (#39). Fermé, il n'écrit plus rien : un événement tardif
+ * est perdu avec un warning (intégrité d'attribution > complétude, pour un journal d'audit).
+ */
+class AccessLog {
+  private stream: WriteStream | null = null;
+  private closed = false;
+
+  /** `file` null : aucun journal (`.cliodeck` lié hors du projet, ou dossier introuvable). */
+  constructor(private readonly file: string | null) {}
+
+  write(e: MCPClientEvent): void {
+    if (!this.file) return;
+    if (this.closed) {
+      console.warn('[mcp-clients] audit log already closed, entry dropped:', e.kind, e.name);
+      return;
+    }
+    try {
+      if (!this.stream) {
+        this.stream = createWriteStream(this.file, { flags: 'a' });
+        this.stream.on('error', (err) => {
+          console.warn('[mcp-clients] audit log stream error:', err);
+        });
+      }
+      // Reuse the central redaction helper so the file written by this
+      // service stays in the same shape as the one written by the MCP
+      // server logger (same key filtering, same env masking) — one audit
+      // file, one contract.
+      this.stream.write(JSON.stringify(redactForAudit(e)) + '\n');
+    } catch (err) {
+      console.warn('[mcp-clients] failed to write audit log entry:', err);
+    }
+  }
+
+  close(): void {
+    this.closed = true;
+    try {
+      this.stream?.end();
+    } catch (err) {
+      console.warn('[mcp-clients] failed to close audit log stream:', err);
+    }
+  }
+}
+
 class MCPClientsService {
   private manager: MCPClientManager | null = null;
   private workspaceRoot: string | null = null;
   private listeners = new Set<(e: MCPClientEvent) => void>();
-  private auditLogStream: WriteStream | null = null;
+  private accessLog: AccessLog | null = null;
   /**
    * Avance à chaque détachement (unload, ou ouverture d'un autre projet). Un `loadProject` qui
    * reprend après une attente sur une génération dépassée a été relayé : il s'arrête là, et son
@@ -96,69 +147,44 @@ class MCPClientsService {
   private loadGeneration = 0;
 
   /**
-   * Écrit dans le flux passé en paramètre, jamais dans le champ vivant du
-   * singleton : un callTool en vol sur l'ANCIEN manager peut se résoudre
-   * après la bascule de projet, et lire `this.auditLogStream` à ce moment
-   * enverrait son entrée dans le mcp-access.jsonl du NOUVEAU projet (#39).
-   * Chaque manager est donc lié par closure au flux ouvert pour lui ; un
-   * événement tardif sur un flux déjà fermé est perdu avec un warning
-   * (intégrité d'attribution > complétude, pour un journal d'audit).
+   * `handle` : l'ouverture du projet, que la séquence passe (A10). Un appel sans handle (les tests du
+   * service) ne s'arrête qu'à un détachement.
    */
-  private writeAuditLog(stream: WriteStream | null, e: MCPClientEvent): void {
-    if (!stream) return;
-    try {
-      // Reuse the central redaction helper so the file written by this
-      // service stays in the same shape as the one written by the MCP
-      // server logger (same key filtering, same env masking) — one audit
-      // file, one contract.
-      const redacted = redactForAudit(e);
-      stream.write(JSON.stringify(redacted) + '\n');
-    } catch (err) {
-      console.warn('[mcp-clients] failed to write audit log entry:', err);
-    }
-  }
-
-  async loadProject(root: string): Promise<void> {
+  async loadProject(root: string, handle?: ProjectHandle): Promise<void> {
     const previous = this.detach();
     // Lue sans attente après le détachement : seul un détachement postérieur la fait avancer.
     const generation = this.loadGeneration;
-    const superseded = (): boolean => generation !== this.loadGeneration;
+    // La génération dit un détachement (unload, un autre chargement). Le handle le dit plus tôt : la
+    // séquence l'avorte dès que la fermeture de cette ouverture commence (bascule, fermeture, sortie de
+    // l'app), avant d'arriver à `unload`. Une question acceptée à ce moment ne lance plus rien.
+    const superseded = (): boolean => generation !== this.loadGeneration || handle?.isCurrent() === false;
     await this.release(previous);
     if (superseded()) return;
     this.workspaceRoot = root;
 
-    let auditLogStream: WriteStream | null = null;
+    let accessFile: string | null = null;
     try {
       // Disparu (parent renommé, volume débranché) : surtout ne pas recréer un squelette de projet.
       await stat(root);
       if (superseded()) return;
-      // `.cliodeck` lié hors du projet (D18) : ni dossier ni journal créés à l'autre bout du lien.
+      // `.cliodeck` lié hors du projet (D18) : aucun journal créé à l'autre bout du lien.
       const linked = await workspaceLinkOutside(root);
       if (superseded()) return;
       if (linked) throw new Error(`lien hors du projet : ${linked}`);
-      await ensureWorkspaceDirectories(root);
-      if (superseded()) return;
-      auditLogStream = createWriteStream(workspaceFiles(root).mcpAccessLog, {
-        flags: 'a',
-      });
-      auditLogStream.on('error', (err) => {
-        console.warn('[mcp-clients] audit log stream error:', err);
-      });
+      accessFile = workspaceFiles(root).mcpAccessLog;
     } catch (err) {
-      console.warn('[mcp-clients] failed to open audit log stream:', err);
+      console.warn('[mcp-clients] audit log unavailable:', err);
     }
     if (superseded()) return;
-    this.auditLogStream = auditLogStream;
+    const accessLog = new AccessLog(accessFile);
+    this.accessLog = accessLog;
 
-    // Flux capturé par closure : ce manager n'écrira jamais dans le flux
-    // d'un autre projet, même si un événement arrive après la bascule.
-    const auditStreamForThisManager = auditLogStream;
-    // Capturé lui aussi : après chaque attente, c'est ce manager-ci qu'on remplit, jamais
-    // `this.manager` relu, qui peut être celui du projet ouvert entre-temps.
+    // Capturé : après chaque attente, c'est ce manager-ci qu'on remplit, jamais `this.manager` relu,
+    // qui peut être celui du projet ouvert entre-temps. Son journal l'est aussi (`AccessLog`).
     const manager = new MCPClientManager({
       factory: realMCPClientFactory,
       onEvent: (e) => {
-        this.writeAuditLog(auditStreamForThisManager, e);
+        accessLog.write(e);
         this.listeners.forEach((l) => {
           try {
             l(e);
@@ -173,17 +199,21 @@ class MCPClientsService {
     let clients: WorkspaceClientConfig[];
     let scope: string | null;
     try {
-      const read = await readOrInitWorkspaceConfig(root);
+      // Lu sans être créé : un projet sans `config.json` n'en gagne pas un à chaque ouverture (A10).
+      // Un ajout l'écrira.
+      const read = await readWorkspaceConfig(root);
       clients = read.mcpClients ?? [];
       scope = secretsScopeOf(read);
     } catch (e) {
-      // Illisible : le fichier reste tel quel, aucun serveur ne démarre, et le projet s'ouvre
-      // quand même. L'interface l'a dit par `configIssue` ; un ajout le redira.
+      // Absent : aucun serveur déclaré. Illisible : le fichier reste tel quel, aucun serveur ne
+      // démarre, et le projet s'ouvre quand même. L'interface l'a dit par `configIssue` ; un ajout le
+      // redira.
       if (!(e instanceof WorkspaceConfigError)) throw e;
-      console.warn('[mcp-clients] config.json illisible, aucun serveur démarré:', e.message);
+      if (e.kind !== 'absent') console.warn('[mcp-clients] config.json illisible, aucun serveur démarré:', e.message);
       return;
     }
-    if (superseded()) return;
+    // Aucun serveur déclaré : rien à ranger, à demander ni à démarrer.
+    if (superseded() || clients.length === 0) return;
 
     // Fusion 1.5: any sensitive env value still in plain text inside
     // `config.json` is migrated to `secureStorage` on first load. The
@@ -193,26 +223,31 @@ class MCPClientsService {
     // ou pour recopier sous elle l'ancienne clé d'un projet déjà migré (S09-1-6). Si l'écriture
     // échoue, le projet reste sans portée, et l'ancienne clé sert toujours ; ce qui a été rangé sous
     // la portée née dans l'écriture est retiré, sans quoi chaque ouverture en laisserait une copie.
-    const unsaved: Array<{ scope: string; clients: WorkspaceClientConfig[] }> = [];
-    try {
-      const cfg = await updateWorkspaceConfig(root, (current) => {
-        const declared = current.mcpClients ?? [];
-        if (!declared.some(clientHasSecrets)) return false;
-        let changed = secretsScopeOf(current) === null;
-        const currentScope = ensureSecretsScope(current);
-        if (changed) unsaved.push({ scope: currentScope, clients: declared });
-        for (const w of declared) {
-          if (migrateClientEnvSecrets(currentScope, w)) changed = true;
-        }
-        return changed ? undefined : false;
-      });
-      clients = cfg.mcpClients ?? [];
-      scope = secretsScopeOf(cfg);
-    } catch (e) {
-      console.warn('[mcp-clients] failed to persist secret migration:', e);
-      for (const { scope: lost, clients: stored } of unsaved) discardUnsavedScope(lost, stored);
+    // Appelée seulement s'il y a quelque chose à écrire : `updateWorkspaceConfig` crée les dossiers
+    // de `.cliodeck` avant même le mutateur, et un projet reçu d'un tiers gagnait `recipes/` et
+    // `recipes-runs/` avant la question, même refusée (A10).
+    if (secretsMigrationDue(clients, scope)) {
+      const unsaved: Array<{ scope: string; clients: WorkspaceClientConfig[] }> = [];
+      try {
+        const cfg = await updateWorkspaceConfig(root, (current) => {
+          const declared = current.mcpClients ?? [];
+          if (!declared.some(clientHasSecrets)) return false;
+          let changed = secretsScopeOf(current) === null;
+          const currentScope = ensureSecretsScope(current);
+          if (changed) unsaved.push({ scope: currentScope, clients: declared });
+          for (const w of declared) {
+            if (migrateClientEnvSecrets(currentScope, w)) changed = true;
+          }
+          return changed ? undefined : false;
+        });
+        clients = cfg.mcpClients ?? [];
+        scope = secretsScopeOf(cfg);
+      } catch (e) {
+        console.warn('[mcp-clients] failed to persist secret migration:', e);
+        for (const { scope: lost, clients: stored } of unsaved) discardUnsavedScope(lost, stored);
+      }
+      if (superseded()) return;
     }
-    if (superseded()) return;
 
     // Ne JAMAIS démarrer ce que porte `config.json` sans l'avoir validé et
     // fait approuver : un projet partagé par un tiers exécuterait sinon la
@@ -264,12 +299,12 @@ class MCPClientsService {
    * Retire au service son manager et son journal, sans attendre : une opération en vol qui
    * reprend après une attente ne les retrouve plus, et la génération a avancé.
    */
-  private detach(): { manager: MCPClientManager | null; stream: WriteStream | null } {
+  private detach(): { manager: MCPClientManager | null; accessLog: AccessLog | null } {
     this.loadGeneration += 1;
-    const detached = { manager: this.manager, stream: this.auditLogStream };
+    const detached = { manager: this.manager, accessLog: this.accessLog };
     this.manager = null;
     this.workspaceRoot = null;
-    this.auditLogStream = null;
+    this.accessLog = null;
     return detached;
   }
 
@@ -279,16 +314,10 @@ class MCPClientsService {
    */
   private async release(detached: {
     manager: MCPClientManager | null;
-    stream: WriteStream | null;
+    accessLog: AccessLog | null;
   }): Promise<void> {
     await detached.manager?.stopAll();
-    if (detached.stream) {
-      try {
-        detached.stream.end();
-      } catch (err) {
-        console.warn('[mcp-clients] failed to close audit log stream:', err);
-      }
-    }
+    detached.accessLog?.close();
   }
 
   list(): MCPClientInstance[] {

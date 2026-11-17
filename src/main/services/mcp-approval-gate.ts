@@ -1,8 +1,10 @@
 /**
- * Garde appliqué aux serveurs MCP déclarés dans `.cliodeck/config.json`.
+ * Garde appliqué aux serveurs MCP déclarés dans `.cliodeck/config.json`, à
+ * chaque ouverture du projet (A10).
  *
  * Même dispositif que pour l'ajout manuel (`fusion:mcp:add`) : validation de
- * la commande et de l'environnement, puis confirmation native. L'accord est
+ * la commande et de l'environnement, puis confirmation native, qui dit que le
+ * projet déclare ce serveur (l'historien n'ajoute rien). L'accord est
  * mémorisé par empreinte, ici comme à l'ajout, sinon ouvrir son propre projet
  * redemanderait l'autorisation à chaque démarrage. Un accord vaut pour une
  * empreinte, sur tous les projets : retirer un serveur ne le retire pas.
@@ -93,6 +95,7 @@ export async function defaultMcpApprovalGate(
   const accepted = await confirmMcpAdd(req, {
     dialog,
     parentWindow: BrowserWindow.getFocusedWindow(),
+    declaredByProject: true,
   });
 
   await appendMcpAudit(auditPath, {

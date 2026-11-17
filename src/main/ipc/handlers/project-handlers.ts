@@ -5,11 +5,9 @@
  * une file, et la même table de services (`project-services`). Aucun handler n'appelle plus
  * `projectManager.loadProject` lui-même.
  */
-import path from 'path';
 import { ipcMain, BrowserWindow, type WebContents } from 'electron';
 import { configManager } from '../../services/config-manager.js';
 import { projectManager } from '../../services/project-manager.js';
-import { mcpClientsService } from '../../services/mcp-clients-service.js';
 import {
   createProjectLifecycle,
   type ProjectLifecycle,
@@ -143,16 +141,9 @@ export function setupProjectHandlers(options: ProjectHandlersOptions = {}): Proj
         return created;
       }
 
-      // Puis il s'ouvre comme tout projet : journal d'usage compris (S11-1-4).
+      // Puis il s'ouvre comme tout projet : journal d'usage et clients MCP compris (S11-1-4, A10).
       const result = await lifecycle.open(created.path, openRequestFrom(event.sender));
       logOpenResult('project:create', result);
-      if (result.success && result.configIssue?.kind !== 'linked_outside') {
-        // Comme avant pour un projet créé : un `config.json` neuf, aucun serveur à approuver. Sans
-        // attente, pour qu'un serveur mort ne retienne pas l'ouverture (A10 : seule la création).
-        void mcpClientsService
-          .loadProject(path.dirname(created.path))
-          .catch((e) => console.warn('[mcp-clients] loadProject failed:', e));
-      }
       return result;
     } catch (error: unknown) {
       return projectFailure('project:create', error);
